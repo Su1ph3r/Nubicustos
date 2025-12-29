@@ -601,13 +601,8 @@ For issues, questions, or contributions:
 
 - [ ] Add support for IBM Cloud
 - [ ] Integrate additional K8s tools (kube-linter, polaris)
-- [ ] Enhanced remediation workflow with approval gates
 - [ ] API endpoint for programmatic access
-- [ ] Slack/Teams notifications for critical findings
 - [ ] Automated scheduled scanning
 - [ ] Grafana dashboards for metrics visualization
 - [ ] Export findings to SIEM platforms
 
----
-
-**Disclaimer**: This tool is designed for authorized security testing only. Always obtain proper authorization before scanning any cloud infrastructure or Kubernetes clusters.
