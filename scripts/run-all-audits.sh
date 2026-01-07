@@ -251,7 +251,27 @@ run_kubernetes_audits() {
         log INFO "Running Popeye..."
         run_tool "popeye" popeye
     fi
-    
+
+    # kube-linter
+    if [ "${ENABLE_KUBE_LINTER:-true}" = "true" ]; then
+        log INFO "Running kube-linter..."
+        if [ -d "$PROJECT_DIR/iac-code" ]; then
+            run_tool "kube-linter" kube-linter
+        else
+            log WARN "No manifests found for kube-linter"
+        fi
+    fi
+
+    # Polaris
+    if [ "${ENABLE_POLARIS:-true}" = "true" ]; then
+        log INFO "Running Polaris..."
+        if [ -d "$PROJECT_DIR/iac-code" ]; then
+            run_tool "polaris" polaris
+        else
+            log WARN "No manifests found for Polaris"
+        fi
+    fi
+
     log INFO "Kubernetes audits complete"
 }
 

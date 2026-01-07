@@ -120,7 +120,163 @@ class ReportProcessor:
         except Exception as e:
             logger.error(f"Error processing Prowler report: {e}")
             return None, []
-    
+
+    def process_kube_linter_report(self, report_path):
+        """Process kube-linter JSON report"""
+        logger.info(f"Processing kube-linter report: {report_path}")
+
+        findings = []
+        try:
+            with open(report_path, 'r') as f:
+                data = json.load(f)
+
+            metadata = {
+                'tool': 'kube-linter',
+                'cloud_provider': 'kubernetes',
+                'scan_date': datetime.now().isoformat()
+            }
+
+            # kube-linter reports array of findings under Reports
+            for item in data.get('Reports', []):
+                k8s_obj = item.get('Object', {}).get('K8sObject', {})
+                for violation in item.get('Violations', []):
+                    # Map kube-linter severity levels
+                    severity_map = {
+                        'error': 'high',
+                        'warning': 'medium',
+                        'info': 'low'
+                    }
+
+                    finding = {
+                        'check_id': violation.get('Check', ''),
+                        'check_title': violation.get('Check', ''),
+                        'severity': severity_map.get(
+                            violation.get('Severity', 'warning').lower(),
+                            'medium'
+                        ),
+                        'status': 'FAIL',
+                        'resource_type': k8s_obj.get('GroupVersionKind', {}).get('Kind', ''),
+                        'resource_id': f"{k8s_obj.get('Namespace', 'default')}/{k8s_obj.get('Name', '')}",
+                        'resource_name': k8s_obj.get('Name', ''),
+                        'description': violation.get('Message', ''),
+                        'remediation': violation.get('Remediation', ''),
+                        'compliance': []
+                    }
+                    findings.append(finding)
+
+            logger.info(f"Extracted {len(findings)} findings from kube-linter")
+            return metadata, findings
+
+        except Exception as e:
+            logger.error(f"Error processing kube-linter report: {e}")
+            return None, []
+
+    def process_polaris_report(self, report_path):
+        """Process Polaris JSON report"""
+        logger.info(f"Processing Polaris report: {report_path}")
+
+        findings = []
+        try:
+            with open(report_path, 'r') as f:
+                data = json.load(f)
+
+            metadata = {
+                'tool': 'polaris',
+                'cloud_provider': 'kubernetes',
+                'scan_date': datetime.now().isoformat(),
+                'cluster_info': data.get('ClusterInfo', {})
+            }
+
+            # Map Polaris severity to standard severity levels
+            severity_map = {
+                'danger': 'critical',
+                'warning': 'medium',
+                'passing': 'info'
+            }
+
+            # Process audit results from Results structure
+            for namespace_name, namespace_data in data.get('Results', {}).items():
+                if not isinstance(namespace_data, dict):
+                    continue
+                for controller_name, controller_data in namespace_data.items():
+                    if not isinstance(controller_data, dict):
+                        continue
+
+                    kind = controller_data.get('Kind', 'Unknown')
+
+                    for container_name, container_results in controller_data.get('Results', {}).items():
+                        if not isinstance(container_results, dict):
+                            continue
+
+                        for check_category, checks in container_results.items():
+                            if not isinstance(checks, dict):
+                                continue
+
+                            for check_name, check_result in checks.items():
+                                if not isinstance(check_result, dict):
+                                    continue
+
+                                # Only report failures
+                                if check_result.get('Success', True):
+                                    continue
+
+                                severity_level = check_result.get('Severity', 'warning')
+
+                                finding = {
+                                    'check_id': f"polaris-{check_category}-{check_name}",
+                                    'check_title': check_name.replace('_', ' ').title(),
+                                    'severity': severity_map.get(severity_level, 'medium'),
+                                    'status': 'FAIL',
+                                    'resource_type': kind,
+                                    'resource_id': f"{namespace_name}/{controller_name}",
+                                    'resource_name': controller_name,
+                                    'category': check_category,
+                                    'container': container_name,
+                                    'description': check_result.get('Message', ''),
+                                    'remediation': f"Review and fix {check_name} for {kind} {controller_name}",
+                                    'compliance': []
+                                }
+                                findings.append(finding)
+
+            # Also process PodResults if available (for cluster audits)
+            for pod_result in data.get('PodResults', []):
+                namespace = pod_result.get('Namespace', 'default')
+                pod_name = pod_result.get('Name', '')
+                kind = pod_result.get('Kind', 'Pod')
+
+                for container_result in pod_result.get('ContainerResults', []):
+                    container_name = container_result.get('Name', '')
+
+                    for check_name, check_result in container_result.get('Results', {}).items():
+                        if not isinstance(check_result, dict):
+                            continue
+                        if check_result.get('Success', True):
+                            continue
+
+                        severity_level = check_result.get('Severity', 'warning')
+
+                        finding = {
+                            'check_id': f"polaris-{check_name}",
+                            'check_title': check_name.replace('_', ' ').title(),
+                            'severity': severity_map.get(severity_level, 'medium'),
+                            'status': 'FAIL',
+                            'resource_type': kind,
+                            'resource_id': f"{namespace}/{pod_name}",
+                            'resource_name': pod_name,
+                            'container': container_name,
+                            'description': check_result.get('Message', ''),
+                            'remediation': f"Review and fix {check_name} for container {container_name}",
+                            'compliance': []
+                        }
+                        findings.append(finding)
+
+            logger.info(f"Extracted {len(findings)} findings from Polaris")
+            return metadata, findings
+
+        except Exception as e:
+            logger.error(f"Error processing Polaris report: {e}")
+            return None, []
+
     def save_to_database(self, metadata, findings, scan_id):
         """Save processed findings to database"""
         conn = self.connect_db()
@@ -235,14 +391,30 @@ class ReportProcessor:
             if metadata and findings:
                 self.save_to_database(metadata, findings, scan_id)
         
-        # Process Prowler reports  
+        # Process Prowler reports
         prowler_reports = list(self.reports_dir.glob('prowler/*/prowler-output-*.json'))
         for report in prowler_reports:
             scan_id = f"prowler_{report.parent.name}"
             metadata, findings = self.process_prowler_report(report)
             if metadata and findings:
                 self.save_to_database(metadata, findings, scan_id)
-        
+
+        # Process kube-linter reports
+        kube_linter_reports = list(self.reports_dir.glob('kube-linter/*.json'))
+        for report in kube_linter_reports:
+            scan_id = f"kube_linter_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            metadata, findings = self.process_kube_linter_report(report)
+            if metadata and findings:
+                self.save_to_database(metadata, findings, scan_id)
+
+        # Process Polaris reports
+        polaris_reports = list(self.reports_dir.glob('polaris/*.json'))
+        for report in polaris_reports:
+            scan_id = f"polaris_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            metadata, findings = self.process_polaris_report(report)
+            if metadata and findings:
+                self.save_to_database(metadata, findings, scan_id)
+
         # Generate unified report
         self.generate_unified_report()
         

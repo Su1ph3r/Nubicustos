@@ -181,7 +181,31 @@ services:
     networks:
       - security-net
     restart: unless-stopped
-  
+
+  kube-linter:
+    image: stackrox/kube-linter:latest
+    container_name: kube-linter
+    volumes:
+      - ./kubeconfigs:/root/.kube:ro
+      - ./reports/kube-linter:/reports
+      - ./iac-code:/manifests:ro
+    command: lint /manifests --format json --output /reports/kube-linter-results.json
+    networks:
+      - security-net
+    restart: unless-stopped
+
+  polaris:
+    image: quay.io/fairwinds/polaris:latest
+    container_name: polaris
+    volumes:
+      - ./kubeconfigs:/root/.kube:ro
+      - ./reports/polaris:/reports
+      - ./iac-code:/manifests:ro
+    command: audit --audit-path /manifests --format json --output-file /reports/polaris-results.json
+    networks:
+      - security-net
+    restart: unless-stopped
+
   falco:
     image: falcosecurity/falco-no-driver:latest
     container_name: falco
