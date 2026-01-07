@@ -36,6 +36,7 @@ This stack is designed for **penetration testing** and **security configuration 
 │  │                                                        │   │
 │  │  • kube-bench    • kubescape    • kube-hunter        │   │
 │  │  • Trivy         • Popeye       • Falco              │   │
+│  │  • kube-linter   • Polaris                           │   │
 │  └──────────────────────────────────────────────────────┘   │
 │                                                               │
 │  ┌──────────────────────────────────────────────────────┐   │
@@ -70,6 +71,8 @@ This stack is designed for **penetration testing** and **security configuration 
 - **CIS Benchmarks**: kube-bench
 - **Compliance Frameworks**: kubescape (NSA, MITRE ATT&CK, CIS)
 - **Penetration Testing**: kube-hunter
+- **Static Analysis**: kube-linter
+- **Best Practices Validation**: Polaris
 - **Image Scanning**: Trivy, Grype
 - **Runtime Detection**: Falco
 - **Resource Analysis**: Popeye
@@ -755,6 +758,8 @@ This stack leverages the following open-source security tools:
 - [kube-bench](https://github.com/aquasecurity/kube-bench) - Kubernetes CIS benchmarks
 - [Kubescape](https://github.com/kubescape/kubescape) - Kubernetes security platform
 - [kube-hunter](https://github.com/aquasecurity/kube-hunter) - Kubernetes penetration testing
+- [kube-linter](https://github.com/stackrox/kube-linter) - Static analysis for Kubernetes
+- [Polaris](https://github.com/FairwindsOps/polaris) - Kubernetes best practices validation
 - [Trivy](https://github.com/aquasecurity/trivy) - Container security scanner
 - [Falco](https://github.com/falcosecurity/falco) - Runtime threat detection
 - [Checkov](https://github.com/bridgecrewio/checkov) - IaC security scanner
@@ -771,7 +776,7 @@ For issues, questions, or contributions:
 ## Roadmap
 
 - [ ] Add support for IBM Cloud
-- [ ] Integrate additional K8s tools (kube-linter, polaris)
+- [x] Integrate additional K8s tools (kube-linter, polaris)
 - [x] API endpoint for programmatic access
 - [ ] Automated scheduled scanning
 - [x] Grafana dashboards for metrics visualization

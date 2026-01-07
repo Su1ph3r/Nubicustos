@@ -43,6 +43,10 @@ tools:
       enabled: true
     popeye:
       enabled: true
+    kube_linter:
+      enabled: true
+    polaris:
+      enabled: true
 
   # Infrastructure-as-Code Tools - All enabled
   iac:
