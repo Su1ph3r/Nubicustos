@@ -1,6 +1,9 @@
 # ============================================================================
-# Cloud Security Audit Stack - Git Ignore
+# Argus - Git Ignore
 # ============================================================================
+
+# Claude Code instructions (local only)
+CLAUDE.md
 
 # Environment files
 .env
@@ -26,6 +29,7 @@ kubeconfigs/
 reports/
 remediation-scripts/
 logs/
+data/
 *.log
 *.html
 *.csv

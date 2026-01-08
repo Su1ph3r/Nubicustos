@@ -1,4 +1,4 @@
-# Cloud Security Audit Stack - Command Cheatsheet
+# Argus - Command Cheatsheet
 
 Quick reference for common operations and commands.
 

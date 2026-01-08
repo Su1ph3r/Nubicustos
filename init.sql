@@ -1,5 +1,5 @@
 -- ============================================================================
--- Cloud Security Audit Stack - Database Schema
+-- Argus - Database Schema
 -- ============================================================================
 -- PostgreSQL initialization script
 -- This file is automatically executed when the database is first created

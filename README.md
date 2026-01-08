@@ -1,6 +1,8 @@
-# Cloud Security Audit Stack
+# Argus
 
 A comprehensive Docker Compose stack for automated cloud security auditing, vulnerability identification, and remediation script generation across multiple cloud providers and Kubernetes environments.
+
+*Named after Argus Panoptes, the hundred-eyed giant of Greek mythology who sees all.*
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Docker](https://img.shields.io/badge/docker-required-blue.svg)
@@ -20,7 +22,7 @@ This stack is designed for **penetration testing** and **security configuration 
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Cloud Security Audit Stack                │
+│                           Argus                              │
 ├─────────────────────────────────────────────────────────────┤
 │                                                               │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
@@ -114,8 +116,8 @@ This stack is designed for **penetration testing** and **security configuration 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/cloud-security-audit-stack.git
-cd cloud-security-audit-stack
+git clone https://github.com/Su1ph3r/Argus.git
+cd Argus
 ```
 
 ### 2. Configure Environment
@@ -187,6 +189,29 @@ docker-compose ps
 # View logs
 docker-compose logs -f
 ```
+
+### 5. Validate Permissions (Pre-Flight Check)
+
+Before running security audits, validate that your credentials have the required permissions:
+
+```bash
+# Install Python dependencies (one-time)
+pip install boto3 azure-identity azure-mgmt-authorization google-cloud-resource-manager kubernetes
+
+# Check all providers
+python scripts/check-permissions.py
+
+# Check specific provider
+python scripts/check-permissions.py --provider aws
+python scripts/check-permissions.py --provider azure
+python scripts/check-permissions.py --provider gcp
+python scripts/check-permissions.py --provider kubernetes
+
+# Export results with remediation instructions
+python scripts/check-permissions.py --output report.md --remediation
+```
+
+The tool will show which permissions are missing and provide step-by-step instructions to fix them.
 
 ## Usage
 
