@@ -2,7 +2,7 @@
 Permission requirements for each security scanning tool.
 
 This module defines the required permissions, policies, and roles needed
-for each tool in Argus.
+for each tool in Nubicustos.
 """
 
 # =============================================================================

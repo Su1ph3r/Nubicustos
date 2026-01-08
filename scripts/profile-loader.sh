@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# Argus - Profile Loader
+# Nubicustos - Profile Loader
 # ============================================================================
 # Loads scan profiles from YAML files and exports ENABLE_* environment variables
 #

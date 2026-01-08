@@ -1,9 +1,9 @@
 # Repository Structure
 
-This document provides a comprehensive overview of the Argus repository structure.
+This document provides a comprehensive overview of the Nubicustos repository structure.
 
 ```
-argus/
+nubicustos/
 ├── README.md                      # Main documentation
 ├── INSTALL.md                     # Quick installation guide
 ├── LICENSE                        # MIT License

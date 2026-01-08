@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Argus - Permission Validator
+Nubicustos - Permission Validator
 
 Pre-flight tool to validate that cloud credentials have the required
 permissions and roles for each security scanning tool.
