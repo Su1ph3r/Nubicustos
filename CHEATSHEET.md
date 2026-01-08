@@ -1,4 +1,4 @@
-# Argus - Command Cheatsheet
+# Nubicustos - Command Cheatsheet
 
 Quick reference for common operations and commands.
 

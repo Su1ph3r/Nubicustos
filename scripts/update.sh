@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# Argus - Update Manager
+# Nubicustos - Update Manager
 # ============================================================================
 # Updates external tools, custom images, and the stack itself
 
@@ -27,7 +27,7 @@ TOOLS=()
 
 show_help() {
     cat << EOF
-Argus - Update Manager
+Nubicustos - Update Manager
 
 Usage: $(basename "$0") [COMMAND] [OPTIONS] [TOOLS...]
 
@@ -326,7 +326,7 @@ cmd_self() {
 # Show versions of all tools
 cmd_versions() {
     echo ""
-    echo -e "${CYAN}Argus - Installed Versions${NC}"
+    echo -e "${CYAN}Nubicustos - Installed Versions${NC}"
     echo "================================================"
     echo ""
 

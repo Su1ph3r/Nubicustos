@@ -1,8 +1,8 @@
-# Argus
+# Nubicustos
 
 A comprehensive Docker Compose stack for automated cloud security auditing, vulnerability identification, and remediation script generation across multiple cloud providers and Kubernetes environments.
 
-*Named after Argus Panoptes, the hundred-eyed giant of Greek mythology who sees all.*
+*Named from Latin: nubes (cloud) + custos (guardian) - the Cloud Guardian.*
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Docker](https://img.shields.io/badge/docker-required-blue.svg)
@@ -22,7 +22,7 @@ This stack is designed for **penetration testing** and **security configuration 
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                           Argus                              │
+│                        Nubicustos                            │
 ├─────────────────────────────────────────────────────────────┤
 │                                                               │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
@@ -116,8 +116,8 @@ This stack is designed for **penetration testing** and **security configuration 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/Su1ph3r/Argus.git
-cd Argus
+git clone https://github.com/Su1ph3r/Nubicustos.git
+cd Nubicustos
 ```
 
 ### 2. Configure Environment

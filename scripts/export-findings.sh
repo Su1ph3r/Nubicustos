@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# Argus - Export Findings with Remediation
+# Nubicustos - Export Findings with Remediation
 # ============================================================================
 # This script exports findings with remediation guidance for client delivery
 

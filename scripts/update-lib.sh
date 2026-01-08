@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# Argus - Update Library
+# Nubicustos - Update Library
 # ============================================================================
 # Shared helper functions for the update system
 
