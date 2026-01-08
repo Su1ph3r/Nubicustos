@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# Cloud Security Audit Stack - Export Findings with Remediation
+# Argus - Export Findings with Remediation
 # ============================================================================
 # This script exports findings with remediation guidance for client delivery
 

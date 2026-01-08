@@ -1,5 +1,5 @@
 """
-Cloud Security Audit Stack - REST API
+Argus - REST API
 
 FastAPI application for managing security scans and querying findings.
 """
@@ -24,9 +24,9 @@ settings = get_settings()
 
 # Create FastAPI application
 app = FastAPI(
-    title="Cloud Security Audit Stack API",
+    title="Argus API",
     description="""
-REST API for the Cloud Security Audit Stack.
+REST API for the Argus.
 
 ## Features
 
@@ -98,7 +98,7 @@ app.include_router(exports_router, prefix="/api")
 async def root():
     """Root endpoint with API information."""
     return {
-        "name": "Cloud Security Audit Stack API",
+        "name": "Argus API",
         "version": "1.0.0",
         "docs": "/api/docs",
         "health": "/api/health"
@@ -109,7 +109,7 @@ async def root():
 async def api_root():
     """API root endpoint."""
     return {
-        "message": "Cloud Security Audit Stack API",
+        "message": "Argus API",
         "version": "1.0.0",
         "endpoints": {
             "health": "/api/health",
@@ -135,7 +135,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 @app.on_event("startup")
 async def startup_event():
     """Application startup tasks."""
-    logger.info("Starting Cloud Security Audit Stack API")
+    logger.info("Starting Argus API")
     logger.info(f"CORS origins: {settings.cors_origins_list}")
     logger.info(f"Database: {settings.db_host}:{settings.db_port}/{settings.db_name}")
 
@@ -144,7 +144,7 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Application shutdown tasks."""
-    logger.info("Shutting down Cloud Security Audit Stack API")
+    logger.info("Shutting down Argus API")
 
 
 if __name__ == "__main__":

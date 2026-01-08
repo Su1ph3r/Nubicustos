@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# Cloud Security Audit Stack - Profile Loader
+# Argus - Profile Loader
 # ============================================================================
 # Loads scan profiles from YAML files and exports ENABLE_* environment variables
 #

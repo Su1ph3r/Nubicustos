@@ -1,9 +1,9 @@
 # Repository Structure
 
-This document provides a comprehensive overview of the Cloud Security Audit Stack repository structure.
+This document provides a comprehensive overview of the Argus repository structure.
 
 ```
-cloud-security-audit-stack/
+argus/
 ├── README.md                      # Main documentation
 ├── INSTALL.md                     # Quick installation guide
 ├── LICENSE                        # MIT License

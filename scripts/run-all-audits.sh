@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# Cloud Security Audit Stack - Run All Audits
+# Argus - Run All Audits
 # ============================================================================
 # This script runs all configured security audits across all cloud providers
 # and Kubernetes environments
@@ -58,7 +58,7 @@ log() {
 # Show help
 show_help() {
     cat << EOF
-Cloud Security Audit Stack - Run All Audits
+Argus - Run All Audits
 
 Usage: $(basename "$0") [OPTIONS]
 
@@ -447,7 +447,7 @@ main() {
     parse_args "$@"
 
     log INFO "========================================"
-    log INFO "Cloud Security Audit Stack"
+    log INFO "Argus - Cloud Security Platform"
     log INFO "Starting Full Security Audit"
     log INFO "========================================"
     log INFO "Start time: $(date)"
