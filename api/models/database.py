@@ -81,12 +81,26 @@ class Finding(Base):
     cve_id = Column(String(32))
     compliance_frameworks = Column(JSONB)
     tags = Column(JSONB)
-    raw_data = Column(JSONB)
+    finding_metadata = Column("metadata", JSONB)
     first_seen = Column(DateTime)
     last_seen = Column(DateTime)
     scan_date = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # PoC evidence fields
+    poc_evidence = Column(Text)
+    poc_verification = Column(Text)
+    poc_screenshot_path = Column(Text)
+    # Remediation fields
+    remediation_commands = Column(JSONB)
+    remediation_code = Column(JSONB)
+    remediation_resources = Column(JSONB)
+    # Impact field
+    impact = Column(Text)
+    # Deduplication fields
+    canonical_id = Column(String(256))
+    tool_sources = Column(JSONB, default=[])
+    affected_resources = Column(JSONB, default=[])
 
     scan = relationship("Scan", back_populates="findings")
 

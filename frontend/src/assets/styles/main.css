@@ -1,0 +1,535 @@
+@import './variables.css';
+
+/* ============================================================================
+   Global Reset & Base Styles
+   ============================================================================ */
+
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+  line-height: 1.5;
+  transition: background-color var(--transition-normal), color var(--transition-normal);
+}
+
+#app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ============================================================================
+   Typography
+   ============================================================================ */
+
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-primary);
+}
+
+h1 { font-size: 2rem; }
+h2 { font-size: 1.5rem; }
+h3 { font-size: 1.25rem; }
+h4 { font-size: 1.125rem; }
+h5 { font-size: 1rem; }
+h6 { font-size: 0.875rem; }
+
+p {
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+a {
+  color: var(--accent-primary);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+a:hover {
+  color: var(--accent-primary-hover);
+}
+
+/* ============================================================================
+   Layout Utilities
+   ============================================================================ */
+
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: var(--spacing-md);
+}
+
+/* ============================================================================
+   Card Component
+   ============================================================================ */
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: var(--spacing-lg);
+  transition: all var(--transition-normal);
+}
+
+.card:hover {
+  background: var(--bg-card-hover);
+  box-shadow: var(--shadow-md);
+}
+
+/* ============================================================================
+   Severity Badges
+   ============================================================================ */
+
+.severity-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+
+.severity-critical {
+  background: var(--severity-critical-bg);
+  color: var(--severity-critical);
+  border-color: var(--severity-critical-border);
+}
+
+.severity-high {
+  background: var(--severity-high-bg);
+  color: var(--severity-high);
+  border-color: var(--severity-high-border);
+}
+
+.severity-medium {
+  background: var(--severity-medium-bg);
+  color: var(--severity-medium);
+  border-color: var(--severity-medium-border);
+}
+
+.severity-low {
+  background: var(--severity-low-bg);
+  color: var(--severity-low);
+  border-color: var(--severity-low-border);
+}
+
+.severity-info {
+  background: var(--severity-info-bg);
+  color: var(--severity-info);
+  border-color: var(--severity-info-border);
+}
+
+/* ============================================================================
+   Status Badges
+   ============================================================================ */
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.status-open, .status-fail {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--status-open);
+}
+
+.status-closed, .status-pass {
+  background: rgba(34, 197, 94, 0.12);
+  color: var(--status-closed);
+}
+
+.status-mitigated {
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--status-mitigated);
+}
+
+.status-accepted {
+  background: rgba(139, 92, 246, 0.12);
+  color: var(--status-accepted);
+}
+
+/* ============================================================================
+   Tool Badges
+   ============================================================================ */
+
+.tool-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 0.7rem;
+  font-weight: 500;
+  background: var(--accent-primary-bg);
+  color: var(--accent-primary);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+/* ============================================================================
+   Code Blocks
+   ============================================================================ */
+
+.code-block {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  padding: var(--spacing-md);
+  border-radius: var(--radius-sm);
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.8125rem;
+  overflow-x: auto;
+  position: relative;
+  border: 1px solid var(--border-color);
+}
+
+.code-block .copy-btn {
+  position: absolute;
+  top: var(--spacing-sm);
+  right: var(--spacing-sm);
+  background: var(--accent-primary);
+  border: none;
+  color: white;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 500;
+  opacity: 0.8;
+  transition: all var(--transition-fast);
+}
+
+.code-block .copy-btn:hover {
+  opacity: 1;
+  transform: translateY(-1px);
+}
+
+code {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.875em;
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* ============================================================================
+   Loading & Error States
+   ============================================================================ */
+
+.loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-xl);
+  color: var(--text-secondary);
+  gap: var(--spacing-md);
+}
+
+.error {
+  background: var(--severity-critical-bg);
+  color: var(--severity-critical);
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  margin: var(--spacing-md) 0;
+  border: 1px solid var(--severity-critical-border);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+/* ============================================================================
+   Form Elements
+   ============================================================================ */
+
+input, select, textarea {
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  transition: all var(--transition-fast);
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--border-color-focus);
+  box-shadow: 0 0 0 3px var(--accent-primary-bg);
+}
+
+/* ============================================================================
+   Scrollbar Styling
+   ============================================================================ */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color-light);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ============================================================================
+   PrimeVue Overrides
+   ============================================================================ */
+
+.p-component {
+  font-family: inherit;
+}
+
+.p-button {
+  font-family: inherit;
+  font-weight: 500;
+}
+
+.p-datatable {
+  font-size: 0.875rem;
+}
+
+.p-datatable .p-datatable-thead > tr > th {
+  background: var(--table-header-bg) !important;
+  color: var(--text-secondary) !important;
+  border-color: var(--border-color) !important;
+  padding: var(--spacing-md);
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.p-datatable .p-datatable-tbody > tr {
+  background: var(--bg-card) !important;
+  border-color: var(--border-color) !important;
+  transition: background var(--transition-fast);
+}
+
+.p-datatable .p-datatable-tbody > tr:hover {
+  background: var(--table-row-hover) !important;
+}
+
+.p-datatable .p-datatable-tbody > tr > td {
+  border-color: var(--border-color) !important;
+  padding: var(--spacing-md);
+  color: var(--text-primary);
+}
+
+.p-datatable .p-row-toggler {
+  color: var(--text-secondary);
+}
+
+.p-datatable .p-row-toggler:hover {
+  color: var(--accent-primary);
+  background: var(--accent-primary-bg);
+}
+
+.p-paginator {
+  background: transparent !important;
+  border: none !important;
+  padding: var(--spacing-md) 0;
+}
+
+.p-paginator .p-paginator-pages .p-paginator-page {
+  color: var(--text-secondary);
+  min-width: 2.5rem;
+  height: 2.5rem;
+}
+
+.p-paginator .p-paginator-pages .p-paginator-page.p-highlight {
+  background: var(--accent-primary) !important;
+  color: white !important;
+}
+
+.p-dropdown {
+  background: var(--bg-input) !important;
+  border-color: var(--border-color) !important;
+}
+
+.p-dropdown .p-dropdown-label {
+  color: var(--text-primary);
+}
+
+.p-dropdown-panel {
+  background: var(--bg-elevated) !important;
+  border-color: var(--border-color) !important;
+}
+
+.p-dropdown-panel .p-dropdown-items .p-dropdown-item {
+  color: var(--text-primary);
+}
+
+.p-dropdown-panel .p-dropdown-items .p-dropdown-item:hover {
+  background: var(--table-row-hover);
+}
+
+.p-inputtext {
+  background: var(--bg-input) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+
+.p-inputtext:focus {
+  border-color: var(--border-color-focus) !important;
+  box-shadow: 0 0 0 3px var(--accent-primary-bg) !important;
+}
+
+/* MultiSelect (for Severity/Status filters) - Comprehensive dark mode fixes */
+.p-multiselect,
+.p-multiselect.p-component {
+  background: var(--bg-input) !important;
+  background-color: var(--bg-input) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+
+.p-multiselect .p-multiselect-label,
+.p-multiselect .p-multiselect-label.p-placeholder {
+  color: var(--text-primary) !important;
+}
+
+.p-multiselect .p-multiselect-trigger {
+  color: var(--text-secondary) !important;
+  background: transparent !important;
+}
+
+.p-multiselect .p-multiselect-trigger .p-multiselect-trigger-icon {
+  color: var(--text-secondary) !important;
+}
+
+.p-multiselect-panel,
+.p-multiselect-panel.p-component {
+  background: var(--bg-elevated) !important;
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border-color) !important;
+}
+
+.p-multiselect-panel .p-multiselect-header {
+  background: var(--bg-secondary) !important;
+  background-color: var(--bg-secondary) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+
+.p-multiselect-panel .p-multiselect-items,
+.p-multiselect-items-wrapper {
+  background: var(--bg-elevated) !important;
+}
+
+.p-multiselect-panel .p-multiselect-items .p-multiselect-item,
+.p-multiselect-item {
+  color: var(--text-primary) !important;
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+.p-multiselect-panel .p-multiselect-items .p-multiselect-item:hover,
+.p-multiselect-item:hover,
+.p-multiselect-item.p-focus {
+  background: var(--table-row-hover) !important;
+  background-color: var(--table-row-hover) !important;
+}
+
+.p-multiselect-panel .p-multiselect-items .p-multiselect-item.p-highlight,
+.p-multiselect-item.p-highlight {
+  background: var(--accent-primary-bg) !important;
+  background-color: var(--accent-primary-bg) !important;
+  color: var(--accent-primary) !important;
+}
+
+.p-multiselect-panel .p-checkbox .p-checkbox-box,
+.p-checkbox .p-checkbox-box {
+  background: var(--bg-input) !important;
+  background-color: var(--bg-input) !important;
+  border-color: var(--border-color) !important;
+}
+
+.p-multiselect-panel .p-checkbox .p-checkbox-box.p-highlight,
+.p-checkbox .p-checkbox-box.p-highlight {
+  background: var(--accent-primary) !important;
+  background-color: var(--accent-primary) !important;
+  border-color: var(--accent-primary) !important;
+}
+
+/* Chip styles for selected items */
+.p-multiselect .p-multiselect-token,
+.p-multiselect-token {
+  background: var(--accent-primary-bg) !important;
+  background-color: var(--accent-primary-bg) !important;
+  color: var(--accent-primary) !important;
+  border-radius: var(--radius-sm);
+}
+
+.p-multiselect .p-multiselect-token .p-multiselect-token-icon,
+.p-multiselect-token-icon {
+  color: var(--accent-primary) !important;
+}
+
+/* Ensure all text in multiselect is visible */
+.p-multiselect *,
+.p-multiselect-panel * {
+  color: inherit;
+}
+
+/* Override PrimeVue lara theme backgrounds */
+.p-multiselect-label-container {
+  background: transparent !important;
+}
+
+.p-multiselect:not(.p-disabled):hover {
+  border-color: var(--border-color-light) !important;
+}
+
+.p-multiselect:not(.p-disabled).p-focus {
+  border-color: var(--accent-primary) !important;
+  box-shadow: 0 0 0 2px var(--accent-primary-bg) !important;
+}
+
+/* ============================================================================
+   Responsive Utilities
+   ============================================================================ */
+
+@media (max-width: 768px) {
+  .container {
+    padding: var(--spacing-sm);
+  }
+
+  .card {
+    padding: var(--spacing-md);
+  }
+
+  h1 { font-size: 1.5rem; }
+  h2 { font-size: 1.25rem; }
+}

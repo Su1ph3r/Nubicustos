@@ -137,3 +137,4 @@ secrets/
 # Local configuration overrides
 config/local/
 docker-compose.override.yml
+frontend/node_modules/

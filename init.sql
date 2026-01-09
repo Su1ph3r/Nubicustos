@@ -58,7 +58,15 @@ CREATE TABLE IF NOT EXISTS findings (
     last_seen TIMESTAMP DEFAULT NOW(),
     scan_date TIMESTAMP DEFAULT NOW(),
     created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
+    updated_at TIMESTAMP DEFAULT NOW(),
+    -- Proof of Concept Evidence
+    poc_evidence TEXT,
+    poc_verification TEXT,
+    poc_screenshot_path TEXT,
+    -- Enhanced Remediation
+    remediation_commands JSONB,
+    remediation_code JSONB,
+    remediation_resources JSONB
 );
 
 -- Compliance mappings table
@@ -274,6 +282,46 @@ ON CONFLICT DO NOTHING;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO auditor;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO auditor;
 GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO auditor;
+
+-- ============================================================================
+-- Schema Migrations (for existing databases)
+-- ============================================================================
+
+-- Add PoC evidence columns if they don't exist
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='findings' AND column_name='poc_evidence') THEN
+        ALTER TABLE findings ADD COLUMN poc_evidence TEXT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='findings' AND column_name='poc_verification') THEN
+        ALTER TABLE findings ADD COLUMN poc_verification TEXT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='findings' AND column_name='poc_screenshot_path') THEN
+        ALTER TABLE findings ADD COLUMN poc_screenshot_path TEXT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='findings' AND column_name='remediation_commands') THEN
+        ALTER TABLE findings ADD COLUMN remediation_commands JSONB;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='findings' AND column_name='remediation_code') THEN
+        ALTER TABLE findings ADD COLUMN remediation_code JSONB;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='findings' AND column_name='remediation_resources') THEN
+        ALTER TABLE findings ADD COLUMN remediation_resources JSONB;
+    END IF;
+    -- Deduplication columns
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='findings' AND column_name='canonical_id') THEN
+        ALTER TABLE findings ADD COLUMN canonical_id VARCHAR(256);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='findings' AND column_name='tool_sources') THEN
+        ALTER TABLE findings ADD COLUMN tool_sources JSONB DEFAULT '[]';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='findings' AND column_name='affected_resources') THEN
+        ALTER TABLE findings ADD COLUMN affected_resources JSONB DEFAULT '[]';
+    END IF;
+END $$;
+
+-- Create index for canonical_id if not exists
+CREATE INDEX IF NOT EXISTS idx_findings_canonical ON findings(canonical_id);
 
 -- ============================================================================
 -- Maintenance

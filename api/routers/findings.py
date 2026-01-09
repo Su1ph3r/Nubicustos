@@ -1,4 +1,5 @@
 """Findings endpoints."""
+import re
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
@@ -8,18 +9,62 @@ from uuid import UUID
 from models.database import get_db, Finding
 from models.schemas import (
     FindingResponse, FindingUpdate, FindingListResponse,
-    FindingSummary, SeverityLevel, FindingStatus
+    FindingSummary, SeverityLevel, FindingStatus, AffectedResource
 )
 
 router = APIRouter(prefix="/findings", tags=["Findings"])
+
+
+def _aggregate_finding_data(finding: Finding, db: Session) -> dict:
+    """Aggregate tool_sources and affected_resources for a finding based on canonical_id."""
+    if not finding.canonical_id:
+        return {
+            'tool_sources': [finding.tool] if finding.tool else [],
+            'affected_resources': [{
+                'id': finding.resource_id,
+                'name': finding.resource_name,
+                'region': finding.region,
+                'type': finding.resource_type
+            }] if finding.resource_id else [],
+            'affected_count': 1
+        }
+
+    # Get all findings with the same canonical_id
+    related_findings = db.query(Finding).filter(
+        Finding.canonical_id == finding.canonical_id,
+        Finding.status.in_(['open', 'fail'])
+    ).all()
+
+    # Aggregate tool sources (unique)
+    tool_sources = list(set(f.tool for f in related_findings if f.tool))
+
+    # Aggregate affected resources (unique by resource_id)
+    seen_resources = set()
+    affected_resources = []
+    for f in related_findings:
+        if f.resource_id and f.resource_id not in seen_resources:
+            seen_resources.add(f.resource_id)
+            affected_resources.append({
+                'id': f.resource_id,
+                'name': f.resource_name,
+                'region': f.region,
+                'type': f.resource_type
+            })
+
+    return {
+        'tool_sources': tool_sources,
+        'affected_resources': affected_resources,
+        'affected_count': len(affected_resources)
+    }
 
 
 @router.get("", response_model=FindingListResponse)
 @router.get("/", response_model=FindingListResponse)
 async def list_findings(
     db: Session = Depends(get_db),
+    search: Optional[str] = Query(None, description="Search in title, description, resource_id"),
     severity: Optional[str] = Query(None, description="Filter by severity (comma-separated)"),
-    status: Optional[str] = Query(None, description="Filter by status (open, closed, mitigated)"),
+    status: Optional[str] = Query(None, description="Filter by status (comma-separated, default: open,fail)"),
     cloud_provider: Optional[str] = Query(None, description="Filter by cloud provider"),
     tool: Optional[str] = Query(None, description="Filter by scanning tool"),
     resource_type: Optional[str] = Query(None, description="Filter by resource type"),
@@ -30,14 +75,24 @@ async def list_findings(
     """List findings with optional filters."""
     query = db.query(Finding)
 
+    # Apply search filter - search ONLY by title
+    # Security: Escape SQL LIKE wildcards to prevent wildcard injection
+    if search:
+        escaped_search = search.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+        search_term = f"%{escaped_search}%"
+        query = query.filter(Finding.title.ilike(search_term, escape='\\'))
+
     # Apply filters
     if severity:
         severities = [s.strip().lower() for s in severity.split(",")]
         query = query.filter(Finding.severity.in_(severities))
 
+    # Default to active findings (open + fail) if no status specified
     if status:
         statuses = [s.strip().lower() for s in status.split(",")]
-        query = query.filter(Finding.status.in_(statuses))
+    else:
+        statuses = ["open", "fail"]
+    query = query.filter(Finding.status.in_(statuses))
 
     if cloud_provider:
         query = query.filter(Finding.cloud_provider == cloud_provider.lower())
@@ -71,19 +126,22 @@ async def list_findings(
 @router.get("/summary", response_model=FindingSummary)
 async def get_findings_summary(
     db: Session = Depends(get_db),
-    status: Optional[str] = Query("open", description="Filter by status")
+    status: Optional[str] = Query(None, description="Filter by status (comma-separated, default: open,fail)")
 ):
     """Get summary statistics of findings."""
-    # Build base query
-    base_query = db.query(Finding)
-
+    # Default to showing open and fail (active) findings
     if status:
-        base_query = base_query.filter(Finding.status == status.lower())
+        statuses = [s.strip().lower() for s in status.split(",")]
+    else:
+        statuses = ["open", "fail"]  # Both open and fail are considered active findings
+
+    # Build base query
+    base_query = db.query(Finding).filter(Finding.status.in_(statuses))
 
     # Get severity counts
     severity_counts = dict(
         db.query(Finding.severity, func.count(Finding.id))
-        .filter(Finding.status == (status or "open"))
+        .filter(Finding.status.in_(statuses))
         .group_by(Finding.severity)
         .all()
     )
@@ -91,7 +149,7 @@ async def get_findings_summary(
     # Get provider counts
     provider_counts = dict(
         db.query(Finding.cloud_provider, func.count(Finding.id))
-        .filter(Finding.status == (status or "open"))
+        .filter(Finding.status.in_(statuses))
         .group_by(Finding.cloud_provider)
         .all()
     )
@@ -99,7 +157,7 @@ async def get_findings_summary(
     # Get tool counts
     tool_counts = dict(
         db.query(Finding.tool, func.count(Finding.id))
-        .filter(Finding.status == (status or "open"))
+        .filter(Finding.status.in_(statuses))
         .group_by(Finding.tool)
         .all()
     )
@@ -123,13 +181,22 @@ async def get_finding(
     finding_id: int,
     db: Session = Depends(get_db)
 ):
-    """Get a specific finding by ID."""
+    """Get a specific finding by ID with aggregated tool sources and affected resources."""
     finding = db.query(Finding).filter(Finding.id == finding_id).first()
 
     if not finding:
         raise HTTPException(status_code=404, detail="Finding not found")
 
-    return FindingResponse.model_validate(finding)
+    # Get the base response
+    response = FindingResponse.model_validate(finding)
+
+    # Aggregate related findings data
+    aggregated = _aggregate_finding_data(finding, db)
+    response.tool_sources = aggregated['tool_sources']
+    response.affected_resources = [AffectedResource(**r) for r in aggregated['affected_resources']]
+    response.affected_count = aggregated['affected_count']
+
+    return response
 
 
 @router.patch("/{finding_id}", response_model=FindingResponse)

@@ -1,0 +1,118 @@
+const API_BASE = '/api'
+
+class ApiError extends Error {
+  constructor(message, status, data) {
+    super(message)
+    this.status = status
+    this.data = data
+  }
+}
+
+async function request(endpoint, options = {}) {
+  const url = `${API_BASE}${endpoint}`
+
+  const config = {
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers
+    },
+    ...options
+  }
+
+  try {
+    const response = await fetch(url, config)
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}))
+      throw new ApiError(
+        data.detail || `HTTP error ${response.status}`,
+        response.status,
+        data
+      )
+    }
+
+    // Handle empty responses
+    const text = await response.text()
+    return text ? JSON.parse(text) : null
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error
+    }
+    throw new ApiError(error.message, 0, null)
+  }
+}
+
+export const api = {
+  // Findings
+  async getFindings(params = {}) {
+    const searchParams = new URLSearchParams()
+
+    if (params.page) searchParams.set('page', params.page)
+    if (params.page_size) searchParams.set('page_size', params.page_size)
+    if (params.severity) searchParams.set('severity', params.severity)
+    if (params.status) searchParams.set('status', params.status)
+    if (params.tool) searchParams.set('tool', params.tool)
+    if (params.cloud_provider) searchParams.set('cloud_provider', params.cloud_provider)
+    if (params.resource_type) searchParams.set('resource_type', params.resource_type)
+    if (params.search) searchParams.set('search', params.search)
+
+    const query = searchParams.toString()
+    return request(`/findings${query ? `?${query}` : ''}`)
+  },
+
+  async getFinding(id) {
+    return request(`/findings/${id}`)
+  },
+
+  async getSummary() {
+    return request('/findings/summary')
+  },
+
+  async updateFinding(id, data) {
+    return request(`/findings/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data)
+    })
+  },
+
+  // Scans
+  async getScans(params = {}) {
+    const searchParams = new URLSearchParams()
+    if (params.page) searchParams.set('page', params.page)
+    if (params.page_size) searchParams.set('page_size', params.page_size)
+    if (params.status) searchParams.set('status', params.status)
+    if (params.tool) searchParams.set('tool', params.tool)
+
+    const query = searchParams.toString()
+    return request(`/scans${query ? `?${query}` : ''}`)
+  },
+
+  async getScan(id) {
+    return request(`/scans/${id}`)
+  },
+
+  // Exports
+  getExportUrl(format, params = {}) {
+    const searchParams = new URLSearchParams()
+
+    if (params.severity) searchParams.set('severity', params.severity)
+    if (params.status) searchParams.set('status', params.status)
+    if (params.tool) searchParams.set('tool', params.tool)
+    if (params.include_remediation) searchParams.set('include_remediation', 'true')
+
+    const query = searchParams.toString()
+    return `${API_BASE}/exports/${format}${query ? `?${query}` : ''}`
+  },
+
+  // Health
+  async getHealth() {
+    return request('/health')
+  },
+
+  async getDetailedHealth() {
+    return request('/health/detailed')
+  }
+}
+
+export { ApiError }
+export default api

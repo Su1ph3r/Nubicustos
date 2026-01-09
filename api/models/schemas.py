@@ -81,6 +81,28 @@ class ScanListResponse(BaseModel):
 # Finding Schemas
 # ============================================================================
 
+class RemediationCommand(BaseModel):
+    """Remediation command details."""
+    type: str = Field(description="Command type: cli, terraform, etc.")
+    command: str = Field(description="The actual command to execute")
+    description: Optional[str] = Field(default=None, description="What this command does")
+
+
+class RemediationResource(BaseModel):
+    """External resource for remediation guidance."""
+    title: str = Field(description="Resource title")
+    url: str = Field(description="Resource URL")
+    type: str = Field(default="documentation", description="Resource type: documentation, blog, video")
+
+
+class AffectedResource(BaseModel):
+    """Details of an affected resource."""
+    id: str = Field(description="Resource ID")
+    name: Optional[str] = Field(default=None, description="Resource name")
+    region: Optional[str] = Field(default=None, description="Resource region")
+    type: Optional[str] = Field(default=None, description="Resource type")
+
+
 class FindingResponse(BaseModel):
     """Response schema for finding details."""
     id: int
@@ -88,6 +110,7 @@ class FindingResponse(BaseModel):
     scan_id: Optional[UUID]
     tool: Optional[str]
     cloud_provider: Optional[str]
+    account_id: Optional[str] = Field(default=None, description="Cloud account ID")
     severity: Optional[str]
     status: str = "open"
     title: Optional[str]
@@ -99,6 +122,19 @@ class FindingResponse(BaseModel):
     region: Optional[str]
     first_seen: Optional[datetime]
     last_seen: Optional[datetime]
+    # Proof of Concept Evidence
+    poc_evidence: Optional[str] = Field(default=None, description="Raw evidence/API response demonstrating the finding")
+    poc_verification: Optional[str] = Field(default=None, description="Command to verify the finding exists")
+    poc_screenshot_path: Optional[str] = Field(default=None, description="Path to screenshot evidence")
+    # Enhanced Remediation
+    remediation_commands: Optional[List[RemediationCommand]] = Field(default=None, description="CLI/IaC commands to fix")
+    remediation_code: Optional[Dict[str, str]] = Field(default=None, description="Code snippets by language/tool")
+    remediation_resources: Optional[List[RemediationResource]] = Field(default=None, description="External documentation links")
+    # Deduplication fields
+    canonical_id: Optional[str] = Field(default=None, description="Canonical ID for grouping similar findings")
+    tool_sources: Optional[List[str]] = Field(default=None, description="List of tools that detected this finding")
+    affected_resources: Optional[List[AffectedResource]] = Field(default=None, description="List of affected resources")
+    affected_count: Optional[int] = Field(default=None, description="Count of affected resources")
 
     class Config:
         from_attributes = True

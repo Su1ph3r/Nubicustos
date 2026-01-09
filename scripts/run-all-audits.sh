@@ -499,7 +499,21 @@ main() {
     
     # Generate summary
     generate_summary
-    
+
+    # Load findings into database
+    log INFO "========================================"
+    log INFO "Loading Findings into Database"
+    log INFO "========================================"
+    if [ "$DRY_RUN" = "true" ]; then
+        log INFO "[DRY-RUN] Would execute: docker-compose exec -T report-processor python /app/process_reports.py"
+    else
+        log INFO "Processing and loading scan reports..."
+        docker-compose exec -T report-processor python /app/process_reports.py || {
+            log ERROR "Failed to load findings into database"
+        }
+        log INFO "Database loading complete"
+    fi
+
     log INFO "========================================"
     log INFO "All Audits Complete"
     log INFO "End time: $(date)"
