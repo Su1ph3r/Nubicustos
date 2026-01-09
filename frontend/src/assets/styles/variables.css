@@ -1,0 +1,151 @@
+/* ============================================================================
+   Nubicustos Theme System
+   ============================================================================ */
+
+:root {
+  /* Spacing (same for both themes) */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+
+  /* Border radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-full: 9999px;
+
+  /* Transitions */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.25s ease;
+  --transition-slow: 0.4s ease;
+
+  /* Severity colors (consistent across themes) */
+  --severity-critical: #ef4444;
+  --severity-critical-bg: rgba(239, 68, 68, 0.12);
+  --severity-critical-border: rgba(239, 68, 68, 0.3);
+  --severity-high: #f97316;
+  --severity-high-bg: rgba(249, 115, 22, 0.12);
+  --severity-high-border: rgba(249, 115, 22, 0.3);
+  --severity-medium: #eab308;
+  --severity-medium-bg: rgba(234, 179, 8, 0.12);
+  --severity-medium-border: rgba(234, 179, 8, 0.3);
+  --severity-low: #22c55e;
+  --severity-low-bg: rgba(34, 197, 94, 0.12);
+  --severity-low-border: rgba(34, 197, 94, 0.3);
+  --severity-info: #3b82f6;
+  --severity-info-bg: rgba(59, 130, 246, 0.12);
+  --severity-info-border: rgba(59, 130, 246, 0.3);
+
+  /* Status colors */
+  --status-open: #ef4444;
+  --status-closed: #22c55e;
+  --status-mitigated: #3b82f6;
+  --status-accepted: #8b5cf6;
+}
+
+/* ============================================================================
+   Dark Theme (Default)
+   ============================================================================ */
+
+:root,
+html.dark {
+  /* Backgrounds */
+  --bg-primary: #09090b;
+  --bg-secondary: #18181b;
+  --bg-tertiary: #27272a;
+  --bg-card: #1c1c1f;
+  --bg-card-hover: #222225;
+  --bg-elevated: #27272a;
+  --bg-input: #18181b;
+
+  /* Text */
+  --text-primary: #fafafa;
+  --text-secondary: #a1a1aa;
+  --text-tertiary: #71717a;
+  --text-muted: #52525b;
+  --text-inverse: #09090b;
+
+  /* Borders */
+  --border-color: #27272a;
+  --border-color-light: #3f3f46;
+  --border-color-focus: #6366f1;
+
+  /* Accent colors */
+  --accent-primary: #6366f1;
+  --accent-primary-hover: #818cf8;
+  --accent-primary-bg: rgba(99, 102, 241, 0.15);
+  --gradient-start: #6366f1;
+  --gradient-end: #8b5cf6;
+
+  /* Header */
+  --header-bg: linear-gradient(135deg, #18181b 0%, #27272a 100%);
+  --header-border: #3f3f46;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 0 20px rgba(99, 102, 241, 0.2);
+
+  /* Overlays */
+  --overlay-bg: rgba(0, 0, 0, 0.6);
+
+  /* Table */
+  --table-row-hover: rgba(255, 255, 255, 0.03);
+  --table-row-expanded: rgba(99, 102, 241, 0.05);
+  --table-header-bg: #18181b;
+}
+
+/* ============================================================================
+   Light Theme
+   ============================================================================ */
+
+html.light {
+  /* Backgrounds */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f4f4f5;
+  --bg-tertiary: #e4e4e7;
+  --bg-card: #ffffff;
+  --bg-card-hover: #fafafa;
+  --bg-elevated: #ffffff;
+  --bg-input: #ffffff;
+
+  /* Text */
+  --text-primary: #09090b;
+  --text-secondary: #52525b;
+  --text-tertiary: #71717a;
+  --text-muted: #a1a1aa;
+  --text-inverse: #fafafa;
+
+  /* Borders */
+  --border-color: #e4e4e7;
+  --border-color-light: #d4d4d8;
+  --border-color-focus: #4f46e5;
+
+  /* Accent colors */
+  --accent-primary: #4f46e5;
+  --accent-primary-hover: #6366f1;
+  --accent-primary-bg: rgba(79, 70, 229, 0.1);
+  --gradient-start: #4f46e5;
+  --gradient-end: #7c3aed;
+
+  /* Header */
+  --header-bg: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+  --header-border: transparent;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.12);
+  --shadow-glow: 0 0 20px rgba(79, 70, 229, 0.15);
+
+  /* Overlays */
+  --overlay-bg: rgba(0, 0, 0, 0.4);
+
+  /* Table */
+  --table-row-hover: rgba(0, 0, 0, 0.02);
+  --table-row-expanded: rgba(79, 70, 229, 0.05);
+  --table-header-bg: #f4f4f5;
+}

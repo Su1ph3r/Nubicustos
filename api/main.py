@@ -3,6 +3,7 @@ Nubicustos - REST API
 
 FastAPI application for managing security scans and querying findings.
 """
+import secrets
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -76,8 +77,9 @@ async def validate_api_key(request: Request, call_next):
 
     # Check if API key is required
     if settings.api_key:
-        api_key = request.headers.get("X-API-Key")
-        if api_key != settings.api_key:
+        api_key = request.headers.get("X-API-Key") or ""
+        # Use timing-safe comparison to prevent timing attacks
+        if not secrets.compare_digest(api_key, settings.api_key):
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Invalid or missing API key"}

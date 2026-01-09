@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # ============================================================================
   # AWS Security Tools
@@ -52,17 +50,17 @@ services:
   # ============================================================================
   
   cloudsploit:
-    image: aquasec/cloudsploit:latest
+    image: cloudsploit:local
     container_name: cloudsploit
+    user: root
     volumes:
       - ./reports/cloudsploit:/reports
-      - ./credentials:/root/.config:ro
-      - ./config/cloudsploit:/config:ro
+      - ./credentials/aws:/root/.aws:ro
     environment:
-      - AWS_SHARED_CREDENTIALS_FILE=/root/.config/aws/credentials
-      - AZURE_CONFIG_DIR=/root/.config/azure
-      - GOOGLE_APPLICATION_CREDENTIALS=/root/.config/gcp/credentials.json
-    command: --config /config/config.js --console none --json /reports/output.json
+      - HOME=/root
+      - AWS_DEFAULT_REGION=us-east-1
+    entrypoint: ["node", "/var/scan/cloudsploit/index.js"]
+    command: ["--cloud", "aws", "--compliance", "pci", "--console", "table", "--json", "/reports/output.json"]
     networks:
       - security-net
     restart: unless-stopped
@@ -395,33 +393,31 @@ services:
     restart: unless-stopped
 
   # ============================================================================
-  # Monitoring & Dashboards
+  # Report Processor
   # ============================================================================
 
-  grafana:
-    image: grafana/grafana:latest
-    container_name: grafana
+  report-processor:
+    image: python:3.11-slim
+    container_name: report-processor
+    working_dir: /app
     environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
-      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-piechart-panel
-      - GF_SERVER_ROOT_URL=http://localhost:${GRAFANA_PORT:-3000}
-    ports:
-      - "${GRAFANA_PORT:-3000}:3000"
+      - DB_HOST=postgresql
+      - DB_PORT=5432
+      - DB_NAME=${POSTGRES_DB:-security_audits}
+      - DB_USER=${POSTGRES_USER:-auditor}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - AWS_SHARED_CREDENTIALS_FILE=/root/.aws/credentials
+      - AWS_CONFIG_FILE=/root/.aws/config
     volumes:
-      - grafana-data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./report-processor:/app:ro
+      - ./reports:/reports:rw
+      - ./credentials/aws:/root/.aws:ro
     depends_on:
       postgresql:
         condition: service_healthy
     networks:
       - security-net
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    entrypoint: ["sh", "-c", "pip install psycopg2-binary pandas PyYAML awscli --quiet && tail -f /dev/null"]
     restart: unless-stopped
 
 # ============================================================================
@@ -453,6 +449,4 @@ volumes:
   trivy-cache:
     driver: local
   grype-cache:
-    driver: local
-  grafana-data:
     driver: local
