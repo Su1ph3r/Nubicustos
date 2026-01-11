@@ -1,19 +1,34 @@
-"""Export endpoints."""
-from fastapi import APIRouter, Depends, Query, HTTPException
-from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
-from sqlalchemy import desc
-from typing import Optional, List
-from datetime import datetime
+"""
+Exports API Endpoints.
+
+This module provides endpoints for exporting security findings data in various formats:
+- CSV: For spreadsheet analysis and reporting
+- JSON: For programmatic access and integration
+
+All export endpoints support the same filtering options as the findings list endpoint.
+
+Endpoints:
+    GET /exports/csv - Export findings as CSV download
+    GET /exports/json - Export findings as JSON download
+    POST /exports/generate - Generate an export with metadata
+    GET /exports/summary - Get export-ready summary statistics
+"""
 import csv
 import io
 import json
+from datetime import datetime
+from typing import Any, Optional
 from uuid import uuid4
 
-from models.database import get_db, Finding
-from models.schemas import ExportRequest, ExportResponse, SeverityLevel, FindingStatus
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
+from sqlalchemy import desc
+from sqlalchemy.orm import Session
 
-router = APIRouter(prefix="/exports", tags=["Exports"])
+from models.database import Finding, get_db
+from models.schemas import ExportRequest, ExportResponse, FindingStatus, SeverityLevel
+
+router: APIRouter = APIRouter(prefix="/exports", tags=["Exports"])
 
 
 @router.get("/csv")
@@ -24,7 +39,26 @@ async def export_findings_csv(
     cloud_provider: Optional[str] = Query(None, description="Filter by cloud provider"),
     include_remediation: bool = Query(True, description="Include remediation guidance")
 ):
-    """Export findings as CSV file."""
+    """
+    Export findings as CSV file download.
+
+    Generates a CSV file with findings data suitable for spreadsheet analysis,
+    reporting, and integration with ticketing systems.
+
+    Args:
+        severity: Comma-separated severity levels to include
+        status: Comma-separated statuses to include (default: open)
+        cloud_provider: Filter by cloud provider
+        include_remediation: Include remediation column (default: true)
+
+    Returns:
+        StreamingResponse: CSV file download
+
+    CSV Columns:
+        finding_id, tool, cloud_provider, severity, status, title,
+        resource_type, resource_id, resource_name, region, scan_date,
+        [remediation if include_remediation=true]
+    """
     query = db.query(Finding)
 
     # Apply filters
@@ -88,7 +122,28 @@ async def export_findings_json(
     status: Optional[str] = Query("open", description="Filter by status"),
     cloud_provider: Optional[str] = Query(None, description="Filter by cloud provider")
 ):
-    """Export findings as JSON file."""
+    """
+    Export findings as JSON file download.
+
+    Generates a JSON file with complete findings data including all metadata.
+    Suitable for programmatic processing and integration.
+
+    Args:
+        severity: Comma-separated severity levels to include
+        status: Comma-separated statuses to include (default: open)
+        cloud_provider: Filter by cloud provider
+
+    Returns:
+        StreamingResponse: JSON file download
+
+    JSON Structure:
+        {
+            "export_timestamp": "ISO-8601 timestamp",
+            "filters": {...applied filters...},
+            "total_findings": count,
+            "findings": [{...finding details...}]
+        }
+    """
     query = db.query(Finding)
 
     # Apply filters
@@ -156,7 +211,22 @@ async def generate_export(
     export_request: ExportRequest,
     db: Session = Depends(get_db)
 ):
-    """Generate an export package with specified filters."""
+    """
+    Generate an export package with specified filters.
+
+    Creates export metadata with a unique ID and download URL.
+    Use this endpoint when you need to reference exports later.
+
+    Args:
+        export_request: Export configuration including:
+            - format: Output format (csv, json)
+            - severity_filter: List of severity levels
+            - status_filter: List of statuses
+            - cloud_provider: Cloud provider filter
+
+    Returns:
+        ExportResponse: Export metadata with download URL
+    """
     query = db.query(Finding)
 
     # Apply filters
@@ -190,7 +260,20 @@ async def generate_export(
 async def export_summary(
     db: Session = Depends(get_db)
 ):
-    """Get export-ready summary of current findings."""
+    """
+    Get export-ready summary of current findings.
+
+    Returns aggregated statistics suitable for executive reporting
+    and dashboard displays.
+
+    Returns:
+        dict: Summary statistics including:
+            - generated_at: Timestamp
+            - total_open_findings: Total count
+            - by_severity: Counts grouped by severity
+            - by_provider: Counts grouped by cloud provider
+            - by_tool: Counts grouped by scanning tool
+    """
     from sqlalchemy import func
 
     # Severity breakdown

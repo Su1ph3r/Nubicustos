@@ -27,6 +27,19 @@ except ImportError:
     def get_default_remediation(s, d): return 'Review and remediate according to security best practices.'
     def get_default_description(s, c, d): return d or 'Security finding detected.'
 
+# Import severity scoring module
+try:
+    from severity_scoring import enrich_finding_with_scoring, calculate_risk_score
+except ImportError:
+    # Fallback if scoring module not available
+    def enrich_finding_with_scoring(finding):
+        finding['risk_score'] = 50.0
+        finding['cvss_score'] = 5.0
+        finding['exploitation_likelihood'] = 'likely'
+        return finding
+    def calculate_risk_score(finding, base_severity=None):
+        return 50.0, 'medium', {}
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -1213,8 +1226,16 @@ class ReportProcessor:
             logger.error(f"Error processing Polaris report: {e}")
             return None, []
 
-    def save_to_database(self, metadata, findings, scan_id):
-        """Save processed findings to database"""
+    def save_to_database(self, metadata, findings, scan_id, existing_scan_id=None):
+        """Save processed findings to database.
+
+        Args:
+            metadata: Scan metadata dict
+            findings: List of finding dicts
+            scan_id: Internal scan identifier (tool-specific)
+            existing_scan_id: Optional UUID of an existing scan to link findings to.
+                             If provided, updates the existing scan record instead of creating new.
+        """
         conn = self.connect_db()
         if not conn:
             return False
@@ -1222,33 +1243,68 @@ class ReportProcessor:
         try:
             cur = conn.cursor()
 
-            # Generate a proper UUID for the scan
-            import uuid
-            db_scan_id = str(uuid.uuid4())
+            # Apply CVSS-style severity scoring to all findings
+            for finding in findings:
+                enrich_finding_with_scoring(finding)
 
-            # Insert scan record into 'scans' table (not scan_metadata)
-            cur.execute("""
-                INSERT INTO scans (
-                    scan_id, scan_type, target, tool,
-                    started_at, completed_at, status,
-                    total_findings, critical_findings, high_findings,
-                    medium_findings, low_findings, metadata
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                db_scan_id,
-                'security_audit',
-                metadata.get('cloud_provider', 'unknown'),
-                metadata['tool'],
-                metadata['scan_date'],
-                metadata['scan_date'],
-                'completed',
-                len(findings),
-                len([f for f in findings if f.get('severity', '').lower() == 'critical']),
-                len([f for f in findings if f.get('severity', '').lower() == 'high']),
-                len([f for f in findings if f.get('severity', '').lower() == 'medium']),
-                len([f for f in findings if f.get('severity', '').lower() == 'low']),
-                Json(metadata)
-            ))
+            # Count findings by adjusted severity (after scoring)
+            critical_count = len([f for f in findings if f.get('severity', '').lower() == 'critical'])
+            high_count = len([f for f in findings if f.get('severity', '').lower() == 'high'])
+            medium_count = len([f for f in findings if f.get('severity', '').lower() == 'medium'])
+            low_count = len([f for f in findings if f.get('severity', '').lower() == 'low'])
+
+            # Use existing scan_id if provided, otherwise generate new UUID
+            if existing_scan_id:
+                db_scan_id = existing_scan_id
+                # Update existing scan record with finding counts
+                cur.execute("""
+                    UPDATE scans SET
+                        completed_at = %s,
+                        status = 'completed',
+                        total_findings = total_findings + %s,
+                        critical_findings = critical_findings + %s,
+                        high_findings = high_findings + %s,
+                        medium_findings = medium_findings + %s,
+                        low_findings = low_findings + %s
+                    WHERE scan_id = %s
+                """, (
+                    metadata['scan_date'],
+                    len(findings),
+                    critical_count,
+                    high_count,
+                    medium_count,
+                    low_count,
+                    db_scan_id
+                ))
+                logger.info(f"Updated existing scan {db_scan_id} with {len(findings)} findings")
+            else:
+                # Generate a proper UUID for the scan
+                import uuid
+                db_scan_id = str(uuid.uuid4())
+
+                # Insert scan record into 'scans' table (not scan_metadata)
+                cur.execute("""
+                    INSERT INTO scans (
+                        scan_id, scan_type, target, tool,
+                        started_at, completed_at, status,
+                        total_findings, critical_findings, high_findings,
+                        medium_findings, low_findings, metadata
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    db_scan_id,
+                    'security_audit',
+                    metadata.get('cloud_provider', 'unknown'),
+                    metadata['tool'],
+                    metadata['scan_date'],
+                    metadata['scan_date'],
+                    'completed',
+                    len(findings),
+                    critical_count,
+                    high_count,
+                    medium_count,
+                    low_count,
+                    Json(metadata)
+                ))
 
             # Insert findings with cross-tool deduplication using canonical_id
             for finding in findings:
@@ -1283,22 +1339,30 @@ class ReportProcessor:
                         if isinstance(res, dict) and res.get('id') not in existing_resource_ids:
                             existing_resources.append(res)
 
-                    # Update existing finding with merged data
+                    # Update existing finding with merged data and updated scoring
                     cur.execute("""
                         UPDATE findings SET
                             tool_sources = %s,
                             affected_resources = %s,
                             last_seen = NOW(),
-                            scan_id = %s
+                            scan_id = %s,
+                            risk_score = %s,
+                            cvss_score = %s,
+                            exploitability = %s,
+                            severity = %s
                         WHERE id = %s
                     """, (
                         Json(existing_tools),
                         Json(existing_resources),
                         db_scan_id,
+                        finding.get('risk_score', 50.0),
+                        finding.get('cvss_score', 5.0),
+                        finding.get('exploitation_likelihood', 'likely'),
+                        finding.get('severity', 'medium').lower(),
                         existing_id
                     ))
                 else:
-                    # Insert new finding
+                    # Insert new finding with CVSS-style severity scoring
                     cur.execute("""
                         INSERT INTO findings (
                             finding_id, scan_id, tool, cloud_provider, account_id,
@@ -1307,8 +1371,9 @@ class ReportProcessor:
                             remediation, compliance_frameworks, metadata,
                             poc_evidence, poc_verification,
                             remediation_commands, remediation_code, remediation_resources,
-                            canonical_id, tool_sources, affected_resources
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            canonical_id, tool_sources, affected_resources,
+                            risk_score, cvss_score, exploitability
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
                         finding_unique_id,
                         db_scan_id,
@@ -1333,7 +1398,10 @@ class ReportProcessor:
                         Json(finding.get('remediation_resources', [])),
                         canonical_id,
                         Json([metadata['tool']]),  # Initial tool_sources
-                        Json(finding.get('affected_resources', []))  # Affected resources from parser
+                        Json(finding.get('affected_resources', [])),  # Affected resources from parser
+                        finding.get('risk_score', 50.0),  # CVSS-style risk score (0-100)
+                        finding.get('cvss_score', 5.0),   # CVSS score (0-10)
+                        finding.get('exploitation_likelihood', 'likely')  # Exploitation likelihood
                     ))
 
             conn.commit()
@@ -1388,6 +1456,87 @@ class ReportProcessor:
         finally:
             conn.close()
     
+    def process_for_scan(self, orchestration_scan_id: str, tools: list = None):
+        """Process reports and link findings to an existing orchestration scan.
+
+        This method is called by the scan orchestration after tools complete.
+        It processes only reports generated by the specified tools and links
+        all findings to the orchestration's scan_id.
+
+        Args:
+            orchestration_scan_id: UUID of the existing scan record from orchestration
+            tools: Optional list of tools to process (e.g., ['prowler', 'scoutsuite'])
+                  If None, processes all available reports.
+
+        Returns:
+            int: Total number of findings processed
+        """
+        logger.info(f"Processing reports for orchestration scan: {orchestration_scan_id}")
+        total_findings = 0
+
+        # Process each tool's reports
+        tools_to_process = tools or ['prowler', 'scoutsuite', 'cloudsploit', 'cloudfox']
+
+        if 'prowler' in tools_to_process:
+            # Process most recent Prowler reports
+            prowler_reports = list(self.reports_dir.glob('prowler/*/prowler-output-*.json'))
+            prowler_reports += list(self.reports_dir.glob('prowler/prowler-output-*.json'))
+            prowler_reports += list(self.reports_dir.glob('prowler/prowler-output-*.ocsf.json'))
+            prowler_reports = list(set(prowler_reports))
+            # Sort by modification time, process most recent
+            if prowler_reports:
+                prowler_reports.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                report = prowler_reports[0]
+                logger.info(f"Processing Prowler report: {report}")
+                metadata, findings = self.process_prowler_report(report)
+                if metadata and findings:
+                    self.save_to_database(metadata, findings, f"prowler_{report.stem}", orchestration_scan_id)
+                    total_findings += len(findings)
+
+        if 'scoutsuite' in tools_to_process:
+            # Process most recent ScoutSuite reports
+            # NOTE: Filter to only scoutsuite_results files, not scoutsuite_exceptions
+            scoutsuite_reports = list(self.reports_dir.glob('scoutsuite/*/scoutsuite-results/scoutsuite_results*.js'))
+            scoutsuite_reports += list(self.reports_dir.glob('scoutsuite/*/scoutsuite_results_*.json'))
+            scoutsuite_reports = list(set(scoutsuite_reports))
+            if scoutsuite_reports:
+                scoutsuite_reports.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                report = scoutsuite_reports[0]
+                logger.info(f"Processing ScoutSuite report: {report}")
+                metadata, findings = self.process_scoutsuite_report(report)
+                if metadata and findings:
+                    self.save_to_database(metadata, findings, f"scoutsuite_{report.parent.name}", orchestration_scan_id)
+                    total_findings += len(findings)
+                else:
+                    logger.warning(f"ScoutSuite report yielded no findings: {report}")
+
+        if 'cloudsploit' in tools_to_process:
+            # Process most recent CloudSploit reports
+            cloudsploit_reports = list(self.reports_dir.glob('cloudsploit/*.json'))
+            if cloudsploit_reports:
+                cloudsploit_reports.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                report = cloudsploit_reports[0]
+                logger.info(f"Processing CloudSploit report: {report}")
+                metadata, findings = self.process_cloudsploit_report(report)
+                if metadata and findings:
+                    self.save_to_database(metadata, findings, f"cloudsploit_{report.stem}", orchestration_scan_id)
+                    total_findings += len(findings)
+
+        if 'cloudfox' in tools_to_process:
+            # CloudFox outputs are enumeration data (inventory, permissions, principals)
+            # stored in cloudfox_results table, not as security findings
+            # The data supports attack path analysis but isn't findings-based
+            cloudfox_output_dir = self.reports_dir / 'cloudfox' / 'cloudfox-output'
+            if cloudfox_output_dir.exists():
+                json_files = list(cloudfox_output_dir.glob('**/*.json'))
+                if json_files:
+                    logger.info(f"CloudFox: Found {len(json_files)} enumeration files (stored in cloudfox_results table)")
+                    # CloudFox enumeration data powers attack path analysis
+                    # Findings from CloudFox are generated via attack_path_analyzer.py
+
+        logger.info(f"Processed {total_findings} total findings for scan {orchestration_scan_id}")
+        return total_findings
+
     def run(self):
         """Main processing loop"""
         logger.info("Starting report processing...")
@@ -1446,5 +1595,33 @@ class ReportProcessor:
         logger.info("Report processing completed")
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Process security scan reports')
+    parser.add_argument(
+        '--scan-id',
+        dest='scan_id',
+        help='Orchestration scan UUID to link findings to'
+    )
+    parser.add_argument(
+        '--tools',
+        dest='tools',
+        help='Comma-separated list of tools to process (e.g., prowler,scoutsuite)'
+    )
+    args = parser.parse_args()
+
+    # Also check environment variables (for container deployment)
+    scan_id = args.scan_id or os.environ.get('ORCHESTRATION_SCAN_ID')
+    tools_str = args.tools or os.environ.get('TOOLS_TO_PROCESS')
+    tools = tools_str.split(',') if tools_str else None
+
     processor = ReportProcessor()
-    processor.run()
+
+    if scan_id:
+        # Process for a specific orchestration scan
+        logger.info(f"Processing reports for orchestration scan: {scan_id}")
+        total = processor.process_for_scan(scan_id, tools)
+        logger.info(f"Completed: {total} findings linked to scan {scan_id}")
+    else:
+        # Default: run full processing loop
+        processor.run()

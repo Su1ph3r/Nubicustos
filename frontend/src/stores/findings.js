@@ -12,6 +12,10 @@ export const useFindingsStore = defineStore('findings', () => {
   const loading = ref(false)
   const error = ref(null)
 
+  // Sort state
+  const sortBy = ref('risk_score')
+  const sortOrder = ref('desc')
+
   // Filters
   const filters = ref({
     severity: null,
@@ -22,13 +26,25 @@ export const useFindingsStore = defineStore('findings', () => {
     search: ''
   })
 
-  // Available filter options (populated from data)
+  // Available filter options (populated from summary API)
   const filterOptions = ref({
     severities: ['critical', 'high', 'medium', 'low', 'info'],
     statuses: ['open', 'closed', 'mitigated', 'accepted'],
     tools: [],
     cloudProviders: [],
     resourceTypes: []
+  })
+
+  // Summary data for quick filters
+  const summary = ref({
+    total: 0,
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0,
+    info: 0,
+    by_tool: {},
+    by_provider: {}
   })
 
   // Computed
@@ -49,6 +65,8 @@ export const useFindingsStore = defineStore('findings', () => {
       const params = {
         page: page.value,
         page_size: pageSize.value,
+        sort_by: sortBy.value,
+        sort_order: sortOrder.value,
         ...filters.value
       }
 
@@ -110,24 +128,38 @@ export const useFindingsStore = defineStore('findings', () => {
     }
   }
 
+  async function fetchSummary() {
+    try {
+      const response = await fetch('/api/findings/summary')
+      if (!response.ok) throw new Error('Failed to fetch summary')
+
+      const data = await response.json()
+      summary.value = data
+
+      // Update filter options from summary
+      if (data.by_tool) {
+        filterOptions.value.tools = Object.keys(data.by_tool).sort()
+      }
+      if (data.by_provider) {
+        filterOptions.value.cloudProviders = Object.keys(data.by_provider).sort()
+      }
+
+      return data
+    } catch (err) {
+      console.error('Failed to fetch summary:', err)
+      return null
+    }
+  }
+
   function updateFilterOptions(data) {
-    const tools = new Set()
-    const providers = new Set()
+    // Only update resource types from current page data
+    // Tools and providers come from summary API
     const resourceTypes = new Set()
 
     data.forEach(finding => {
-      if (finding.tool) tools.add(finding.tool)
-      if (finding.cloud_provider) providers.add(finding.cloud_provider)
       if (finding.resource_type) resourceTypes.add(finding.resource_type)
     })
 
-    // Only update if we have new options
-    if (tools.size > 0) {
-      filterOptions.value.tools = [...tools].sort()
-    }
-    if (providers.size > 0) {
-      filterOptions.value.cloudProviders = [...providers].sort()
-    }
     if (resourceTypes.size > 0) {
       filterOptions.value.resourceTypes = [...resourceTypes].sort()
     }
@@ -159,6 +191,25 @@ export const useFindingsStore = defineStore('findings', () => {
     page.value = 1
   }
 
+  function setSort(field, order) {
+    // Map frontend field names to backend field names
+    const fieldMapping = {
+      'severity': 'severity',
+      'risk_score': 'risk_score',
+      'scan_date': 'scan_date',
+      'title': 'title',
+      'tool': 'tool',
+      'resource_type': 'resource_type',
+      'region': 'region',
+      'status': 'status'
+    }
+
+    const mappedField = fieldMapping[field] || 'risk_score'
+    sortBy.value = mappedField
+    sortOrder.value = order === 1 ? 'asc' : 'desc'
+    page.value = 1 // Reset to first page when sorting
+  }
+
   return {
     // State
     findings,
@@ -170,6 +221,9 @@ export const useFindingsStore = defineStore('findings', () => {
     error,
     filters,
     filterOptions,
+    summary,
+    sortBy,
+    sortOrder,
 
     // Computed
     hasFilters,
@@ -179,9 +233,11 @@ export const useFindingsStore = defineStore('findings', () => {
     fetchFindings,
     fetchFinding,
     updateFinding,
+    fetchSummary,
     setFilter,
     clearFilters,
     setPage,
-    setPageSize
+    setPageSize,
+    setSort
   }
 })

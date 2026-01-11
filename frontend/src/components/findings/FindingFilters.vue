@@ -1,5 +1,19 @@
 <template>
   <div class="filters-container">
+    <!-- Severity Quick Filters -->
+    <div class="severity-quick-filters">
+      <button
+        v-for="sev in severityQuickFilters"
+        :key="sev.value"
+        class="severity-quick-btn"
+        :class="[sev.value, { active: selectedSeverities.includes(sev.value) }]"
+        @click="toggleSeverity(sev.value)"
+      >
+        <span class="severity-label">{{ sev.label }}</span>
+        <span class="severity-count">{{ findingsStore.summary[sev.value] || 0 }}</span>
+      </button>
+    </div>
+
     <div class="filters-row">
       <div class="filter-group">
         <label>Search</label>
@@ -93,6 +107,14 @@ const selectedProvider = ref(findingsStore.filters.cloud_provider || null)
 // Debounce timer
 let searchDebounceTimer = null
 
+// Quick filter buttons
+const severityQuickFilters = [
+  { label: 'Critical', value: 'critical' },
+  { label: 'High', value: 'high' },
+  { label: 'Medium', value: 'medium' },
+  { label: 'Low', value: 'low' }
+]
+
 // Options
 const severityOptions = [
   { label: 'Critical', value: 'critical' },
@@ -132,6 +154,18 @@ const handleSeverityChange = () => {
   const value = selectedSeverities.value.length > 0 ? selectedSeverities.value.join(',') : null
   findingsStore.setFilter('severity', value)
   emit('filter-change')
+}
+
+const toggleSeverity = (severity) => {
+  const idx = selectedSeverities.value.indexOf(severity)
+  if (idx === -1) {
+    // Add severity
+    selectedSeverities.value = [severity]
+  } else {
+    // Remove severity (clear filter)
+    selectedSeverities.value = []
+  }
+  handleSeverityChange()
 }
 
 const handleStatusChange = () => {
@@ -212,6 +246,89 @@ watch(() => findingsStore.filters, (newFilters) => {
   align-items: center;
   margin-left: auto;
 }
+
+/* Severity Quick Filters */
+.severity-quick-filters {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+  flex-wrap: wrap;
+}
+
+.severity-quick-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.severity-quick-btn:hover {
+  border-color: var(--border-color-light);
+}
+
+.severity-quick-btn.active {
+  border-width: 2px;
+}
+
+.severity-quick-btn.critical {
+  border-color: var(--severity-critical-border);
+}
+
+.severity-quick-btn.critical.active {
+  background: var(--severity-critical-bg);
+  border-color: var(--severity-critical);
+}
+
+.severity-quick-btn.high {
+  border-color: var(--severity-high-border);
+}
+
+.severity-quick-btn.high.active {
+  background: var(--severity-high-bg);
+  border-color: var(--severity-high);
+}
+
+.severity-quick-btn.medium {
+  border-color: var(--severity-medium-border);
+}
+
+.severity-quick-btn.medium.active {
+  background: var(--severity-medium-bg);
+  border-color: var(--severity-medium);
+}
+
+.severity-quick-btn.low {
+  border-color: var(--severity-low-border);
+}
+
+.severity-quick-btn.low.active {
+  background: var(--severity-low-bg);
+  border-color: var(--severity-low);
+}
+
+.severity-label {
+  font-weight: 600;
+  font-size: 0.8125rem;
+  color: var(--text-primary);
+}
+
+.severity-count {
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.severity-quick-btn.critical .severity-label { color: var(--severity-critical); }
+.severity-quick-btn.high .severity-label { color: var(--severity-high); }
+.severity-quick-btn.medium .severity-label { color: var(--severity-medium); }
+.severity-quick-btn.low .severity-label { color: var(--severity-low); }
 
 @media (max-width: 768px) {
   .filters-row {

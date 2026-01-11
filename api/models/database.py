@@ -156,3 +156,329 @@ class AttackPath(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     scan = relationship("Scan")
+
+
+# ============================================================================
+# Pentest Feature Models
+# ============================================================================
+
+class PublicExposure(Base):
+    """Public exposure aggregator model."""
+    __tablename__ = "public_exposures"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    exposure_id = Column(String(64), unique=True)
+    scan_id = Column(UUID(as_uuid=True), ForeignKey("scans.scan_id"))
+    cloud_provider = Column(String(32))
+    account_id = Column(String(128))
+    region = Column(String(64))
+    resource_type = Column(String(128))
+    resource_id = Column(String(512))
+    resource_name = Column(String(512))
+    exposure_type = Column(String(64))
+    exposure_details = Column(JSONB)
+    risk_level = Column(String(16), default="medium")
+    protocol = Column(String(32))
+    port_range = Column(String(64))
+    source_cidr = Column(String(64))
+    is_internet_exposed = Column(Boolean, default=False)
+    finding_ids = Column(JSONB)
+    tags = Column(JSONB)
+    first_seen = Column(DateTime, default=datetime.utcnow)
+    last_seen = Column(DateTime, default=datetime.utcnow)
+    status = Column(String(32), default="open")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ExposedCredential(Base):
+    """Exposed credential model for credential harvesting."""
+    __tablename__ = "exposed_credentials"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    credential_id = Column(String(64), unique=True)
+    scan_id = Column(UUID(as_uuid=True), ForeignKey("scans.scan_id"))
+    cloud_provider = Column(String(32))
+    account_id = Column(String(128))
+    region = Column(String(64))
+    source_type = Column(String(64))
+    source_location = Column(String(512))
+    credential_type = Column(String(64))
+    credential_name = Column(String(256))
+    exposed_value_hash = Column(String(128))
+    is_active = Column(Boolean, default=True)
+    risk_level = Column(String(16), default="critical")
+    finding_ids = Column(JSONB)
+    discovered_by = Column(String(64))
+    remediation_status = Column(String(32), default="pending")
+    remediation_notes = Column(Text)
+    first_seen = Column(DateTime, default=datetime.utcnow)
+    last_seen = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SeverityOverride(Base):
+    """Severity override model for finding severity adjustments."""
+    __tablename__ = "severity_overrides"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    finding_id = Column(Integer, ForeignKey("findings.id"), unique=True)
+    original_severity = Column(String(16))
+    new_severity = Column(String(16))
+    justification = Column(Text)
+    override_type = Column(String(32), default="manual")
+    created_by = Column(String(128))
+    approved_by = Column(String(128))
+    approval_status = Column(String(32), default="pending")
+    expires_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    finding = relationship("Finding")
+
+
+class PrivescPath(Base):
+    """Privilege escalation path model."""
+    __tablename__ = "privesc_paths"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    path_id = Column(String(64), unique=True)
+    scan_id = Column(UUID(as_uuid=True), ForeignKey("scans.scan_id"))
+    cloud_provider = Column(String(32))
+    account_id = Column(String(128))
+    source_principal_type = Column(String(64))
+    source_principal_arn = Column(String(512))
+    source_principal_name = Column(String(256))
+    target_principal_type = Column(String(64))
+    target_principal_arn = Column(String(512))
+    target_principal_name = Column(String(256))
+    escalation_method = Column(String(128))
+    escalation_details = Column(JSONB)
+    path_nodes = Column(JSONB)
+    path_edges = Column(JSONB)
+    risk_score = Column(Integer, default=0)
+    exploitability = Column(String(32), default="theoretical")
+    requires_conditions = Column(JSONB)
+    mitre_techniques = Column(JSONB)
+    poc_commands = Column(JSONB)
+    finding_ids = Column(JSONB)
+    status = Column(String(32), default="open")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ImdsCheck(Base):
+    """IMDS/Metadata checker model."""
+    __tablename__ = "imds_checks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    check_id = Column(String(64), unique=True)
+    scan_id = Column(UUID(as_uuid=True), ForeignKey("scans.scan_id"))
+    cloud_provider = Column(String(32))
+    account_id = Column(String(128))
+    region = Column(String(64))
+    instance_id = Column(String(128))
+    instance_name = Column(String(256))
+    imds_version = Column(String(16))
+    imds_v1_enabled = Column(Boolean, default=False)
+    imds_hop_limit = Column(Integer)
+    http_endpoint_enabled = Column(Boolean, default=True)
+    http_tokens_required = Column(Boolean, default=False)
+    ssrf_vulnerable = Column(Boolean, default=False)
+    container_credential_exposure = Column(Boolean, default=False)
+    ecs_task_role_exposed = Column(Boolean, default=False)
+    eks_pod_identity_exposed = Column(Boolean, default=False)
+    vulnerability_details = Column(JSONB)
+    risk_level = Column(String(16), default="medium")
+    finding_ids = Column(JSONB)
+    remediation_status = Column(String(32), default="pending")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CloudfoxResult(Base):
+    """CloudFox enumeration result model."""
+    __tablename__ = "cloudfox_results"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    result_id = Column(String(64), unique=True)
+    scan_id = Column(UUID(as_uuid=True), ForeignKey("scans.scan_id"))
+    cloud_provider = Column(String(32))
+    account_id = Column(String(128))
+    region = Column(String(64))
+    module_name = Column(String(64))
+    result_type = Column(String(64))
+    resource_arn = Column(String(512))
+    resource_name = Column(String(256))
+    finding_category = Column(String(64))
+    finding_details = Column(JSONB)
+    risk_level = Column(String(16), default="medium")
+    loot_file_path = Column(String(512))
+    raw_output = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PacuResult(Base):
+    """Pacu module execution result model."""
+    __tablename__ = "pacu_results"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    result_id = Column(String(64), unique=True)
+    scan_id = Column(UUID(as_uuid=True), ForeignKey("scans.scan_id"))
+    session_name = Column(String(128))
+    module_name = Column(String(128))
+    module_category = Column(String(64))
+    execution_status = Column(String(32))
+    target_account_id = Column(String(128))
+    target_region = Column(String(64))
+    resources_affected = Column(Integer, default=0)
+    permissions_used = Column(JSONB)
+    findings = Column(JSONB)
+    loot_data = Column(JSONB)
+    error_message = Column(Text)
+    execution_time_ms = Column(Integer)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class EnumerateIamResult(Base):
+    """enumerate-iam result model."""
+    __tablename__ = "enumerate_iam_results"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    result_id = Column(String(64), unique=True)
+    scan_id = Column(UUID(as_uuid=True), ForeignKey("scans.scan_id"))
+    account_id = Column(String(128))
+    principal_arn = Column(String(512))
+    principal_name = Column(String(256))
+    principal_type = Column(String(64))
+    enumeration_method = Column(String(64))
+    confirmed_permissions = Column(JSONB)
+    denied_permissions = Column(JSONB)
+    error_permissions = Column(JSONB)
+    permission_count = Column(Integer, default=0)
+    high_risk_permissions = Column(JSONB)
+    privesc_capable = Column(Boolean, default=False)
+    data_access_capable = Column(Boolean, default=False)
+    admin_capable = Column(Boolean, default=False)
+    enumeration_duration_ms = Column(Integer)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AssumedRoleMapping(Base):
+    """Assumed role mapping model for Neo4j visualization."""
+    __tablename__ = "assumed_role_mappings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    mapping_id = Column(String(64), unique=True)
+    scan_id = Column(UUID(as_uuid=True), ForeignKey("scans.scan_id"))
+    cloud_provider = Column(String(32))
+    account_id = Column(String(128))
+    source_principal_type = Column(String(64))
+    source_principal_arn = Column(String(512))
+    source_principal_name = Column(String(256))
+    source_account_id = Column(String(128))
+    target_role_arn = Column(String(512))
+    target_role_name = Column(String(256))
+    target_account_id = Column(String(128))
+    trust_policy = Column(JSONB)
+    conditions = Column(JSONB)
+    is_cross_account = Column(Boolean, default=False)
+    is_external_id_required = Column(Boolean, default=False)
+    external_id_value = Column(String(256))
+    max_session_duration = Column(Integer)
+    assumption_chain_depth = Column(Integer, default=1)
+    risk_level = Column(String(16), default="medium")
+    neo4j_synced = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class LambdaAnalysis(Base):
+    """Lambda code analysis result model."""
+    __tablename__ = "lambda_analysis"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    analysis_id = Column(String(64), unique=True)
+    scan_id = Column(UUID(as_uuid=True), ForeignKey("scans.scan_id"))
+    cloud_provider = Column(String(32), default="aws")
+    account_id = Column(String(128))
+    region = Column(String(64))
+    function_arn = Column(String(512))
+    function_name = Column(String(256))
+    runtime = Column(String(64))
+    handler = Column(String(256))
+    code_size_bytes = Column(Integer)
+    memory_size = Column(Integer)
+    timeout_seconds = Column(Integer)
+    environment_variables = Column(JSONB)
+    has_vpc_config = Column(Boolean, default=False)
+    layers = Column(JSONB)
+    secrets_found = Column(JSONB)
+    hardcoded_credentials = Column(JSONB)
+    vulnerable_dependencies = Column(JSONB)
+    insecure_patterns = Column(JSONB)
+    api_keys_exposed = Column(JSONB)
+    database_connections = Column(JSONB)
+    external_urls = Column(JSONB)
+    risk_score = Column(Integer, default=0)
+    risk_level = Column(String(16), default="medium")
+    finding_ids = Column(JSONB)
+    analysis_status = Column(String(32), default="pending")
+    analysis_error = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ToolExecution(Base):
+    """Tool execution tracking model for async container runs."""
+    __tablename__ = "tool_executions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    execution_id = Column(String(64), unique=True)
+    tool_name = Column(String(64))
+    tool_type = Column(String(32))
+    status = Column(String(32), default="pending")
+    container_id = Column(String(128))
+    config = Column(JSONB, default={})
+    output_path = Column(String(512))
+    error_message = Column(Text)
+    exit_code = Column(Integer)
+    started_at = Column(DateTime)
+    completed_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class UserSetting(Base):
+    """User settings model for application preferences."""
+    __tablename__ = "user_settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    setting_key = Column(String(128), unique=True, nullable=False)
+    setting_value = Column(JSONB, nullable=False)
+    category = Column(String(64), nullable=False)
+    description = Column(Text)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CredentialStatusCache(Base):
+    """Credential status cache for quick status display."""
+    __tablename__ = "credential_status_cache"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    provider = Column(String(32), unique=True, nullable=False)
+    status = Column(String(32), nullable=False, default="unknown")
+    identity = Column(String(256))
+    account_info = Column(String(256))
+    tools_ready = Column(JSONB, default=[])
+    tools_partial = Column(JSONB, default=[])
+    tools_failed = Column(JSONB, default=[])
+    last_verified = Column(DateTime)
+    verification_error = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
