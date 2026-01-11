@@ -33,7 +33,10 @@
       :page-size="findingsStore.pageSize"
       :loading="findingsStore.loading"
       :has-filters="findingsStore.hasFilters"
+      :sort-field="findingsStore.sortBy"
+      :sort-order="findingsStore.sortOrder === 'asc' ? 1 : -1"
       @page-change="handlePageChange"
+      @sort-change="handleSortChange"
     />
   </div>
 </template>
@@ -66,6 +69,11 @@ const handlePageChange = ({ page, pageSize }) => {
   loadFindings()
 }
 
+const handleSortChange = ({ field, order }) => {
+  findingsStore.setSort(field, order)
+  loadFindings()
+}
+
 const exportCsv = () => {
   // Build export URL with current filters
   const params = new URLSearchParams()
@@ -82,7 +90,10 @@ const exportCsv = () => {
 }
 
 // Handle query params for filtering
-onMounted(() => {
+onMounted(async () => {
+  // Fetch summary first to populate filter options (tools, providers)
+  await findingsStore.fetchSummary()
+
   // Check for severity filter in query params (from dashboard click)
   if (route.query.severity) {
     findingsStore.setFilter('severity', route.query.severity)

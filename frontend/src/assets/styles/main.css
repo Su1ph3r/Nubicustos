@@ -518,6 +518,123 @@ input:focus, select:focus, textarea:focus {
 }
 
 /* ============================================================================
+   InputSwitch Fixes
+   ============================================================================ */
+
+.p-inputswitch {
+  width: 2.75rem !important;
+  height: 1.5rem !important;
+}
+
+.p-inputswitch .p-inputswitch-slider {
+  background: var(--bg-tertiary) !important;
+  border-radius: var(--radius-full) !important;
+  transition: all var(--transition-normal) !important;
+}
+
+.p-inputswitch .p-inputswitch-slider:before {
+  background: var(--text-secondary) !important;
+  width: 1.125rem !important;
+  height: 1.125rem !important;
+  left: 0.1875rem !important;
+  margin-top: -0.5625rem !important;
+  border-radius: 50% !important;
+  transition: all var(--transition-normal) !important;
+}
+
+.p-inputswitch.p-inputswitch-checked .p-inputswitch-slider {
+  background: var(--accent-primary) !important;
+}
+
+.p-inputswitch.p-inputswitch-checked .p-inputswitch-slider:before {
+  background: white !important;
+  transform: translateX(1.25rem) !important;
+}
+
+.p-inputswitch:not(.p-disabled):hover .p-inputswitch-slider {
+  background: var(--border-color-light) !important;
+}
+
+.p-inputswitch.p-inputswitch-checked:not(.p-disabled):hover .p-inputswitch-slider {
+  background: var(--accent-primary-hover) !important;
+}
+
+/* ============================================================================
+   Pagination Z-index Fix
+   ============================================================================ */
+
+.pagination-container {
+  position: relative;
+  z-index: 10;
+}
+
+/* ============================================================================
+   Severity Badge Classes (for FindingsTable)
+   ============================================================================ */
+
+.severity-badge.critical {
+  background: var(--severity-critical-bg);
+  color: var(--severity-critical);
+  border-color: var(--severity-critical-border);
+}
+
+.severity-badge.high {
+  background: var(--severity-high-bg);
+  color: var(--severity-high);
+  border-color: var(--severity-high-border);
+}
+
+.severity-badge.medium {
+  background: var(--severity-medium-bg);
+  color: var(--severity-medium);
+  border-color: var(--severity-medium-border);
+}
+
+.severity-badge.low {
+  background: var(--severity-low-bg);
+  color: var(--severity-low);
+  border-color: var(--severity-low-border);
+}
+
+.severity-badge.info {
+  background: var(--severity-info-bg);
+  color: var(--severity-info);
+  border-color: var(--severity-info-border);
+}
+
+/* ============================================================================
+   TabView Styling
+   ============================================================================ */
+
+.p-tabview .p-tabview-nav {
+  background: var(--bg-secondary) !important;
+  border: none !important;
+}
+
+.p-tabview .p-tabview-nav li .p-tabview-nav-link {
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 2px solid transparent !important;
+  color: var(--text-secondary) !important;
+  font-weight: 500 !important;
+  padding: var(--spacing-md) var(--spacing-lg) !important;
+}
+
+.p-tabview .p-tabview-nav li.p-highlight .p-tabview-nav-link {
+  color: var(--accent-primary) !important;
+  border-bottom-color: var(--accent-primary) !important;
+}
+
+.p-tabview .p-tabview-nav li .p-tabview-nav-link:hover {
+  color: var(--text-primary) !important;
+}
+
+.p-tabview .p-tabview-panels {
+  background: transparent !important;
+  padding: var(--spacing-lg) 0 !important;
+}
+
+/* ============================================================================
    Responsive Utilities
    ============================================================================ */
 

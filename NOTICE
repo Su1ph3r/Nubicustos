@@ -1,0 +1,228 @@
+NOTICE
+
+Nubicustos - Cloud Security Guardian
+Copyright 2024 Cloud Security Audit Stack Contributors
+
+This project is licensed under the MIT License.
+
+================================================================================
+THIRD-PARTY SOFTWARE NOTICES AND ATTRIBUTIONS
+================================================================================
+
+Nubicustos integrates with and orchestrates the following open-source security
+tools. Each tool is used via its official Docker image and retains its original
+license. Nubicustos does not modify these tools.
+
+--------------------------------------------------------------------------------
+CLOUD SECURITY TOOLS
+--------------------------------------------------------------------------------
+
+Prowler
+  Repository: https://github.com/prowler-cloud/prowler
+  License: Apache License 2.0
+  Copyright: Prowler Cloud Security
+
+ScoutSuite
+  Repository: https://github.com/nccgroup/ScoutSuite
+  License: GNU General Public License v2.0 (GPL-2.0)
+  Copyright: NCC Group
+
+  NOTE: ScoutSuite uses GPL-2.0 which requires that derivative works also be
+  licensed under GPL-2.0. Since Nubicustos merely orchestrates ScoutSuite via
+  Docker without modifying its source code, this does not create a derivative
+  work. However, users should be aware of GPL-2.0 requirements when using
+  ScoutSuite directly.
+
+Pacu
+  Repository: https://github.com/RhinoSecurityLabs/pacu
+  License: BSD 3-Clause License
+  Copyright: Rhino Security Labs
+
+CloudSploit
+  Repository: https://github.com/aquasecurity/cloudsploit
+  License: GNU General Public License v3.0 (GPL-3.0)
+  Copyright: Aqua Security Software Ltd.
+
+Cloud Custodian
+  Repository: https://github.com/cloud-custodian/cloud-custodian
+  License: Apache License 2.0
+  Copyright: Cloud Custodian Contributors
+
+Cartography
+  Repository: https://github.com/lyft/cartography
+  License: Apache License 2.0
+  Copyright: Lyft, Inc.
+
+--------------------------------------------------------------------------------
+KUBERNETES SECURITY TOOLS
+--------------------------------------------------------------------------------
+
+kube-bench
+  Repository: https://github.com/aquasecurity/kube-bench
+  License: Apache License 2.0
+  Copyright: Aqua Security Software Ltd.
+
+Kubescape
+  Repository: https://github.com/kubescape/kubescape
+  License: Apache License 2.0
+  Copyright: ARMO
+
+kube-hunter
+  Repository: https://github.com/aquasecurity/kube-hunter
+  License: Apache License 2.0
+  Copyright: Aqua Security Software Ltd.
+
+kube-linter
+  Repository: https://github.com/stackrox/kube-linter
+  License: Apache License 2.0
+  Copyright: Red Hat, Inc.
+
+Polaris
+  Repository: https://github.com/FairwindsOps/polaris
+  License: Apache License 2.0
+  Copyright: Fairwinds Ops, Inc.
+
+Trivy
+  Repository: https://github.com/aquasecurity/trivy
+  License: Apache License 2.0
+  Copyright: Aqua Security Software Ltd.
+
+Grype
+  Repository: https://github.com/anchore/grype
+  License: Apache License 2.0
+  Copyright: Anchore, Inc.
+
+Popeye
+  Repository: https://github.com/derailed/popeye
+  License: Apache License 2.0
+  Copyright: Fernand Galiana
+
+Falco
+  Repository: https://github.com/falcosecurity/falco
+  License: Apache License 2.0
+  Copyright: The Falco Authors
+
+--------------------------------------------------------------------------------
+INFRASTRUCTURE-AS-CODE SECURITY TOOLS
+--------------------------------------------------------------------------------
+
+Checkov
+  Repository: https://github.com/bridgecrewio/checkov
+  License: Apache License 2.0
+  Copyright: Bridgecrew
+
+Terrascan
+  Repository: https://github.com/tenable/terrascan
+  License: Apache License 2.0
+  Copyright: Tenable, Inc.
+
+tfsec
+  Repository: https://github.com/aquasecurity/tfsec
+  License: MIT License
+  Copyright: Aqua Security Software Ltd.
+
+--------------------------------------------------------------------------------
+INFRASTRUCTURE COMPONENTS
+--------------------------------------------------------------------------------
+
+PostgreSQL
+  Website: https://www.postgresql.org/
+  License: PostgreSQL License (similar to BSD/MIT)
+  Copyright: PostgreSQL Global Development Group
+
+Neo4j Community Edition
+  Website: https://neo4j.com/
+  License: GNU General Public License v3.0 (GPL-3.0)
+  Copyright: Neo4j, Inc.
+
+Nginx
+  Website: https://nginx.org/
+  License: BSD 2-Clause License
+  Copyright: Nginx, Inc.
+
+Grafana
+  Website: https://grafana.com/
+  License: GNU Affero General Public License v3.0 (AGPL-3.0)
+  Copyright: Grafana Labs
+
+  NOTE: Grafana is AGPL-3.0 licensed. Using the official Docker image for
+  visualization purposes does not require licensing your project under AGPL.
+
+--------------------------------------------------------------------------------
+PYTHON DEPENDENCIES (API and Report Processor)
+--------------------------------------------------------------------------------
+
+FastAPI
+  License: MIT License
+  Repository: https://github.com/tiangolo/fastapi
+
+SQLAlchemy
+  License: MIT License
+  Repository: https://github.com/sqlalchemy/sqlalchemy
+
+Pydantic
+  License: MIT License
+  Repository: https://github.com/pydantic/pydantic
+
+Pandas
+  License: BSD 3-Clause License
+  Repository: https://github.com/pandas-dev/pandas
+
+Boto3
+  License: Apache License 2.0
+  Repository: https://github.com/boto/boto3
+
+psycopg2
+  License: LGPL with exceptions (allows proprietary use)
+  Repository: https://github.com/psycopg/psycopg2
+
+--------------------------------------------------------------------------------
+FRONTEND DEPENDENCIES
+--------------------------------------------------------------------------------
+
+Vue.js
+  License: MIT License
+  Repository: https://github.com/vuejs/vue
+
+PrimeVue
+  License: MIT License
+  Repository: https://github.com/primefaces/primevue
+
+Chart.js
+  License: MIT License
+  Repository: https://github.com/chartjs/Chart.js
+
+Vite
+  License: MIT License
+  Repository: https://github.com/vitejs/vite
+
+================================================================================
+LICENSE COMPATIBILITY NOTES
+================================================================================
+
+1. MIT License (Nubicustos)
+   - Highly permissive, compatible with almost all open-source licenses
+   - Allows commercial use, modification, and distribution
+
+2. GPL-Licensed Tools (ScoutSuite GPL-2.0, CloudSploit GPL-3.0, Neo4j GPL-3.0)
+   - These tools are used via Docker orchestration, not embedded or modified
+   - Docker container isolation maintains license separation
+   - Users who modify these tools directly must comply with GPL requirements
+
+3. AGPL-Licensed Tools (Grafana AGPL-3.0)
+   - Used as a standalone visualization service
+   - Network use does not trigger AGPL distribution requirements for Nubicustos
+   - Users modifying Grafana itself must comply with AGPL
+
+4. Apache 2.0 Licensed Tools (majority)
+   - Fully compatible with MIT License
+   - Patent grant included
+   - Requires preservation of copyright notices
+
+================================================================================
+
+For complete license texts, please refer to the LICENSE files in each tool's
+respective repository or Docker image.
+
+If you have questions about licensing or attribution, please open an issue on
+the Nubicustos GitHub repository.

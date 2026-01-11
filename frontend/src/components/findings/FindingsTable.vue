@@ -6,6 +6,8 @@
       :rows="pageSize"
       :totalRecords="total"
       :lazy="true"
+      :sortField="sortField"
+      :sortOrder="sortOrder"
       v-model:expandedRows="expandedRows"
       dataKey="id"
       @page="onPage"
@@ -134,6 +136,14 @@ const props = defineProps({
   hasFilters: {
     type: Boolean,
     default: false
+  },
+  sortField: {
+    type: String,
+    default: 'risk_score'
+  },
+  sortOrder: {
+    type: Number,
+    default: -1  // -1 for descending, 1 for ascending
   }
 })
 

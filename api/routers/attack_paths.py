@@ -1,28 +1,49 @@
-"""Attack paths API endpoints."""
-import time
-import subprocess
-import sys
-import os
-from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks
-from sqlalchemy.orm import Session
-from sqlalchemy import func, desc
-from typing import Optional, List
-from uuid import UUID
-from collections import defaultdict
+"""
+Attack Paths API Endpoints.
 
-from models.database import get_db, AttackPath, Finding
+This module provides endpoints for discovering and managing attack paths.
+Attack paths represent chains of vulnerabilities that an attacker could
+exploit to achieve specific objectives (data exfiltration, privilege
+escalation, account takeover, etc.).
+
+Attack path analysis uses:
+- Security findings from scanning tools as graph edges
+- BFS pathfinding from entry points to target objectives
+- CVSS-inspired risk scoring (0-100)
+- MITRE ATT&CK mapping for tactics and techniques
+
+Endpoints:
+    GET /attack-paths - List attack paths with filters
+    GET /attack-paths/summary - Get attack path statistics
+    GET /attack-paths/{path_id} - Get path details
+    POST /attack-paths/analyze - Trigger path analysis
+    GET /attack-paths/{path_id}/findings - Get related findings
+    GET /attack-paths/{path_id}/export - Export path as markdown/JSON
+    DELETE /attack-paths/{path_id} - Delete an attack path
+"""
+import sys
+import time
+from collections import defaultdict
+from typing import Any, List, Optional
+from uuid import UUID
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from sqlalchemy import desc, func
+from sqlalchemy.orm import Session
+
+from models.database import AttackPath, Finding, get_db
 from models.schemas import (
-    AttackPathResponse,
-    AttackPathListResponse,
-    AttackPathSummary,
     AttackPathAnalyzeRequest,
     AttackPathAnalyzeResponse,
-    AttackPathNode,
     AttackPathEdge,
+    AttackPathListResponse,
+    AttackPathNode,
+    AttackPathResponse,
+    AttackPathSummary,
     PoCStep,
 )
 
-router = APIRouter(prefix="/attack-paths", tags=["Attack Paths"])
+router: APIRouter = APIRouter(prefix="/attack-paths", tags=["Attack Paths"])
 
 
 def _convert_path_to_response(path: AttackPath) -> AttackPathResponse:
@@ -81,7 +102,24 @@ async def list_attack_paths(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page")
 ):
-    """List attack paths with optional filters."""
+    """
+    List attack paths with optional filters and pagination.
+
+    Returns discovered attack paths ordered by risk score (highest first).
+
+    Args:
+        min_risk_score: Minimum risk score filter (0-100)
+        max_risk_score: Maximum risk score filter (0-100)
+        exploitability: Filter by exploitability level
+        entry_point_type: Filter by entry point (public_s3, public_ec2, etc.)
+        target_type: Filter by target (account_takeover, data_exfiltration, etc.)
+        scan_id: Filter by specific scan UUID
+        page: Page number (1-indexed)
+        page_size: Items per page (1-100)
+
+    Returns:
+        AttackPathListResponse: Paginated list of attack paths
+    """
     query = db.query(AttackPath)
 
     # Apply filters
@@ -122,7 +160,15 @@ async def list_attack_paths(
 
 @router.get("/summary", response_model=AttackPathSummary)
 async def get_attack_paths_summary(db: Session = Depends(get_db)):
-    """Get summary statistics for attack paths."""
+    """
+    Get summary statistics for attack paths.
+
+    Returns aggregated statistics including counts by risk level,
+    entry point types, target types, and top MITRE ATT&CK tactics.
+
+    Returns:
+        AttackPathSummary: Aggregated attack path statistics
+    """
     # Count by risk level
     total = db.query(AttackPath).count()
     critical = db.query(AttackPath).filter(AttackPath.risk_score >= 80).count()
@@ -177,7 +223,21 @@ async def get_attack_path(
     path_id: int,
     db: Session = Depends(get_db)
 ):
-    """Get a specific attack path by ID."""
+    """
+    Get a specific attack path by database ID.
+
+    Returns complete attack path details including nodes, edges,
+    PoC steps, and MITRE ATT&CK mappings.
+
+    Args:
+        path_id: Database ID of the attack path
+
+    Returns:
+        AttackPathResponse: Complete attack path details
+
+    Raises:
+        HTTPException 404: If attack path is not found
+    """
     path = db.query(AttackPath).filter(AttackPath.id == path_id).first()
 
     if not path:
@@ -191,7 +251,21 @@ async def get_attack_path_by_path_id(
     path_id: str,
     db: Session = Depends(get_db)
 ):
-    """Get a specific attack path by its path_id hash."""
+    """
+    Get a specific attack path by its unique path_id hash.
+
+    The path_id is a deterministic hash of the path structure,
+    allowing stable references across analysis runs.
+
+    Args:
+        path_id: The 16-character path hash
+
+    Returns:
+        AttackPathResponse: Complete attack path details
+
+    Raises:
+        HTTPException 404: If attack path is not found
+    """
     path = db.query(AttackPath).filter(AttackPath.path_id == path_id).first()
 
     if not path:
@@ -273,7 +347,20 @@ async def get_path_findings(
     path_id: int,
     db: Session = Depends(get_db)
 ):
-    """Get all findings associated with an attack path."""
+    """
+    Get all findings associated with an attack path.
+
+    Returns the security findings that form the edges of this attack path.
+
+    Args:
+        path_id: Database ID of the attack path
+
+    Returns:
+        List[dict]: Related findings with key details
+
+    Raises:
+        HTTPException 404: If attack path is not found
+    """
     path = db.query(AttackPath).filter(AttackPath.id == path_id).first()
 
     if not path:
@@ -304,7 +391,21 @@ async def delete_attack_path(
     path_id: int,
     db: Session = Depends(get_db)
 ):
-    """Delete an attack path."""
+    """
+    Delete an attack path.
+
+    Removes an attack path from the database. Use this for cleanup
+    or when paths are no longer relevant.
+
+    Args:
+        path_id: Database ID of the attack path to delete
+
+    Returns:
+        dict: Confirmation message
+
+    Raises:
+        HTTPException 404: If attack path is not found
+    """
     path = db.query(AttackPath).filter(AttackPath.id == path_id).first()
 
     if not path:
@@ -322,7 +423,22 @@ async def export_attack_path(
     format: str = Query("markdown", description="Export format: markdown, json"),
     db: Session = Depends(get_db)
 ):
-    """Export an attack path in various formats for reporting."""
+    """
+    Export an attack path in various formats for reporting.
+
+    Generates a formatted report of the attack path suitable for
+    penetration testing reports, security reviews, or documentation.
+
+    Args:
+        path_id: Database ID of the attack path
+        format: Output format (markdown or json)
+
+    Returns:
+        dict or AttackPathResponse: Formatted export content
+
+    Raises:
+        HTTPException 404: If attack path is not found
+    """
     path = db.query(AttackPath).filter(AttackPath.id == path_id).first()
 
     if not path:

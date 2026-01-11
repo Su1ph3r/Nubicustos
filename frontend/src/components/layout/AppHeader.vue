@@ -34,6 +34,65 @@
           <i class="pi pi-sitemap"></i>
           <span>Attack Paths</span>
         </router-link>
+        <div class="nav-dropdown" @mouseenter="showPentestMenu = true" @mouseleave="showPentestMenu = false">
+          <button class="nav-link" :class="{ active: isPentestRouteActive }">
+            <i class="pi pi-shield"></i>
+            <span>Pentest</span>
+            <i class="pi pi-chevron-down dropdown-arrow"></i>
+          </button>
+          <div v-if="showPentestMenu" class="dropdown-menu">
+            <router-link to="/public-exposures" class="dropdown-item">
+              <i class="pi pi-globe"></i> Public Exposures
+            </router-link>
+            <router-link to="/exposed-credentials" class="dropdown-item">
+              <i class="pi pi-key"></i> Exposed Credentials
+            </router-link>
+            <router-link to="/severity-overrides" class="dropdown-item">
+              <i class="pi pi-sliders-h"></i> Severity Overrides
+            </router-link>
+            <router-link to="/privesc-paths" class="dropdown-item">
+              <i class="pi pi-arrow-up-right"></i> Privesc Paths
+            </router-link>
+            <router-link to="/imds-checks" class="dropdown-item">
+              <i class="pi pi-server"></i> IMDS Checks
+            </router-link>
+            <div class="dropdown-divider"></div>
+            <router-link to="/cloudfox" class="dropdown-item">
+              <i class="pi pi-search"></i> CloudFox
+            </router-link>
+            <router-link to="/pacu" class="dropdown-item">
+              <i class="pi pi-bolt"></i> Pacu
+            </router-link>
+            <router-link to="/enumerate-iam" class="dropdown-item">
+              <i class="pi pi-id-card"></i> enumerate-iam
+            </router-link>
+            <div class="dropdown-divider"></div>
+            <router-link to="/assumed-roles" class="dropdown-item">
+              <i class="pi pi-share-alt"></i> Assumed Roles
+            </router-link>
+            <router-link to="/lambda-analysis" class="dropdown-item">
+              <i class="pi pi-code"></i> Lambda Analysis
+            </router-link>
+          </div>
+        </div>
+        <div class="nav-dropdown" @mouseenter="showConfigMenu = true" @mouseleave="showConfigMenu = false">
+          <button class="nav-link" :class="{ active: isConfigRouteActive }">
+            <i class="pi pi-cog"></i>
+            <span>Configuration</span>
+            <i class="pi pi-chevron-down dropdown-arrow"></i>
+          </button>
+          <div v-if="showConfigMenu" class="dropdown-menu">
+            <router-link to="/scans" class="dropdown-item">
+              <i class="pi pi-play"></i> Scans
+            </router-link>
+            <router-link to="/credentials" class="dropdown-item">
+              <i class="pi pi-key"></i> Credentials
+            </router-link>
+            <router-link to="/settings" class="dropdown-item">
+              <i class="pi pi-sliders-h"></i> Settings
+            </router-link>
+          </div>
+        </div>
         <a href="/reports/" class="nav-link" target="_blank" rel="noopener">
           <i class="pi pi-folder"></i>
           <span>Reports</span>
@@ -63,12 +122,43 @@
 
 <script setup>
 import { ref, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import { useThemeStore } from '../../stores/theme'
 
+const route = useRoute()
 const toast = useToast()
 const themeStore = useThemeStore()
 const selectedExport = ref(null)
+const showPentestMenu = ref(false)
+const showConfigMenu = ref(false)
+
+const pentestRoutes = [
+  '/public-exposures',
+  '/exposed-credentials',
+  '/severity-overrides',
+  '/privesc-paths',
+  '/imds-checks',
+  '/cloudfox',
+  '/pacu',
+  '/enumerate-iam',
+  '/assumed-roles',
+  '/lambda-analysis'
+]
+
+const configRoutes = [
+  '/scans',
+  '/credentials',
+  '/settings'
+]
+
+const isPentestRouteActive = computed(() => {
+  return pentestRoutes.some(r => route.path.startsWith(r))
+})
+
+const isConfigRouteActive = computed(() => {
+  return configRoutes.some(r => route.path.startsWith(r))
+})
 
 const exportOptions = [
   { label: 'Export CSV', value: 'csv' },
@@ -189,6 +279,61 @@ const handleExport = (event) => {
 
 .nav-link i {
   font-size: 1rem;
+}
+
+.nav-dropdown {
+  position: relative;
+}
+
+.nav-dropdown .nav-link {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.dropdown-arrow {
+  font-size: 0.75rem;
+  margin-left: 0.25rem;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  background: var(--surface-card);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  min-width: 200px;
+  padding: 0.5rem 0;
+  z-index: 1000;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  color: var(--text-color);
+  text-decoration: none;
+  font-size: 0.875rem;
+  transition: background-color 0.15s;
+}
+
+.dropdown-item:hover {
+  background: var(--surface-hover);
+}
+
+.dropdown-item i {
+  font-size: 0.875rem;
+  width: 1rem;
+  text-align: center;
+}
+
+.dropdown-divider {
+  height: 1px;
+  background: var(--surface-border);
+  margin: 0.5rem 0;
 }
 
 .header-actions {

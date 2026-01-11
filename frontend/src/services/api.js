@@ -55,6 +55,8 @@ export const api = {
     if (params.cloud_provider) searchParams.set('cloud_provider', params.cloud_provider)
     if (params.resource_type) searchParams.set('resource_type', params.resource_type)
     if (params.search) searchParams.set('search', params.search)
+    if (params.sort_by) searchParams.set('sort_by', params.sort_by)
+    if (params.sort_order) searchParams.set('sort_order', params.sort_order)
 
     const query = searchParams.toString()
     return request(`/findings${query ? `?${query}` : ''}`)
