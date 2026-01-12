@@ -1,6 +1,7 @@
 # CloudMapper Dockerfile - Optimized with multi-stage build
 # Stage 1: Build stage
-FROM python:3.11.9-slim-bookworm AS builder
+# Using Python 3.9 for compatibility with CloudMapper's older dependencies
+FROM python:3.9-slim-bookworm AS builder
 
 LABEL org.opencontainers.image.title="Nubicustos CloudMapper"
 LABEL org.opencontainers.image.description="AWS infrastructure visualization for Nubicustos"
@@ -16,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     automake \
     libtool \
     gcc \
+    make \
     && rm -rf /var/lib/apt/lists/*
 
 # Clone CloudMapper and build wheels
@@ -23,7 +25,7 @@ RUN git clone --depth 1 https://github.com/duo-labs/cloudmapper.git . \
     && pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
 
 # Stage 2: Production stage
-FROM python:3.11.9-slim-bookworm AS production
+FROM python:3.9-slim-bookworm AS production
 
 WORKDIR /opt/cloudmapper
 

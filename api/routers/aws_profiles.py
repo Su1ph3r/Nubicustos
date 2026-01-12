@@ -32,6 +32,16 @@ class AWSProfileCredentials(BaseModel):
     region: str | None = None
 
 
+class SaveProfileRequest(BaseModel):
+    """Request to save a new profile."""
+
+    profile_name: str
+    access_key_id: str
+    secret_access_key: str
+    session_token: str | None = None
+    region: str | None = None
+
+
 class ProfileListResponse(BaseModel):
     """Response for listing profiles."""
 
@@ -212,3 +222,114 @@ async def verify_profile(profile_name: str):
         }
     except Exception as e:
         return {"valid": False, "profile": profile_name, "error": "Unknown", "message": str(e)}
+
+
+def _write_credentials_file(config: configparser.ConfigParser) -> None:
+    """Write AWS credentials file."""
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(AWS_CREDENTIALS_PATH), exist_ok=True)
+    with open(AWS_CREDENTIALS_PATH, "w") as f:
+        config.write(f)
+
+
+def _write_config_file(config: configparser.ConfigParser) -> None:
+    """Write AWS config file."""
+    os.makedirs(os.path.dirname(AWS_CONFIG_PATH), exist_ok=True)
+    with open(AWS_CONFIG_PATH, "w") as f:
+        config.write(f)
+
+
+@router.post("")
+@router.post("/")
+async def save_profile(request: SaveProfileRequest):
+    """
+    Save credentials as a new AWS profile.
+
+    This writes the credentials to the AWS credentials file so they persist
+    and can be selected as a profile for future scans.
+    """
+    import boto3
+    from botocore.exceptions import ClientError, NoCredentialsError
+
+    profile_name = request.profile_name.strip()
+    if not profile_name:
+        raise HTTPException(status_code=400, detail="Profile name is required")
+
+    # Validate the credentials first
+    try:
+        session = boto3.Session(
+            aws_access_key_id=request.access_key_id,
+            aws_secret_access_key=request.secret_access_key,
+            aws_session_token=request.session_token,
+            region_name=request.region or "us-east-1",
+        )
+        sts = session.client("sts")
+        identity = sts.get_caller_identity()
+    except (ClientError, NoCredentialsError) as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid credentials: {str(e)}"
+        )
+
+    # Read existing credentials file
+    credentials = _read_credentials_file()
+
+    # Add or update the profile
+    if not credentials.has_section(profile_name):
+        credentials.add_section(profile_name)
+
+    credentials.set(profile_name, "aws_access_key_id", request.access_key_id)
+    credentials.set(profile_name, "aws_secret_access_key", request.secret_access_key)
+
+    if request.session_token:
+        credentials.set(profile_name, "aws_session_token", request.session_token)
+    elif credentials.has_option(profile_name, "aws_session_token"):
+        credentials.remove_option(profile_name, "aws_session_token")
+
+    # Write credentials file
+    _write_credentials_file(credentials)
+
+    # If region is specified, write to config file
+    if request.region:
+        config = _read_config_file()
+        section_name = "default" if profile_name == "default" else f"profile {profile_name}"
+
+        if not config.has_section(section_name):
+            config.add_section(section_name)
+
+        config.set(section_name, "region", request.region)
+        _write_config_file(config)
+
+    return {
+        "success": True,
+        "profile": profile_name,
+        "account": identity.get("Account"),
+        "arn": identity.get("Arn"),
+        "message": f"Profile '{profile_name}' saved successfully",
+    }
+
+
+@router.delete("/{profile_name}")
+async def delete_profile(profile_name: str):
+    """
+    Delete an AWS profile from the credentials file.
+    """
+    credentials = _read_credentials_file()
+
+    if not credentials.has_section(profile_name):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile_name}' not found")
+
+    credentials.remove_section(profile_name)
+    _write_credentials_file(credentials)
+
+    # Also remove from config file if present
+    config = _read_config_file()
+    section_name = "default" if profile_name == "default" else f"profile {profile_name}"
+    if config.has_section(section_name):
+        config.remove_section(section_name)
+        _write_config_file(config)
+
+    return {
+        "success": True,
+        "message": f"Profile '{profile_name}' deleted",
+    }

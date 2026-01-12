@@ -1784,6 +1784,7 @@ class ReportProcessor:
 
 if __name__ == "__main__":
     import argparse
+    import time
 
     parser = argparse.ArgumentParser(description="Process security scan reports")
     parser.add_argument(
@@ -1794,12 +1795,21 @@ if __name__ == "__main__":
         dest="tools",
         help="Comma-separated list of tools to process (e.g., prowler,scoutsuite)",
     )
+    parser.add_argument(
+        "--auto-process",
+        dest="auto_process",
+        action="store_true",
+        help="Auto-process all existing reports on startup",
+    )
     args = parser.parse_args()
 
     # Also check environment variables (for container deployment)
     scan_id = args.scan_id or os.environ.get("ORCHESTRATION_SCAN_ID")
     tools_str = args.tools or os.environ.get("TOOLS_TO_PROCESS")
     tools = tools_str.split(",") if tools_str else None
+
+    # Check if auto-processing is enabled (default: disabled)
+    auto_process = args.auto_process or os.environ.get("AUTO_PROCESS", "false").lower() == "true"
 
     processor = ReportProcessor()
 
@@ -1808,6 +1818,14 @@ if __name__ == "__main__":
         logger.info(f"Processing reports for orchestration scan: {scan_id}")
         total = processor.process_for_scan(scan_id, tools)
         logger.info(f"Completed: {total} findings linked to scan {scan_id}")
-    else:
-        # Default: run full processing loop
+    elif auto_process:
+        # Run full processing loop only if explicitly enabled
+        logger.info("Auto-processing enabled, running full report processing")
         processor.run()
+    else:
+        # Default: wait for explicit triggers (scans will trigger processing via API)
+        logger.info("Report processor started in standby mode (AUTO_PROCESS=false)")
+        logger.info("Processing will be triggered by scan completions via API")
+        # Keep container alive but don't auto-process
+        while True:
+            time.sleep(3600)  # Sleep for 1 hour, wake up to check for signals

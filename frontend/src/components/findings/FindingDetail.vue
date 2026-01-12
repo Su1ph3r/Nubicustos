@@ -129,9 +129,21 @@
       </div>
     </div>
 
+    <!-- Verification Command Section (above PoC Evidence) -->
+    <div
+      v-if="finding.poc_verification"
+      class="detail-section"
+    >
+      <h4>
+        <i class="pi pi-terminal" />
+        Verification Command
+      </h4>
+      <VerificationCommand :finding="finding" />
+    </div>
+
     <!-- PoC Evidence Section -->
     <div
-      v-if="hasPocEvidence"
+      v-if="hasPocEvidenceOnly"
       class="detail-section"
     >
       <h4>
@@ -204,6 +216,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import PocEvidence from './PocEvidence.vue'
+import VerificationCommand from './VerificationCommand.vue'
 import RemediationPanel from '../remediation/RemediationPanel.vue'
 
 const props = defineProps({
@@ -228,6 +241,12 @@ const toggleResourcePoc = (index) => {
 const hasPocEvidence = computed(() => {
   return props.finding.poc_evidence ||
          props.finding.poc_verification ||
+         props.finding.poc_screenshot_path
+})
+
+// PoC evidence without verification command (shown separately)
+const hasPocEvidenceOnly = computed(() => {
+  return props.finding.poc_evidence ||
          props.finding.poc_screenshot_path
 })
 

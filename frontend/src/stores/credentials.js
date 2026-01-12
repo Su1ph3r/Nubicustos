@@ -3,6 +3,21 @@ import { ref, computed } from 'vue'
 
 const API_BASE = '/api'
 
+// Event for credential status changes
+const credentialStatusCallbacks = []
+
+export function onCredentialStatusChange(callback) {
+  credentialStatusCallbacks.push(callback)
+  return () => {
+    const idx = credentialStatusCallbacks.indexOf(callback)
+    if (idx > -1) credentialStatusCallbacks.splice(idx, 1)
+  }
+}
+
+function notifyCredentialStatusChange() {
+  credentialStatusCallbacks.forEach(cb => cb())
+}
+
 export const useCredentialsStore = defineStore('credentials', () => {
   // State
   const verificationResult = ref(null)
@@ -178,6 +193,8 @@ export const useCredentialsStore = defineStore('credentials', () => {
   function setSessionCredentials(provider, credentials) {
     if (sessionCredentials.value.hasOwnProperty(provider)) {
       sessionCredentials.value[provider] = credentials
+      // Notify listeners that credential status has changed
+      notifyCredentialStatusChange()
     }
   }
 
@@ -261,6 +278,8 @@ export const useCredentialsStore = defineStore('credentials', () => {
           }
           // Persist the selected profile name in localStorage
           localStorage.setItem('selectedAwsProfile', profileName)
+          // Notify listeners that credential status has changed
+          notifyCredentialStatusChange()
         }
       } catch (e) {
         console.error('Error fetching profile credentials:', e)
@@ -276,6 +295,8 @@ export const useCredentialsStore = defineStore('credentials', () => {
     selectedAwsProfile.value = null
     sessionCredentials.value.aws = null
     localStorage.removeItem('selectedAwsProfile')
+    // Notify listeners that credential status has changed
+    notifyCredentialStatusChange()
   }
 
   // Restore persisted profile on init

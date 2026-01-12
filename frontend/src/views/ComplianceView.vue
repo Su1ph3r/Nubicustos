@@ -26,7 +26,7 @@
 
     <!-- Summary Cards -->
     <div
-      v-if="complianceStore.summary"
+      v-if="displayStats"
       class="summary-cards"
     >
       <div class="summary-card">
@@ -34,8 +34,8 @@
           <i class="pi pi-th-large" />
         </div>
         <div class="card-content">
-          <span class="card-value">{{ complianceStore.summary.frameworks_count }}</span>
-          <span class="card-label">Frameworks</span>
+          <span class="card-value">{{ displayStats.frameworks_count }}</span>
+          <span class="card-label">{{ complianceStore.selectedFramework ? 'Framework' : 'Frameworks' }}</span>
         </div>
       </div>
       <div class="summary-card">
@@ -43,7 +43,7 @@
           <i class="pi pi-check-square" />
         </div>
         <div class="card-content">
-          <span class="card-value">{{ complianceStore.summary.total_controls }}</span>
+          <span class="card-value">{{ displayStats.total_controls }}</span>
           <span class="card-label">Total Controls</span>
         </div>
       </div>
@@ -52,7 +52,7 @@
           <i class="pi pi-check-circle" />
         </div>
         <div class="card-content">
-          <span class="card-value">{{ complianceStore.summary.total_passed }}</span>
+          <span class="card-value">{{ displayStats.total_passed }}</span>
           <span class="card-label">Passed</span>
         </div>
       </div>
@@ -61,7 +61,7 @@
           <i class="pi pi-times-circle" />
         </div>
         <div class="card-content">
-          <span class="card-value">{{ complianceStore.summary.total_failed }}</span>
+          <span class="card-value">{{ displayStats.total_failed }}</span>
           <span class="card-label">Failed</span>
         </div>
       </div>
@@ -70,8 +70,8 @@
           <i class="pi pi-percentage" />
         </div>
         <div class="card-content">
-          <span class="card-value">{{ complianceStore.summary.overall_pass_percentage }}%</span>
-          <span class="card-label">Overall Pass Rate</span>
+          <span class="card-value">{{ displayStats.overall_pass_percentage }}%</span>
+          <span class="card-label">Pass Rate</span>
         </div>
       </div>
     </div>
@@ -168,6 +168,8 @@
         :rows="20"
         :rows-per-page-options="[10, 20, 50, 100]"
         class="controls-table"
+        :row-class="(data) => data.finding_count > 0 ? 'clickable-row' : ''"
+        @row-click="handleControlClick"
       >
         <Column
           field="control_id"
@@ -245,14 +247,36 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useComplianceStore } from '../stores/compliance'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import api from '../services/api'
 
+const router = useRouter()
 const complianceStore = useComplianceStore()
 const selectedFrameworkFilter = ref(null)
+
+// Computed stats for selected framework or overall summary
+const displayStats = computed(() => {
+  if (complianceStore.selectedFramework) {
+    // Find the framework data for the selected framework
+    const fw = complianceStore.frameworks.find(
+      f => f.framework === complianceStore.selectedFramework,
+    )
+    if (fw) {
+      return {
+        frameworks_count: 1,
+        total_controls: fw.controls_checked,
+        total_passed: fw.controls_passed,
+        total_failed: fw.controls_failed,
+        overall_pass_percentage: fw.pass_percentage,
+      }
+    }
+  }
+  return complianceStore.summary
+})
 
 const loadData = async () => {
   await complianceStore.fetchSummary()
@@ -287,6 +311,24 @@ const getSeverityColor = (severity) => {
     info: 'secondary',
   }
   return colors[severity?.toLowerCase()] || 'secondary'
+}
+
+// Handle control row click to show finding details
+const handleControlClick = (event) => {
+  const control = event.data
+  if (control?.finding_id) {
+    // Navigate to finding detail if finding_id exists
+    router.push(`/findings/${control.finding_id}`)
+  } else if (control?.finding_count > 0) {
+    // Otherwise navigate to findings filtered by control
+    router.push({
+      path: '/findings',
+      query: {
+        control_id: control.control_id,
+        framework: complianceStore.selectedFramework,
+      },
+    })
+  }
 }
 
 const exportCsv = () => {
@@ -473,6 +515,13 @@ onMounted(() => {
   min-width: 250px;
 }
 
+/* Fix dropdown clear button positioning */
+.framework-dropdown :deep(.p-dropdown-clear-icon) {
+  position: relative;
+  right: auto;
+  margin-left: var(--spacing-sm);
+}
+
 /* Error */
 .error-message {
   display: flex;
@@ -597,6 +646,15 @@ onMounted(() => {
 .has-findings {
   color: #ef4444;
   font-weight: 600;
+}
+
+/* Clickable rows */
+.controls-table :deep(.clickable-row) {
+  cursor: pointer;
+}
+
+.controls-table :deep(.clickable-row:hover) {
+  background: rgba(99, 102, 241, 0.1) !important;
 }
 
 /* Loading State */
