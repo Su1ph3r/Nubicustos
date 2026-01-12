@@ -2,9 +2,6 @@
 # Nubicustos - Git Ignore
 # ============================================================================
 
-# Local development configuration
-CLAUDE.md
-
 # Environment files
 .env
 .env.local
@@ -138,3 +135,6 @@ secrets/
 config/local/
 docker-compose.override.yml
 frontend/node_modules/
+
+# Frontend build output
+static/
