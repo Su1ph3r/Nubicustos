@@ -19,25 +19,6 @@
       </div>
     </div>
 
-    <!-- Verification Command -->
-    <div
-      v-if="finding.poc_verification"
-      class="evidence-block"
-    >
-      <div class="evidence-header">
-        <span>Verification Command</span>
-        <Button
-          icon="pi pi-copy"
-          size="small"
-          text
-          @click="copyToClipboard(finding.poc_verification)"
-        />
-      </div>
-      <div class="code-block command">
-        <code>{{ finding.poc_verification }}</code>
-      </div>
-    </div>
-
     <!-- Screenshot -->
     <div
       v-if="finding.poc_screenshot_path"
@@ -118,7 +99,6 @@ const screenshotUrl = computed(() => {
 
 const hasAnyEvidence = computed(() => {
   return props.finding.poc_evidence ||
-         props.finding.poc_verification ||
          props.finding.poc_screenshot_path
 })
 
@@ -201,15 +181,6 @@ const handleImageError = () => {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-.code-block.command {
-  padding: var(--spacing-sm) var(--spacing-md);
-  background: #2d2d2d;
-}
-
-.code-block.command code {
-  color: #98c379;
 }
 
 .screenshot-container {

@@ -350,18 +350,27 @@ clusters:
               <i class="pi pi-check-circle" />
               <div>
                 <strong>Credentials Verified</strong>
-                <p>Store these credentials in session memory for use during scans</p>
+                <p>Save as a profile and use for scans</p>
               </div>
             </div>
-            <button
-              class="btn-use-credentials"
-              :class="{ active: isCredentialStored }"
-              :disabled="isCredentialStored"
-              @click="useForScans"
-            >
-              <i :class="isCredentialStored ? 'pi pi-check' : 'pi pi-bolt'" />
-              {{ isCredentialStored ? 'Ready for Scans' : 'Use for Scans' }}
-            </button>
+            <div class="save-profile-form">
+              <input
+                v-model="profileNameToSave"
+                type="text"
+                placeholder="Profile name (e.g., default, production)"
+                class="profile-name-input"
+                :disabled="savingProfile || isCredentialStored"
+              >
+              <button
+                class="btn-use-credentials"
+                :class="{ active: isCredentialStored }"
+                :disabled="savingProfile || isCredentialStored || !profileNameToSave.trim()"
+                @click="useForScans"
+              >
+                <i :class="savingProfile ? 'pi pi-spin pi-spinner' : (isCredentialStored ? 'pi pi-check' : 'pi pi-save')" />
+                {{ savingProfile ? 'Saving...' : (isCredentialStored ? 'Saved & Ready' : 'Save & Use for Scans') }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -393,6 +402,8 @@ const error = ref(null)
 const result = ref(null)
 const showManualForm = ref(false)
 const profileVerified = ref(null)
+const profileNameToSave = ref('default')
+const savingProfile = ref(false)
 
 // AWS Profiles from store
 const awsProfiles = computed(() => credentialsStore.awsProfiles)
@@ -603,28 +614,77 @@ const isCredentialStored = computed(() => {
   return credentialsStore.getSessionCredentials(selectedProvider.value) !== null
 })
 
-// Store verified credentials for use in scans
-function useForScans() {
-  let credentials = null
-
+// Store verified credentials for use in scans and save as profile
+async function useForScans() {
   if (selectedProvider.value === 'aws') {
-    credentials = { ...awsForm.value }
-  } else if (selectedProvider.value === 'azure') {
-    credentials = { ...azureForm.value }
-  } else if (selectedProvider.value === 'gcp') {
-    credentials = { ...gcpForm.value }
-  } else if (selectedProvider.value === 'kubernetes') {
-    credentials = { ...kubernetesForm.value }
-  }
+    // Save to credentials file as a profile
+    savingProfile.value = true
+    try {
+      const response = await fetch(`${API_BASE}/aws-profiles/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          profile_name: profileNameToSave.value.trim(),
+          access_key_id: awsForm.value.access_key_id,
+          secret_access_key: awsForm.value.secret_access_key,
+          session_token: awsForm.value.session_token || null,
+          region: awsForm.value.region || 'us-east-1',
+        }),
+      })
 
-  if (credentials) {
-    credentialsStore.setSessionCredentials(selectedProvider.value, credentials)
-    toast.add({
-      severity: 'success',
-      summary: 'Credentials Ready',
-      detail: `${getProviderName(selectedProvider.value)} credentials stored for scan use`,
-      life: 4000,
-    })
+      if (!response.ok) {
+        const errData = await response.json()
+        throw new Error(errData.detail || 'Failed to save profile')
+      }
+
+      const data = await response.json()
+
+      // Also store in session
+      credentialsStore.setSessionCredentials('aws', { ...awsForm.value })
+
+      // Refresh the profiles list
+      await credentialsStore.fetchAwsProfiles()
+
+      // Select the newly created profile
+      await credentialsStore.selectAwsProfile(profileNameToSave.value.trim())
+
+      toast.add({
+        severity: 'success',
+        summary: 'Profile Saved',
+        detail: `AWS profile "${profileNameToSave.value}" saved and ready for scans (Account: ${data.account})`,
+        life: 5000,
+      })
+    } catch (e) {
+      toast.add({
+        severity: 'error',
+        summary: 'Save Failed',
+        detail: e.message,
+        life: 5000,
+      })
+    } finally {
+      savingProfile.value = false
+    }
+  } else {
+    // For other providers, just store in session for now
+    let credentials = null
+
+    if (selectedProvider.value === 'azure') {
+      credentials = { ...azureForm.value }
+    } else if (selectedProvider.value === 'gcp') {
+      credentials = { ...gcpForm.value }
+    } else if (selectedProvider.value === 'kubernetes') {
+      credentials = { ...kubernetesForm.value }
+    }
+
+    if (credentials) {
+      credentialsStore.setSessionCredentials(selectedProvider.value, credentials)
+      toast.add({
+        severity: 'success',
+        summary: 'Credentials Ready',
+        detail: `${getProviderName(selectedProvider.value)} credentials stored for scan use`,
+        life: 4000,
+      })
+    }
   }
 }
 </script>
@@ -992,6 +1052,33 @@ function useForScans() {
 
 .btn-use-credentials.active {
   background: var(--green-600);
+}
+
+.save-profile-form {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.profile-name-input {
+  padding: 0.625rem 0.875rem;
+  border: 1px solid var(--surface-border);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  background: var(--surface-card);
+  color: var(--text-color);
+  width: 200px;
+  transition: border-color 0.15s;
+}
+
+.profile-name-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+}
+
+.profile-name-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* AWS Profiles Section */

@@ -9,6 +9,7 @@ services:
   prowler:
     image: toniblyx/prowler:4.2.4
     container_name: prowler
+    profiles: ["tools", "aws"]
     volumes:
       - ./reports/prowler:/reports
       - ./credentials/aws:/home/prowler/.aws:ro
@@ -23,8 +24,9 @@ services:
     restart: unless-stopped
 
   scoutsuite-aws:
-    image: opendevsecops/scoutsuite:5.12.0
+    image: rossja/ncc-scoutsuite:latest
     container_name: scoutsuite-aws
+    profiles: ["tools", "aws"]
     volumes:
       - ./reports/scoutsuite:/reports
       - ./credentials/aws:/root/.aws:ro
@@ -34,8 +36,9 @@ services:
     restart: unless-stopped
 
   pacu:
-    image: rhinosecuritylabs/pacu:1.6.0
+    image: rhinosecuritylabs/pacu:latest
     container_name: pacu
+    profiles: ["tools", "aws"]
     volumes:
       - ./reports/pacu:/reports
       - ./credentials/aws:/root/.aws:ro
@@ -49,8 +52,12 @@ services:
     restart: unless-stopped
 
   cloudfox:
-    image: bishopfox/cloudfox:1.14.2
+    build:
+      context: ./docker/cloudfox
+      dockerfile: Dockerfile
+    image: cloudfox:local
     container_name: cloudfox
+    profiles: ["tools", "aws"]
     volumes:
       - ./reports/cloudfox:/reports
       - ./credentials/aws:/root/.aws:ro
@@ -60,7 +67,7 @@ services:
     environment:
       - AWS_SHARED_CREDENTIALS_FILE=/root/.aws/credentials
       - AWS_CONFIG_FILE=/root/.aws/config
-    command: aws all-checks --output /reports
+    command: cloudfox aws all-checks --output /reports
     networks:
       - security-net
     restart: unless-stopped
@@ -70,6 +77,7 @@ services:
       context: ./tools/enumerate-iam
       dockerfile: Dockerfile
     container_name: enumerate-iam
+    profiles: ["tools", "aws"]
     volumes:
       - ./reports/enumerate-iam:/reports
       - ./credentials/aws:/root/.aws:ro
@@ -86,6 +94,7 @@ services:
   cloudsploit:
     image: cloudsploit:local
     container_name: cloudsploit
+    profiles: ["tools", "aws"]
     user: root
     volumes:
       - ./reports/cloudsploit:/reports
@@ -100,8 +109,9 @@ services:
     restart: unless-stopped
 
   cloud-custodian:
-    image: cloudcustodian/c7n:0.9.34
+    image: cloudcustodian/c7n:latest
     container_name: cloud-custodian
+    profiles: ["tools", "aws"]
     volumes:
       - ./policies:/policies:ro
       - ./reports/custodian:/output
@@ -117,6 +127,7 @@ services:
   cloudmapper:
     build: ./cloudmapper
     container_name: cloudmapper
+    profiles: ["tools", "aws"]
     volumes:
       - ./reports/cloudmapper:/reports
       - ./credentials/aws:/root/.aws:ro
@@ -134,6 +145,7 @@ services:
   kube-bench:
     image: aquasec/kube-bench:v0.7.3
     container_name: kube-bench
+    profiles: ["tools", "kubernetes"]
     volumes:
       - ./kubeconfigs:/root/.kube:ro
       - ./reports/kube-bench:/reports
@@ -144,8 +156,9 @@ services:
     restart: unless-stopped
 
   kubescape:
-    image: quay.io/armosec/kubescape:v3.0.8
+    image: quay.io/armosec/kubescape:latest
     container_name: kubescape
+    profiles: ["tools", "kubernetes"]
     volumes:
       - ./kubeconfigs:/root/.kube:ro
       - ./reports/kubescape:/reports
@@ -162,6 +175,7 @@ services:
   kube-hunter:
     image: aquasec/kube-hunter:0.6.8
     container_name: kube-hunter
+    profiles: ["tools", "kubernetes"]
     volumes:
       - ./kubeconfigs:/root/.kube:ro
       - ./reports/kube-hunter:/reports
@@ -173,6 +187,7 @@ services:
   trivy:
     image: aquasec/trivy:0.50.4
     container_name: trivy
+    profiles: ["tools", "container"]
     volumes:
       - ./reports/trivy:/reports
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -187,6 +202,7 @@ services:
   grype:
     image: anchore/grype:v0.77.4
     container_name: grype
+    profiles: ["tools", "container"]
     volumes:
       - ./reports/grype:/reports
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -200,6 +216,7 @@ services:
   popeye:
     image: derailed/popeye:v0.21.3
     container_name: popeye
+    profiles: ["tools", "kubernetes"]
     volumes:
       - ./kubeconfigs:/root/.kube:ro
       - ./reports/popeye:/reports
@@ -211,6 +228,7 @@ services:
   kube-linter:
     image: stackrox/kube-linter:v0.6.8
     container_name: kube-linter
+    profiles: ["tools", "kubernetes", "iac"]
     volumes:
       - ./kubeconfigs:/root/.kube:ro
       - ./reports/kube-linter:/reports
@@ -223,6 +241,7 @@ services:
   polaris:
     image: quay.io/fairwinds/polaris:9.0.1
     container_name: polaris
+    profiles: ["tools", "kubernetes", "iac"]
     volumes:
       - ./kubeconfigs:/root/.kube:ro
       - ./reports/polaris:/reports
@@ -235,6 +254,7 @@ services:
   falco:
     image: falcosecurity/falco-no-driver:0.37.1
     container_name: falco
+    profiles: ["tools", "kubernetes"]
     privileged: true
     volumes:
       - /var/run/docker.sock:/host/var/run/docker.sock:ro
@@ -254,6 +274,7 @@ services:
   checkov:
     image: bridgecrew/checkov:3.2.74
     container_name: checkov
+    profiles: ["tools", "iac"]
     volumes:
       - ./iac-code:/code:ro
       - ./reports/checkov:/reports
@@ -270,6 +291,7 @@ services:
   terrascan:
     image: tenable/terrascan:latest
     container_name: terrascan
+    profiles: ["tools", "iac"]
     volumes:
       - ./iac-code:/iac:ro
       - ./reports/terrascan:/reports
@@ -285,6 +307,7 @@ services:
   tfsec:
     image: aquasec/tfsec:v1.28.6
     container_name: tfsec
+    profiles: ["tools", "iac"]
     volumes:
       - ./iac-code:/src:ro
       - ./reports/tfsec:/reports
@@ -304,6 +327,7 @@ services:
   cartography:
     image: ghcr.io/lyft/cartography:0.94.0
     container_name: cartography
+    profiles: ["tools", "aws"]
     depends_on:
       - neo4j
     volumes:
@@ -342,15 +366,15 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-    # Security hardening
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - SETGID
-      - SETUID
+    # Security hardening disabled for Docker Desktop compatibility
+    # security_opt:
+    #   - no-new-privileges:true
+    # cap_drop:
+    #   - ALL
+    # cap_add:
+    #   - CHOWN
+    #   - SETGID
+    #   - SETUID
     restart: unless-stopped
 
   # ============================================================================
@@ -403,7 +427,7 @@ services:
     volumes:
       - ./reports:/reports:ro
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./static:/static:ro
+      - ./frontend/dist:/static:ro
       - ./logs/nginx:/var/log/nginx
     networks:
       - security-net

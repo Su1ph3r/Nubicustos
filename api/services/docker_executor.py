@@ -70,7 +70,7 @@ TOOL_CONFIGS = {
         "expected_exit_codes": [0, 1, 3],  # 0=no findings, 1/3=findings found (not errors)
     },
     ToolType.SCOUTSUITE: {
-        "image": "opendevsecops/scoutsuite:5.12.0",
+        "image": "rossja/ncc-scoutsuite:latest",
         "container_name_prefix": "scoutsuite-scan",
         "volumes": {
             "/app/reports/scoutsuite": {"bind": "/reports", "mode": "rw"},
@@ -89,7 +89,7 @@ TOOL_CONFIGS = {
         "expected_exit_codes": [0, 1],
     },
     ToolType.CLOUDFOX: {
-        "image": "bishopfox/cloudfox:1.14.2",
+        "image": "cloudfox:local",
         "container_name_prefix": "cloudfox-exec",
         "volumes": {
             "/app/reports/cloudfox": {"bind": "/reports", "mode": "rw"},
@@ -133,7 +133,7 @@ TOOL_CONFIGS = {
         "expected_exit_codes": [0, 1],
     },
     ToolType.CLOUD_CUSTODIAN: {
-        "image": "cloudcustodian/c7n:0.9.34",
+        "image": "cloudcustodian/c7n:latest",
         "container_name_prefix": "custodian-scan",
         "volumes": {
             "/app/policies": {"bind": "/policies", "mode": "ro"},
@@ -186,7 +186,7 @@ TOOL_CONFIGS = {
         "expected_exit_codes": [0],
     },
     ToolType.PACU: {
-        "image": "rhinosecuritylabs/pacu:1.6.0",
+        "image": "rhinosecuritylabs/pacu:latest",
         "container_name_prefix": "pacu-exec",
         "volumes": {
             "/app/reports/pacu": {"bind": "/reports", "mode": "rw"},
@@ -220,7 +220,7 @@ TOOL_CONFIGS = {
     # Kubernetes Security Tools
     # ============================================================================
     ToolType.KUBESCAPE: {
-        "image": "quay.io/armosec/kubescape:v3.0.8",
+        "image": "quay.io/armosec/kubescape:latest",
         "container_name_prefix": "kubescape-scan",
         "volumes": {
             "/app/kubeconfigs": {"bind": "/root/.kube", "mode": "ro"},

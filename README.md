@@ -47,25 +47,32 @@ cd Nubicustos
 cp .env.example .env
 # Edit .env with your database passwords
 
-# 3. Set up cloud credentials (example: AWS)
+# 3. Launch the core stack
+docker compose up -d
+
+# 4. Verify services are running
+docker compose ps
+# Should show: postgresql, neo4j, nginx, api, report-processor
+
+# 5. Access the web interface
+open http://localhost:8080
+
+# 6. Configure credentials via UI
+# Navigate to Credentials page and add your cloud credentials
+# Or mount credentials manually:
 mkdir -p credentials/aws
 cp ~/.aws/credentials credentials/aws/
 cp ~/.aws/config credentials/aws/
 
-# 4. Launch the stack
-docker-compose up -d
-
-# 5. Verify services are running
-docker-compose ps
-
-# 6. Run your first security scan
-./scripts/run-all-audits.sh --profile quick --dry-run  # Preview
-./scripts/run-all-audits.sh --profile quick            # Execute
-
-# 7. View results
-open http://localhost:8080/reports  # Web interface
-open http://localhost:3000          # Grafana dashboards
+# 7. Run scans via UI or API
+# Use the Scans page in the web interface, or:
+curl -X POST http://localhost:8080/api/scans/orchestrate \
+  -H "Content-Type: application/json" \
+  -d '{"profile": "quick", "provider": "aws"}'
 ```
+
+> **Note:** Security scanning tools run on-demand via the API/UI rather than as persistent containers.
+> This keeps the default deployment lightweight and avoids pulling 20+ tool images at startup.
 
 ---
 

@@ -343,6 +343,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useScansStore } from '../stores/scans'
 import { useToast } from 'primevue/usetoast'
+import { onCredentialStatusChange } from '../stores/credentials'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Tag from 'primevue/tag'
@@ -512,6 +513,9 @@ function viewAllScans() {
   store.fetchScans()
 }
 
+// Track unsubscribe function
+let unsubscribeCredentialStatus = null
+
 onMounted(async () => {
   await Promise.all([
     store.fetchScans(),
@@ -523,10 +527,19 @@ onMounted(async () => {
   for (const scan of store.runningScans) {
     store.startPolling(scan.scan_id)
   }
+
+  // Subscribe to credential status changes
+  unsubscribeCredentialStatus = onCredentialStatusChange(() => {
+    store.fetchCredentialStatus()
+  })
 })
 
 onUnmounted(() => {
   store.stopAllPolling()
+  // Unsubscribe from credential status changes
+  if (unsubscribeCredentialStatus) {
+    unsubscribeCredentialStatus()
+  }
 })
 </script>
 

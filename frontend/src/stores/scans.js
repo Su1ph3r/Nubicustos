@@ -1,9 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { useCredentialsStore } from './credentials'
 
 const API_BASE = '/api'
 
 export const useScansStore = defineStore('scans', () => {
+  // Access credentials store for session credential status
+  const credentialsStore = useCredentialsStore()
   // State
   const scans = ref([])
   const currentScan = ref(null)
@@ -46,21 +49,34 @@ export const useScansStore = defineStore('scans', () => {
     runningScans.value.length > 0,
   )
 
-  const awsStatus = computed(() =>
-    credentialStatus.value?.summary?.aws || 'unknown',
-  )
+  const awsStatus = computed(() => {
+    // Check session credentials first (these are verified and ready)
+    if (credentialsStore.sessionCredentials?.aws) {
+      return 'ready'
+    }
+    return credentialStatus.value?.summary?.aws || 'unknown'
+  })
 
-  const azureStatus = computed(() =>
-    credentialStatus.value?.summary?.azure || 'unknown',
-  )
+  const azureStatus = computed(() => {
+    if (credentialsStore.sessionCredentials?.azure) {
+      return 'ready'
+    }
+    return credentialStatus.value?.summary?.azure || 'unknown'
+  })
 
-  const gcpStatus = computed(() =>
-    credentialStatus.value?.summary?.gcp || 'unknown',
-  )
+  const gcpStatus = computed(() => {
+    if (credentialsStore.sessionCredentials?.gcp) {
+      return 'ready'
+    }
+    return credentialStatus.value?.summary?.gcp || 'unknown'
+  })
 
-  const kubernetesStatus = computed(() =>
-    credentialStatus.value?.summary?.kubernetes || 'unknown',
-  )
+  const kubernetesStatus = computed(() => {
+    if (credentialsStore.sessionCredentials?.kubernetes) {
+      return 'ready'
+    }
+    return credentialStatus.value?.summary?.kubernetes || 'unknown'
+  })
 
   // Actions
   async function fetchScans(filters = {}) {
