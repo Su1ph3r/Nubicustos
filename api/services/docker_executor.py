@@ -392,7 +392,18 @@ class DockerExecutor:
         # from container perspective to host perspective
         if path.startswith("/app"):
             # Use HOST_PROJECT_PATH for /app mapping (project root)
-            host_base = os.environ.get("HOST_PROJECT_PATH", os.getcwd())
+            host_base = os.environ.get("HOST_PROJECT_PATH", "").strip()
+            if not host_base:
+                raise RuntimeError(
+                    "HOST_PROJECT_PATH environment variable is not set. "
+                    "This is required for volume mounting when running scans. "
+                    "Ensure docker-compose is run from the project directory, "
+                    "or set HOST_PROJECT_PATH explicitly in your .env file."
+                )
+            if not host_base.startswith("/"):
+                raise RuntimeError(
+                    f"HOST_PROJECT_PATH must be an absolute path, got: {host_base}"
+                )
             return path.replace("/app", host_base)
         return path
 

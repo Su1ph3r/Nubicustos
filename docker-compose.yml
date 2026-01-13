@@ -475,8 +475,8 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=${LOG_FORMAT:-json}
       - SHUTDOWN_TIMEOUT=${SHUTDOWN_TIMEOUT:-30}
-      - HOST_REPORTS_PATH=${HOST_REPORTS_PATH:-}
-      - HOST_PROJECT_PATH=${HOST_PROJECT_PATH:-}
+      - HOST_REPORTS_PATH=${HOST_REPORTS_PATH:-${PWD}/reports}
+      - HOST_PROJECT_PATH=${HOST_PROJECT_PATH:-${PWD}}
     volumes:
       - ./reports:/reports:rw
       - ./scripts:/app/scripts:ro
