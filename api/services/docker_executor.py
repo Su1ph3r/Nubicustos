@@ -14,6 +14,10 @@ from docker.errors import APIError, ImageNotFound
 
 logger = logging.getLogger(__name__)
 
+# Default AWS profile - can be overridden by environment or passed dynamically
+# When aws_profile is passed to start_execution, it will override this default
+DEFAULT_AWS_PROFILE = os.environ.get("DEFAULT_AWS_PROFILE", "nubicustos-audit")
+
 
 class ExecutionStatus(str, Enum):
     """Tool execution status."""
@@ -89,10 +93,13 @@ TOOL_CONFIGS = {
         "environment": {
             "AWS_SHARED_CREDENTIALS_FILE": "/home/prowler/.aws/credentials",
             "AWS_CONFIG_FILE": "/home/prowler/.aws/config",
+            "AWS_PROFILE": DEFAULT_AWS_PROFILE,
             "HOME": "/home/prowler",
         },
         "default_command": [
             "aws",
+            "--profile",
+            DEFAULT_AWS_PROFILE,
             "--output-formats",
             "json-ocsf",
             "html",
@@ -110,16 +117,23 @@ TOOL_CONFIGS = {
             "/app/credentials/aws": {"bind": "/root/.aws", "mode": "ro"},
         },
         "network": "cloud-stack_security-net",
-        "environment": {},
+        "environment": {
+            "AWS_SHARED_CREDENTIALS_FILE": "/root/.aws/credentials",
+            "AWS_CONFIG_FILE": "/root/.aws/config",
+            "AWS_PROFILE": DEFAULT_AWS_PROFILE,
+        },
+        "entrypoint": "scout",  # Image has no entrypoint, must specify
         "default_command": [
             "--provider",
             "aws",
+            "--profile",
+            DEFAULT_AWS_PROFILE,
             "--report-dir",
             "/reports/aws",
             "--no-browser",
             "--force",
         ],
-        "expected_exit_codes": [0, 1],
+        "expected_exit_codes": [0, 1, 200],  # 200 = completed with warnings
     },
     ToolType.CLOUDFOX: {
         "image": "cloudfox:local",
@@ -135,8 +149,10 @@ TOOL_CONFIGS = {
         "environment": {
             "AWS_SHARED_CREDENTIALS_FILE": "/root/.aws/credentials",
             "AWS_CONFIG_FILE": "/root/.aws/config",
+            "AWS_PROFILE": DEFAULT_AWS_PROFILE,
         },
-        "default_command": ["aws", "all-checks", "--output", "/reports"],
+        "entrypoint": "cloudfox",  # Image has no entrypoint, must specify
+        "default_command": ["aws", "all-checks", "-o", "/reports", "--profile", DEFAULT_AWS_PROFILE],
         "expected_exit_codes": [0, 1],
     },
     ToolType.CLOUDSPLOIT: {
@@ -150,6 +166,9 @@ TOOL_CONFIGS = {
         "environment": {
             "HOME": "/root",
             "AWS_DEFAULT_REGION": "us-east-1",
+            "AWS_SHARED_CREDENTIALS_FILE": "/root/.aws/credentials",
+            "AWS_CONFIG_FILE": "/root/.aws/config",
+            "AWS_PROFILE": DEFAULT_AWS_PROFILE,
         },
         "entrypoint": "node",
         "default_command": [
@@ -176,6 +195,8 @@ TOOL_CONFIGS = {
         "network": "cloud-stack_security-net",
         "environment": {
             "AWS_SHARED_CREDENTIALS_FILE": "/root/.aws/credentials",
+            "AWS_CONFIG_FILE": "/root/.aws/config",
+            "AWS_PROFILE": DEFAULT_AWS_PROFILE,
         },
         "default_command": ["run", "-s", "/output", "/policies/default.yml"],
         "expected_exit_codes": [0, 1],
@@ -191,6 +212,8 @@ TOOL_CONFIGS = {
         "network": "cloud-stack_security-net",
         "environment": {
             "AWS_SHARED_CREDENTIALS_FILE": "/root/.aws/credentials",
+            "AWS_CONFIG_FILE": "/root/.aws/config",
+            "AWS_PROFILE": DEFAULT_AWS_PROFILE,
         },
         "default_command": ["collect", "--config", "/config/config.json", "--output", "/reports"],
         "expected_exit_codes": [0],
@@ -207,6 +230,8 @@ TOOL_CONFIGS = {
             "NEO4J_USER": "neo4j",
             "NEO4J_PASSWORD": "${NEO4J_PASSWORD:-cloudsecurity}",
             "AWS_SHARED_CREDENTIALS_FILE": "/root/.aws/credentials",
+            "AWS_CONFIG_FILE": "/root/.aws/config",
+            "AWS_PROFILE": DEFAULT_AWS_PROFILE,
         },
         "default_command": [
             "--neo4j-uri",
@@ -231,6 +256,8 @@ TOOL_CONFIGS = {
         "network": "cloud-stack_security-net",
         "environment": {
             "AWS_SHARED_CREDENTIALS_FILE": "/root/.aws/credentials",
+            "AWS_CONFIG_FILE": "/root/.aws/config",
+            "AWS_PROFILE": DEFAULT_AWS_PROFILE,
         },
         "default_command": [],  # Pacu requires interactive session or specific module
         "expected_exit_codes": [0],
@@ -245,6 +272,8 @@ TOOL_CONFIGS = {
         "network": "cloud-stack_security-net",
         "environment": {
             "AWS_SHARED_CREDENTIALS_FILE": "/root/.aws/credentials",
+            "AWS_CONFIG_FILE": "/root/.aws/config",
+            "AWS_PROFILE": DEFAULT_AWS_PROFILE,
         },
         "default_command": ["--output-file", "/reports/iam-permissions.json"],
         "expected_exit_codes": [0],
@@ -289,19 +318,19 @@ SCAN_PROFILES = {
             ToolType.CLOUDFOX,
             ToolType.CLOUDSPLOIT,
             ToolType.CLOUD_CUSTODIAN,
-            ToolType.CLOUDMAPPER,
-            ToolType.CARTOGRAPHY,
+            # CloudMapper removed: visualization tool requiring manual account config
+            # Cartography removed: graph analysis tool requiring Neo4j setup
         ],
-        "description": "Full security audit with all AWS tools (30-60 min)",
-        "duration_estimate": "30-60 minutes",
+        "description": "Full security audit with all AWS security scanning tools (20-40 min)",
+        "duration_estimate": "20-40 minutes",
         "prowler_options": [],
     },
     "compliance-only": {
         "tools": [ToolType.PROWLER, ToolType.SCOUTSUITE],
         "description": "Compliance framework focused scanning - CIS, SOC2, PCI-DSS, HIPAA (15-20 min)",
         "duration_estimate": "15-20 minutes",
-        "prowler_options": ["--compliance", "cis_2.0_aws", "soc2_aws", "pci_dss_v4.0_aws"],
-        "scoutsuite_options": ["--ruleset", "cis"],
+        "prowler_options": ["--compliance", "cis_2.0_aws", "soc2_aws", "pci_3.2.1_aws", "hipaa_aws"],
+        # scoutsuite_options removed - causes path handling bug
     },
 }
 
@@ -362,7 +391,8 @@ class DockerExecutor:
         # When running inside a container, we need to map paths
         # from container perspective to host perspective
         if path.startswith("/app"):
-            host_base = os.environ.get("HOST_REPORTS_PATH", os.getcwd())
+            # Use HOST_PROJECT_PATH for /app mapping (project root)
+            host_base = os.environ.get("HOST_PROJECT_PATH", os.getcwd())
             return path.replace("/app", host_base)
         return path
 
@@ -693,7 +723,15 @@ class DockerExecutor:
                 result["logs"] = logs
             elif status == "running":
                 result["execution_status"] = ExecutionStatus.RUNNING
+            elif status == "dead":
+                # Container crashed or failed to start properly
+                result["execution_status"] = ExecutionStatus.FAILED
+                result["error"] = "Container died unexpectedly"
+                logs = container.logs(tail=100).decode("utf-8", errors="replace")
+                result["logs"] = logs
             else:
+                # "created", "paused", "restarting", "removing" - report as PENDING
+                # The caller should handle these states appropriately
                 result["execution_status"] = ExecutionStatus.PENDING
 
             return result
