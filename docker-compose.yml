@@ -506,6 +506,7 @@ services:
     read_only: true
     tmpfs:
       - /tmp:mode=1777,size=64m
+      - /processed:mode=1777,size=128m
     # Docker socket access for tool execution (required for CloudFox, Pacu, etc.)
     group_add:
       - "0"  # Docker socket group on Windows/Mac
