@@ -12,7 +12,7 @@
           label="Analyze Roles"
           icon="pi pi-search"
           :loading="analyzing"
-          class="mr-2"
+          style="margin-right: 0.5rem"
           @click="analyzeRoles"
         />
         <Button
