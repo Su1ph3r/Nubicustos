@@ -81,6 +81,12 @@ class ScanCreate(BaseModel):
         description="Comma-separated severity levels",
     )
     dry_run: bool = Field(default=False, description="Preview commands without executing")
+    aws_profile: str | None = Field(
+        default=None,
+        max_length=64,
+        pattern=r"^[a-zA-Z0-9_\-]+$",
+        description="AWS profile name from credentials file to use for scanning",
+    )
 
     @field_validator("target")
     @classmethod

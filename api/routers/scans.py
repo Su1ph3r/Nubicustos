@@ -44,6 +44,11 @@ from services.docker_executor import (
 router: APIRouter = APIRouter(prefix="/scans", tags=["Scans"])
 logger: logging.Logger = logging.getLogger(__name__)
 
+# Maximum time to wait for a single tool to complete (6 hours)
+MAX_TOOL_TIMEOUT_SECONDS = 6 * 60 * 60
+# Polling interval in seconds
+POLL_INTERVAL_SECONDS = 10
+
 # Provider to tools mapping
 PROVIDER_TOOLS: dict[str, list[str]] = {
     "aws": [
@@ -153,11 +158,57 @@ async def _process_reports_directly(scan_id: str, tools: list[str]) -> None:
         logger.error(f"Direct report processing failed: {e}")
 
 
+
+def _replace_profile_in_command(command: list[str], aws_profile: str, tool: "ToolType") -> list[str]:
+    """
+    Replace hardcoded AWS profile references in command arguments with the dynamic profile.
+    
+    Different tools use different flags:
+    - Prowler: --profile <name>
+    - ScoutSuite: --profile <name>
+    - CloudFox: --profile <name>
+    - Others: may use --profile or AWS_PROFILE env var
+    """
+    result = []
+    skip_next = False
+    profile_added = False
+    
+    for i, arg in enumerate(command):
+        if skip_next:
+            # This is the profile value following --profile, replace it
+            result.append(aws_profile)
+            skip_next = False
+            profile_added = True
+        elif arg == "--profile":
+            result.append(arg)
+            skip_next = True  # Next arg is the profile value to replace
+        elif arg.startswith("--profile="):
+            # Handle --profile=value format
+            result.append(f"--profile={aws_profile}")
+            profile_added = True
+        else:
+            result.append(arg)
+    
+    # If no --profile flag was found in command, some tools need it added
+    # The environment variable AWS_PROFILE should handle most cases
+    # but for tools that require the CLI flag, we add it
+    if not profile_added and tool.value in ("prowler", "scoutsuite", "cloudfox"):
+        # Insert --profile after the subcommand (usually first or second arg)
+        if len(result) >= 1:
+            # For prowler: aws --profile <name> ...
+            # For scoutsuite: --provider aws --profile <name> ...
+            # For cloudfox: aws all-checks --profile <name> ...
+            result.extend(["--profile", aws_profile])
+    
+    return result
+
+
 async def run_scan_orchestration(
     scan_id: str,
     profile: str,
     severity_filter: str | None,
     db_url: str,
+    aws_profile: str | None = None,
 ) -> None:
     """
     Background task to orchestrate a security scan using Docker SDK.
@@ -227,11 +278,19 @@ async def run_scan_orchestration(
                 if default_cmd:
                     command = list(default_cmd)
 
+            # Build environment with dynamic AWS profile
+            env = {"SCAN_ID": scan_id}
+            if aws_profile:
+                env["AWS_PROFILE"] = aws_profile
+                # Also replace hardcoded profile in command if present
+                if command:
+                    command = _replace_profile_in_command(command, aws_profile, tool)
+
             # Start the tool execution
             result = await executor.start_execution(
                 tool_type=tool,
                 command=command,
-                environment={"SCAN_ID": scan_id},
+                environment=env,
                 entrypoint=entrypoint,
             )
 
@@ -250,9 +309,11 @@ async def run_scan_orchestration(
                 f"Scan {scan_id}: Tool {tool.value} started, container: {container_id[:12]}"
             )
 
-            # Wait for completion (poll every 10 seconds)
-            while True:
-                await asyncio.sleep(10)
+            # Wait for completion with timeout
+            elapsed_seconds = 0
+            while elapsed_seconds < MAX_TOOL_TIMEOUT_SECONDS:
+                await asyncio.sleep(POLL_INTERVAL_SECONDS)
+                elapsed_seconds += POLL_INTERVAL_SECONDS
                 status = await executor.get_execution_status(container_id)
                 exec_status = status.get("execution_status")
 
@@ -279,7 +340,41 @@ async def run_scan_orchestration(
                         execution_ids=execution_ids,
                     )
                     return
-                # Still running, continue polling
+                elif exec_status == ExecutionStatus.PENDING:
+                    # Container in unexpected state (paused, dead, created, etc.)
+                    container_status = status.get("status", "unknown")
+                    if container_status in ("paused", "dead", "removing"):
+                        logger.error(
+                            f"Scan {scan_id}: Tool {tool.value} container in bad state: {container_status}"
+                        )
+                        _update_scan_status(
+                            db,
+                            scan_id,
+                            "failed",
+                            error=f"{tool.value} container {container_status}",
+                            execution_ids=execution_ids,
+                        )
+                        return
+                    # "created" or other states - continue polling but log warning
+                    if elapsed_seconds % 60 == 0:  # Log every minute
+                        logger.warning(
+                            f"Scan {scan_id}: Tool {tool.value} still pending ({container_status}), "
+                            f"waited {elapsed_seconds}s"
+                        )
+                # RUNNING status - continue polling
+            else:
+                # Loop completed without break - timeout reached
+                logger.error(
+                    f"Scan {scan_id}: Tool {tool.value} timed out after {MAX_TOOL_TIMEOUT_SECONDS}s"
+                )
+                _update_scan_status(
+                    db,
+                    scan_id,
+                    "failed",
+                    error=f"{tool.value} timed out after {MAX_TOOL_TIMEOUT_SECONDS // 3600}h",
+                    execution_ids=execution_ids,
+                )
+                return
 
         # All tools completed successfully - now process reports
         logger.info(f"Scan {scan_id}: All tools completed, triggering report processing")
@@ -512,6 +607,7 @@ async def create_scan(scan_request: ScanCreate, db: Session = Depends(get_db)):
                 profile_name,
                 scan_request.severity_filter,
                 settings.database_url,
+                scan_request.aws_profile,
             )
         )
         task.add_done_callback(_handle_task_exception)
