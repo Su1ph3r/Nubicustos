@@ -30,8 +30,19 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from config import get_settings
-from models.database import Scan, get_db
-from models.schemas import ScanCreate, ScanListResponse, ScanResponse
+from models.database import Scan, ScanFile, get_db
+from models.schemas import (
+    ArchiveInfo,
+    ArchiveListResponse,
+    BulkArchiveRequest,
+    BulkArchiveResponse,
+    BulkDeleteRequest,
+    BulkDeleteResponse,
+    ScanCreate,
+    ScanFileResponse,
+    ScanListResponse,
+    ScanResponse,
+)
 from services.docker_executor import (
     SCAN_PROFILES,
     TOOL_CONFIGS,
@@ -585,6 +596,281 @@ async def create_scan(scan_request: ScanCreate, db: Session = Depends(get_db)):
     return ScanResponse.model_validate(scan)
 
 
+# ============================================================================
+# Static Routes (must be defined BEFORE dynamic {scan_id} routes)
+# ============================================================================
+
+
+@router.get("/profiles/list")
+async def list_profiles():
+    """
+    List available scan profiles.
+
+    Returns metadata about each predefined scan profile including
+    name, description, estimated duration, and tools included.
+
+    Available Profiles:
+        - quick: Fast scan (5-10 min) focusing on critical/high issues
+        - comprehensive: Full audit (30-60 min) with all AWS tools enabled
+        - compliance-only: Compliance-focused scanning (15-20 min)
+
+    Returns:
+        dict: List of available profiles with descriptions and tool lists
+    """
+    profiles = []
+    for name, config in SCAN_PROFILES.items():
+        profiles.append(
+            {
+                "name": name,
+                "description": config.get("description", ""),
+                "duration_estimate": config.get("duration_estimate", "Unknown"),
+                "tools": [t.value for t in config.get("tools", [])],
+            }
+        )
+    return {"profiles": profiles}
+
+
+@router.get("/tools")
+async def list_all_tools():
+    """
+    List all available tools grouped by provider.
+
+    Returns a mapping of cloud providers to their available security scanning tools.
+    Use this endpoint to discover what tools can be selected for each provider.
+
+    Returns:
+        dict: Tools grouped by provider (aws, azure, gcp, kubernetes, iac)
+
+    Example Response:
+        ```json
+        {
+            "tools_by_provider": {
+                "aws": ["prowler", "scoutsuite", "cloudsploit", ...],
+                "azure": ["prowler", "scoutsuite", "cloudfox"],
+                "gcp": ["prowler", "scoutsuite", "cloudfox", "cartography"],
+                "kubernetes": ["kube-bench", "kubescape", ...],
+                "iac": ["checkov", "terrascan", "tfsec"]
+            }
+        }
+        ```
+    """
+    return {"tools_by_provider": PROVIDER_TOOLS}
+
+
+@router.get("/tools/{provider}")
+async def get_tools_for_provider(provider: str):
+    """
+    Get available tools for a specific cloud provider.
+
+    Args:
+        provider: Cloud provider name (aws, azure, gcp, kubernetes, iac)
+
+    Returns:
+        dict: Provider name and list of available tools
+
+    Raises:
+        HTTPException 400: If provider is not recognized
+
+    Example Response:
+        ```json
+        {
+            "provider": "aws",
+            "tools": ["prowler", "scoutsuite", "cloudsploit", ...]
+        }
+        ```
+    """
+    if provider not in PROVIDER_TOOLS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown provider: {provider}. Available providers: {list(PROVIDER_TOOLS.keys())}",
+        )
+    return {"provider": provider, "tools": PROVIDER_TOOLS[provider]}
+
+
+@router.get("/archives", response_model=ArchiveListResponse)
+async def list_archives():
+    """
+    List all available scan archives.
+
+    Returns:
+        ArchiveListResponse: List of archives with metadata
+    """
+    from services.archive_service import get_archive_service
+
+    archive_service = get_archive_service()
+    archives = archive_service.list_archives()
+
+    return ArchiveListResponse(
+        archives=[ArchiveInfo(**a) for a in archives],
+        total=len(archives),
+    )
+
+
+@router.delete("/bulk", response_model=BulkDeleteResponse)
+async def bulk_delete_scans(
+    request: BulkDeleteRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Delete multiple scans and optionally their associated files.
+
+    Only scans with status completed/failed/cancelled can be deleted.
+    Running scans will be skipped with a warning in the response.
+
+    Args:
+        request: BulkDeleteRequest with scan_ids list and delete_files flag
+
+    Returns:
+        BulkDeleteResponse: Summary of deletion operation
+    """
+    from services.archive_service import get_archive_service
+
+    deleted_scans = 0
+    deleted_files = 0
+    skipped_scans = []
+    errors = []
+
+    archive_service = get_archive_service()
+
+    for scan_id in request.scan_ids:
+        scan = db.query(Scan).filter(Scan.scan_id == scan_id).first()
+
+        if not scan:
+            errors.append(f"{scan_id}: Scan not found")
+            continue
+
+        # Skip running scans
+        if scan.status in ["pending", "running"]:
+            skipped_scans.append(str(scan_id))
+            continue
+
+        # Get associated files if we need to delete them
+        if request.delete_files:
+            scan_files = db.query(ScanFile).filter(ScanFile.scan_id == scan_id).all()
+            file_paths = [sf.file_path for sf in scan_files]
+
+            if file_paths:
+                count, file_errors = archive_service.delete_files(file_paths)
+                deleted_files += count
+                errors.extend(file_errors)
+
+        # Delete the scan (cascade will delete ScanFile records)
+        try:
+            db.delete(scan)
+            db.commit()
+            deleted_scans += 1
+        except Exception as e:
+            db.rollback()
+            errors.append(f"{scan_id}: Failed to delete - {str(e)}")
+
+    return BulkDeleteResponse(
+        success=len(errors) == 0 and len(skipped_scans) == 0,
+        deleted_scans=deleted_scans,
+        deleted_files=deleted_files,
+        skipped_scans=skipped_scans,
+        errors=errors,
+    )
+
+
+@router.post("/bulk/archive", response_model=BulkArchiveResponse)
+async def bulk_archive_scans(
+    request: BulkArchiveRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Archive multiple scans into a zip file and delete originals.
+
+    Creates a zip archive containing all report files associated with the
+    specified scans, then deletes the original files and database records.
+
+    Archive naming: {YYYYMMDD}_{HHMMSS}_{profile}.zip
+    Archives stored in /reports/archives/
+
+    Args:
+        request: BulkArchiveRequest with scan_ids list
+
+    Returns:
+        BulkArchiveResponse: Archive creation summary
+
+    Raises:
+        HTTPException 400: If no valid scans to archive or archive creation fails
+    """
+    from services.archive_service import get_archive_service
+
+    archive_service = get_archive_service()
+
+    # Collect all file paths and determine profile name
+    all_file_paths = []
+    profiles = set()
+    valid_scan_ids = []
+
+    for scan_id in request.scan_ids:
+        scan = db.query(Scan).filter(Scan.scan_id == scan_id).first()
+
+        if not scan:
+            continue
+
+        # Skip running scans
+        if scan.status in ["pending", "running"]:
+            continue
+
+        valid_scan_ids.append(scan_id)
+        profiles.add(scan.scan_type or "unknown")
+
+        # Get associated files
+        scan_files = db.query(ScanFile).filter(ScanFile.scan_id == scan_id).all()
+        all_file_paths.extend([sf.file_path for sf in scan_files])
+
+    if not valid_scan_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="No valid scans to archive (must be completed/failed/cancelled)",
+        )
+
+    # Determine profile name for archive
+    if len(profiles) == 1:
+        profile_name = profiles.pop()
+    else:
+        profile_name = "mixed"
+
+    # Create archive
+    try:
+        archive_path, archive_size = archive_service.create_archive(profile_name, all_file_paths)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Archive creation failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create archive")
+
+    # Delete original files
+    if all_file_paths:
+        archive_service.delete_files(all_file_paths)
+
+    # Delete scans from database (cascade handles ScanFile records)
+    for scan_id in valid_scan_ids:
+        scan = db.query(Scan).filter(Scan.scan_id == scan_id).first()
+        if scan:
+            db.delete(scan)
+
+    db.commit()
+
+    archive_name = archive_path.split("/")[-1]
+
+    return BulkArchiveResponse(
+        success=True,
+        archive_path=archive_path,
+        archive_name=archive_name,
+        archived_scans=len(valid_scan_ids),
+        archived_files=len(all_file_paths),
+        archive_size_bytes=archive_size,
+    )
+
+
+# ============================================================================
+# Dynamic Routes (with {scan_id} path parameter)
+# ============================================================================
+
+
 @router.get("/{scan_id}", response_model=ScanResponse)
 async def get_scan(scan_id: UUID, db: Session = Depends(get_db)):
     """
@@ -681,87 +967,25 @@ async def cancel_scan(scan_id: UUID, db: Session = Depends(get_db)):
     return {"message": "Scan cancelled", "scan_id": str(scan_id)}
 
 
-@router.get("/profiles/list")
-async def list_profiles():
+@router.get("/{scan_id}/files", response_model=list[ScanFileResponse])
+async def get_scan_files(scan_id: UUID, db: Session = Depends(get_db)):
     """
-    List available scan profiles.
-
-    Returns metadata about each predefined scan profile including
-    name, description, estimated duration, and tools included.
-
-    Available Profiles:
-        - quick: Fast scan (5-10 min) focusing on critical/high issues
-        - comprehensive: Full audit (30-60 min) with all AWS tools enabled
-        - compliance-only: Compliance-focused scanning (15-20 min)
-
-    Returns:
-        dict: List of available profiles with descriptions and tool lists
-    """
-    profiles = []
-    for name, config in SCAN_PROFILES.items():
-        profiles.append(
-            {
-                "name": name,
-                "description": config.get("description", ""),
-                "duration_estimate": config.get("duration_estimate", "Unknown"),
-                "tools": [t.value for t in config.get("tools", [])],
-            }
-        )
-    return {"profiles": profiles}
-
-
-@router.get("/tools")
-async def list_all_tools():
-    """
-    List all available tools grouped by provider.
-
-    Returns a mapping of cloud providers to their available security scanning tools.
-    Use this endpoint to discover what tools can be selected for each provider.
-
-    Returns:
-        dict: Tools grouped by provider (aws, azure, gcp, kubernetes, iac)
-
-    Example Response:
-        ```json
-        {
-            "tools_by_provider": {
-                "aws": ["prowler", "scoutsuite", "cloudsploit", ...],
-                "azure": ["prowler", "scoutsuite", "cloudfox"],
-                "gcp": ["prowler", "scoutsuite", "cloudfox", "cartography"],
-                "kubernetes": ["kube-bench", "kubescape", ...],
-                "iac": ["checkov", "terrascan", "tfsec"]
-            }
-        }
-        ```
-    """
-    return {"tools_by_provider": PROVIDER_TOOLS}
-
-
-@router.get("/tools/{provider}")
-async def get_tools_for_provider(provider: str):
-    """
-    Get available tools for a specific cloud provider.
+    Get list of files associated with a scan.
 
     Args:
-        provider: Cloud provider name (aws, azure, gcp, kubernetes, iac)
+        scan_id: UUID of the scan
 
     Returns:
-        dict: Provider name and list of available tools
+        list[ScanFileResponse]: List of file records
 
     Raises:
-        HTTPException 400: If provider is not recognized
-
-    Example Response:
-        ```json
-        {
-            "provider": "aws",
-            "tools": ["prowler", "scoutsuite", "cloudsploit", ...]
-        }
-        ```
+        HTTPException 404: If scan is not found
     """
-    if provider not in PROVIDER_TOOLS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown provider: {provider}. Available providers: {list(PROVIDER_TOOLS.keys())}",
-        )
-    return {"provider": provider, "tools": PROVIDER_TOOLS[provider]}
+    scan = db.query(Scan).filter(Scan.scan_id == scan_id).first()
+
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    files = db.query(ScanFile).filter(ScanFile.scan_id == scan_id).all()
+
+    return [ScanFileResponse.model_validate(f) for f in files]
