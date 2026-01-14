@@ -52,28 +52,24 @@ Get up and running in under 5 minutes:
 git clone https://github.com/Su1ph3r/Nubicustos.git
 cd Nubicustos
 
-# 2. Configure environment
-cp .env.example .env
-# Edit .env with your database passwords
-
-# 3. Launch the core stack
+# 2. Launch the core stack
 docker compose up -d
 
-# 4. Verify services are running
+# 3. Verify services are running
 docker compose ps
 # Should show: postgresql, neo4j, nginx, api, report-processor
 
-# 5. Access the web interface
+# 4. Access the web interface
 open http://localhost:8080
 
-# 6. Configure credentials via UI
+# 5. Configure credentials via UI
 # Navigate to Credentials page and add your cloud credentials
 # Or mount credentials manually:
 mkdir -p credentials/aws
 cp ~/.aws/credentials credentials/aws/
 cp ~/.aws/config credentials/aws/
 
-# 7. Run scans via UI or API
+# 6. Run scans via UI or API
 # Use the Scans page in the web interface, or:
 curl -X POST http://localhost:8000/api/scans \
   -H "Content-Type: application/json" \
@@ -109,7 +105,7 @@ curl -X POST http://localhost:8000/api/scans \
     DATA LAYER                        INTEGRATIONS
     ==========                        ============
     PostgreSQL (Findings DB)          MCP Server (LLM Integration)
-    Neo4j (Asset Graph)               Grafana Dashboards (:3000)
+    Neo4j (Asset Graph)               Privilege Escalation Analyzer
     Archive Service (ZIP)             Attack Path Analyzer
     Report Processor                  Assumed Role Analyzer
 
@@ -382,7 +378,6 @@ curl http://localhost:8000/api/credentials/aws/profiles
 |------|---------|-------------|
 | 8080 | Nginx | Vue.js web frontend |
 | 8000 | FastAPI | REST API (20+ endpoint groups) |
-| 3000 | Grafana | Dashboards (optional) |
 | 5432 | PostgreSQL | Findings database |
 | 7474 | Neo4j HTTP | Graph browser |
 | 7687 | Neo4j Bolt | Graph connections |
