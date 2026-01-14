@@ -143,6 +143,76 @@ class ScanListResponse(BaseModel):
 
 
 # ============================================================================
+# Bulk Scan Operation Schemas
+# ============================================================================
+
+
+class ScanFileResponse(BaseModel):
+    """Response schema for scan file details."""
+
+    id: int
+    scan_id: UUID
+    tool: str
+    file_path: str
+    file_type: str
+    file_size_bytes: int | None = None
+    created_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class BulkDeleteRequest(BaseModel):
+    """Request schema for bulk delete operation."""
+
+    scan_ids: list[UUID] = Field(min_length=1, max_length=100, description="List of scan IDs to delete")
+    delete_files: bool = Field(default=True, description="Also delete associated report files")
+
+
+class BulkDeleteResponse(BaseModel):
+    """Response schema for bulk delete operation."""
+
+    success: bool
+    deleted_scans: int
+    deleted_files: int
+    skipped_scans: list[str] = Field(default=[], description="IDs of running scans that were skipped")
+    errors: list[str] = Field(default=[], description="Any errors encountered")
+
+
+class BulkArchiveRequest(BaseModel):
+    """Request schema for bulk archive operation."""
+
+    scan_ids: list[UUID] = Field(min_length=1, max_length=100, description="List of scan IDs to archive")
+
+
+class BulkArchiveResponse(BaseModel):
+    """Response schema for bulk archive operation."""
+
+    success: bool
+    archive_path: str
+    archive_name: str
+    archived_scans: int
+    archived_files: int
+    archive_size_bytes: int
+
+
+class ArchiveInfo(BaseModel):
+    """Information about an archive file."""
+
+    name: str
+    path: str
+    size_bytes: int
+    created_at: datetime
+
+
+class ArchiveListResponse(BaseModel):
+    """Response schema for listing archives."""
+
+    archives: list[ArchiveInfo]
+    total: int
+
+
+# ============================================================================
 # Finding Schemas
 # ============================================================================
 

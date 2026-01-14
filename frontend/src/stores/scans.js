@@ -17,6 +17,9 @@ export const useScansStore = defineStore('scans', () => {
   const error = ref(null)
   const pollingIntervals = ref({})
   const scanPreviousStatus = ref({}) // Track previous status for notifications
+  const selectedScans = ref([]) // For bulk operations
+  const bulkOperationLoading = ref(false)
+  const archives = ref([]) // List of archives
 
   // Toast instance (set from component)
   let toastInstance = null
@@ -77,6 +80,11 @@ export const useScansStore = defineStore('scans', () => {
     }
     return credentialStatus.value?.summary?.kubernetes || 'unknown'
   })
+
+  // Scans that can be selected for bulk operations (not running)
+  const selectableScans = computed(() =>
+    scans.value.filter(s => ['completed', 'failed', 'cancelled'].includes(s.status)),
+  )
 
   // Actions
   async function fetchScans(filters = {}) {
@@ -327,6 +335,115 @@ export const useScansStore = defineStore('scans', () => {
     })
   }
 
+  // Bulk Operations
+
+  async function bulkDeleteScans(scanIds, deleteFiles = true) {
+    bulkOperationLoading.value = true
+    error.value = null
+
+    try {
+      const response = await fetch(`${API_BASE}/scans/bulk`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scan_ids: scanIds,
+          delete_files: deleteFiles,
+        }),
+      })
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}))
+        throw new Error(errData.detail || 'Failed to delete scans')
+      }
+
+      const result = await response.json()
+
+      // Refresh scans list
+      await fetchScans()
+
+      // Clear selection
+      selectedScans.value = []
+
+      // Notify user
+      if (result.success) {
+        notify('success', 'Scans Deleted', `Deleted ${result.deleted_scans} scans and ${result.deleted_files} files`, 5000)
+      } else {
+        const msg = result.skipped_scans.length > 0
+          ? `Deleted ${result.deleted_scans} scans. Skipped ${result.skipped_scans.length} running scans.`
+          : `Deleted ${result.deleted_scans} scans with ${result.errors.length} errors.`
+        notify('warn', 'Partial Success', msg, 5000)
+      }
+
+      return result
+    } catch (e) {
+      error.value = e.message
+      notify('error', 'Delete Failed', e.message, 5000)
+      throw e
+    } finally {
+      bulkOperationLoading.value = false
+    }
+  }
+
+  async function bulkArchiveScans(scanIds) {
+    bulkOperationLoading.value = true
+    error.value = null
+
+    try {
+      const response = await fetch(`${API_BASE}/scans/bulk/archive`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scan_ids: scanIds,
+        }),
+      })
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}))
+        throw new Error(errData.detail || 'Failed to archive scans')
+      }
+
+      const result = await response.json()
+
+      // Refresh scans list
+      await fetchScans()
+
+      // Refresh archives list
+      await fetchArchives()
+
+      // Clear selection
+      selectedScans.value = []
+
+      // Notify user
+      notify('success', 'Scans Archived', `Archived ${result.archived_scans} scans to ${result.archive_name}`, 5000)
+
+      return result
+    } catch (e) {
+      error.value = e.message
+      notify('error', 'Archive Failed', e.message, 5000)
+      throw e
+    } finally {
+      bulkOperationLoading.value = false
+    }
+  }
+
+  async function fetchArchives() {
+    try {
+      const response = await fetch(`${API_BASE}/scans/archives`)
+      if (!response.ok) throw new Error('Failed to fetch archives')
+
+      const data = await response.json()
+      archives.value = data.archives
+      return data.archives
+    } catch (e) {
+      console.error('Error fetching archives:', e)
+      return []
+    }
+  }
+
+  function clearSelection() {
+    selectedScans.value = []
+  }
+
   return {
     // State
     scans,
@@ -337,6 +454,9 @@ export const useScansStore = defineStore('scans', () => {
     loading,
     error,
     pagination,
+    selectedScans,
+    bulkOperationLoading,
+    archives,
 
     // Computed
     runningScans,
@@ -346,6 +466,7 @@ export const useScansStore = defineStore('scans', () => {
     azureStatus,
     gcpStatus,
     kubernetesStatus,
+    selectableScans,
 
     // Actions
     fetchScans,
@@ -360,5 +481,9 @@ export const useScansStore = defineStore('scans', () => {
     stopPolling,
     stopAllPolling,
     setToast,
+    bulkDeleteScans,
+    bulkArchiveScans,
+    fetchArchives,
+    clearSelection,
   }
 })

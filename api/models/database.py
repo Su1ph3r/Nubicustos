@@ -63,6 +63,23 @@ class Scan(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     findings = relationship("Finding", back_populates="scan")
+    files = relationship("ScanFile", back_populates="scan", cascade="all, delete-orphan")
+
+
+class ScanFile(Base):
+    """Scan file tracking model for bulk delete/archive operations."""
+
+    __tablename__ = "scan_files"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    scan_id = Column(UUID(as_uuid=True), ForeignKey("scans.scan_id", ondelete="CASCADE"), nullable=False)
+    tool = Column(String(64), nullable=False)
+    file_path = Column(String(512), nullable=False)
+    file_type = Column(String(32), nullable=False)
+    file_size_bytes = Column(Integer)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    scan = relationship("Scan", back_populates="files")
 
 
 class Finding(Base):

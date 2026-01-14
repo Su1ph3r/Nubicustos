@@ -1622,6 +1622,47 @@ class ReportProcessor:
         finally:
             conn.close()
 
+    def _register_scan_files(self, scan_id: str, tool: str, file_paths: list):
+        """Register report files associated with a scan in the scan_files table.
+
+        Args:
+            scan_id: UUID of the scan
+            tool: Tool name (e.g., 'prowler', 'scoutsuite')
+            file_paths: List of file paths (Path objects or strings)
+        """
+        conn = self.connect_db()
+        if not conn:
+            logger.warning(f"Could not register scan files - database connection failed")
+            return
+
+        try:
+            cur = conn.cursor()
+            for file_path in file_paths:
+                path = Path(file_path)
+                if not path.exists():
+                    continue
+                try:
+                    file_stat = path.stat()
+                    file_type = path.suffix.lstrip(".") or "unknown"
+                    cur.execute(
+                        """
+                        INSERT INTO scan_files (scan_id, tool, file_path, file_type, file_size_bytes)
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (scan_id, file_path) DO UPDATE SET
+                            file_size_bytes = EXCLUDED.file_size_bytes
+                        """,
+                        (scan_id, tool, str(path), file_type, file_stat.st_size),
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to register file {path}: {e}")
+            conn.commit()
+            logger.info(f"Registered {len(file_paths)} files for scan {scan_id}, tool {tool}")
+        except Exception as e:
+            logger.error(f"Failed to register scan files: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+
     def process_for_scan(self, orchestration_scan_id: str, tools: list = None):
         """Process reports and link findings to an existing orchestration scan.
 
@@ -1639,6 +1680,7 @@ class ReportProcessor:
         """
         logger.info(f"Processing reports for orchestration scan: {orchestration_scan_id}")
         total_findings = 0
+        processed_files = {}  # tool -> list of file paths
 
         # Process each tool's reports
         tools_to_process = tools or ["prowler", "scoutsuite", "cloudsploit", "cloudfox"]
@@ -1663,6 +1705,8 @@ class ReportProcessor:
                         orchestration_scan_id,
                     )
                     total_findings += len(findings)
+                    # Track processed file for registration
+                    processed_files["prowler"] = [str(report)]
 
         if "scoutsuite" in tools_to_process:
             # Process most recent ScoutSuite reports
@@ -1687,6 +1731,8 @@ class ReportProcessor:
                         orchestration_scan_id,
                     )
                     total_findings += len(findings)
+                    # Track processed file for registration
+                    processed_files["scoutsuite"] = [str(report)]
                 else:
                     logger.warning(f"ScoutSuite report yielded no findings: {report}")
 
@@ -1706,6 +1752,8 @@ class ReportProcessor:
                         orchestration_scan_id,
                     )
                     total_findings += len(findings)
+                    # Track processed file for registration
+                    processed_files["cloudsploit"] = [str(report)]
 
         if "cloudfox" in tools_to_process:
             # CloudFox outputs are enumeration data (inventory, permissions, principals)
@@ -1718,8 +1766,15 @@ class ReportProcessor:
                     logger.info(
                         f"CloudFox: Found {len(json_files)} enumeration files (stored in cloudfox_results table)"
                     )
+                    # Track CloudFox files for registration
+                    processed_files["cloudfox"] = [str(f) for f in json_files]
                     # CloudFox enumeration data powers attack path analysis
                     # Findings from CloudFox are generated via attack_path_analyzer.py
+
+        # Register all processed files with the scan
+        for tool, files in processed_files.items():
+            if files:
+                self._register_scan_files(orchestration_scan_id, tool, files)
 
         logger.info(f"Processed {total_findings} total findings for scan {orchestration_scan_id}")
         return total_findings

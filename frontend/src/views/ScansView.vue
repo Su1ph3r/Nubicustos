@@ -152,6 +152,38 @@
         />
       </div>
 
+      <!-- Bulk Actions Toolbar -->
+      <div
+        v-if="store.selectedScans.length > 0"
+        class="bulk-actions-bar"
+      >
+        <span class="selection-count">{{ store.selectedScans.length }} scan(s) selected</span>
+        <div class="bulk-buttons">
+          <Button
+            label="Delete Selected"
+            icon="pi pi-trash"
+            severity="danger"
+            size="small"
+            :loading="store.bulkOperationLoading"
+            @click="confirmBulkDelete"
+          />
+          <Button
+            label="Archive Selected"
+            icon="pi pi-file-export"
+            size="small"
+            :loading="store.bulkOperationLoading"
+            @click="confirmBulkArchive"
+          />
+          <Button
+            label="Clear Selection"
+            icon="pi pi-times"
+            text
+            size="small"
+            @click="store.clearSelection"
+          />
+        </div>
+      </div>
+
       <div
         v-if="store.loading && store.scans.length === 0"
         class="loading-container"
@@ -170,11 +202,26 @@
 
       <DataTable
         v-else
+        v-model:selection="store.selectedScans"
         :value="store.scans"
+        data-key="scan_id"
         responsive-layout="scroll"
         class="p-datatable-sm"
         @row-click="viewScan"
       >
+        <Column
+          selection-mode="multiple"
+          header-style="width: 3rem"
+        >
+          <template #body="{ data }">
+            <Checkbox
+              v-model="store.selectedScans"
+              :value="data"
+              :disabled="data.status === 'running' || data.status === 'pending'"
+              @click.stop
+            />
+          </template>
+        </Column>
         <Column
           field="scan_id"
           header="ID"
@@ -239,6 +286,55 @@
         </Column>
       </DataTable>
     </section>
+
+    <!-- Delete Confirmation Dialog -->
+    <Dialog
+      v-model:visible="showDeleteConfirm"
+      modal
+      header="Confirm Delete"
+      :style="{ width: '400px' }"
+    >
+      <p>Are you sure you want to delete {{ store.selectedScans.length }} scan(s)?</p>
+      <p class="confirm-warning">This will also delete all associated report files.</p>
+      <template #footer>
+        <Button
+          label="Cancel"
+          text
+          @click="showDeleteConfirm = false"
+        />
+        <Button
+          label="Delete"
+          icon="pi pi-trash"
+          severity="danger"
+          :loading="store.bulkOperationLoading"
+          @click="handleBulkDelete"
+        />
+      </template>
+    </Dialog>
+
+    <!-- Archive Confirmation Dialog -->
+    <Dialog
+      v-model:visible="showArchiveConfirm"
+      modal
+      header="Confirm Archive"
+      :style="{ width: '400px' }"
+    >
+      <p>Are you sure you want to archive {{ store.selectedScans.length }} scan(s)?</p>
+      <p class="confirm-info">A zip archive will be created and original files will be deleted.</p>
+      <template #footer>
+        <Button
+          label="Cancel"
+          text
+          @click="showArchiveConfirm = false"
+        />
+        <Button
+          label="Archive"
+          icon="pi pi-file-export"
+          :loading="store.bulkOperationLoading"
+          @click="handleBulkArchive"
+        />
+      </template>
+    </Dialog>
 
     <!-- New Scan Dialog -->
     <Dialog
@@ -363,6 +459,8 @@ const toast = useToast()
 store.setToast(toast)
 
 const showNewScanDialog = ref(false)
+const showDeleteConfirm = ref(false)
+const showArchiveConfirm = ref(false)
 const selectedProfile = ref(null)
 const newScanConfig = ref({
   profile: 'comprehensive',
@@ -513,6 +611,35 @@ function viewAllScans() {
   store.fetchScans()
 }
 
+// Bulk Operations
+function confirmBulkDelete() {
+  showDeleteConfirm.value = true
+}
+
+function confirmBulkArchive() {
+  showArchiveConfirm.value = true
+}
+
+async function handleBulkDelete() {
+  try {
+    const scanIds = store.selectedScans.map(s => s.scan_id)
+    await store.bulkDeleteScans(scanIds)
+    showDeleteConfirm.value = false
+  } catch (e) {
+    console.error('Failed to delete scans:', e)
+  }
+}
+
+async function handleBulkArchive() {
+  try {
+    const scanIds = store.selectedScans.map(s => s.scan_id)
+    await store.bulkArchiveScans(scanIds)
+    showArchiveConfirm.value = false
+  } catch (e) {
+    console.error('Failed to archive scans:', e)
+  }
+}
+
 // Track unsubscribe function
 let unsubscribeCredentialStatus = null
 
@@ -583,6 +710,38 @@ onUnmounted(() => {
   font-size: 1.125rem;
   font-weight: 600;
   margin: 0 0 var(--spacing-md) 0;
+}
+
+/* Bulk Actions Toolbar */
+.bulk-actions-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--accent-primary-bg);
+  border: 1px solid var(--accent-primary);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.selection-count {
+  font-weight: 500;
+  color: var(--accent-primary);
+}
+
+.bulk-buttons {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.confirm-warning {
+  color: var(--red-500);
+  font-size: 0.875rem;
+}
+
+.confirm-info {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
 }
 
 /* Credential Cards */

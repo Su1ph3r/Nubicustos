@@ -30,6 +30,18 @@ CREATE TABLE IF NOT EXISTS scans (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
+-- Scan files tracking table (for bulk delete/archive operations)
+CREATE TABLE IF NOT EXISTS scan_files (
+    id SERIAL PRIMARY KEY,
+    scan_id UUID NOT NULL REFERENCES scans(scan_id) ON DELETE CASCADE,
+    tool VARCHAR(64) NOT NULL,
+    file_path VARCHAR(512) NOT NULL,
+    file_type VARCHAR(32) NOT NULL,
+    file_size_bytes BIGINT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(scan_id, file_path)
+);
+
 -- Findings table
 CREATE TABLE IF NOT EXISTS findings (
     id SERIAL PRIMARY KEY,
@@ -188,6 +200,10 @@ CREATE INDEX IF NOT EXISTS idx_findings_tool ON findings(tool);
 CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(status);
 CREATE INDEX IF NOT EXISTS idx_scans_started_at ON scans(started_at);
 CREATE INDEX IF NOT EXISTS idx_scans_scan_type ON scans(scan_type);
+
+-- Scan files indexes
+CREATE INDEX IF NOT EXISTS idx_scan_files_scan_id ON scan_files(scan_id);
+CREATE INDEX IF NOT EXISTS idx_scan_files_tool ON scan_files(tool);
 
 -- Asset indexes
 CREATE INDEX IF NOT EXISTS idx_assets_cloud_provider ON assets(cloud_provider);
