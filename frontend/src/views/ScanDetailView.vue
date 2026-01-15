@@ -141,8 +141,21 @@
           Scan Progress
         </h2>
         <div class="progress-card">
-          <ProgressBar mode="indeterminate" />
-          <p>Scan is running. This may take several minutes depending on the profile.</p>
+          <ToolProgressStepper
+            v-if="toolProgress?.tools?.length"
+            :tools="toolProgress.tools"
+            :completed-tools="toolProgress.completedTools"
+            :tool-errors="toolProgress.toolErrors"
+            :current-tool="toolProgress.currentTool"
+            :scan-status="scan.status"
+          />
+          <ProgressBar
+            v-else
+            mode="indeterminate"
+          />
+          <p class="progress-note">
+            Progress updates every 5 seconds.
+          </p>
         </div>
       </section>
 
@@ -175,13 +188,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useScansStore } from '../stores/scans'
 import Tag from 'primevue/tag'
 import Button from 'primevue/button'
 import ProgressSpinner from 'primevue/progressspinner'
 import ProgressBar from 'primevue/progressbar'
+import ToolProgressStepper from '../components/scans/ToolProgressStepper.vue'
 
 const props = defineProps({
   id: {
@@ -197,6 +211,31 @@ const store = useScansStore()
 const scan = ref(null)
 const logs = ref(null)
 const loading = ref(true)
+
+const toolProgress = computed(() => {
+  if (!scan.value?.scan_metadata) return null
+  const metadata = scan.value.scan_metadata
+  const tools = metadata.tools || []
+  const completedTools = metadata.completed_tools || []
+  const toolErrors = metadata.tool_errors || {}
+
+  let currentTool = null
+  if (scan.value.status === 'running') {
+    for (const tool of tools) {
+      if (!completedTools.includes(tool) && !toolErrors[tool]) {
+        currentTool = tool
+        break
+      }
+    }
+  }
+
+  return {
+    tools,
+    completedTools,
+    toolErrors,
+    currentTool,
+  }
+})
 
 function getStatusSeverity(status) {
   const map = {

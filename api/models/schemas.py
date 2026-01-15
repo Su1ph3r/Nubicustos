@@ -128,6 +128,7 @@ class ScanResponse(BaseModel):
     high_findings: int = 0
     medium_findings: int = 0
     low_findings: int = 0
+    scan_metadata: dict | None = None
 
     class Config:
         from_attributes = True

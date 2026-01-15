@@ -26,58 +26,14 @@
     </div>
 
     <!-- Execution Status Panel -->
-    <div
-      v-if="store.currentExecution"
-      class="execution-panel"
-      :class="executionStatusClass"
-    >
-      <div class="execution-header">
-        <div class="execution-info">
-          <i
-            :class="executionIcon"
-            class="execution-icon"
-          />
-          <span class="execution-title">{{ executionTitle }}</span>
-        </div>
-        <div class="execution-meta">
-          <span
-            v-if="store.currentExecution.execution_id"
-            class="execution-id"
-          >
-            ID: {{ store.currentExecution.execution_id }}
-          </span>
-        </div>
-      </div>
-      <div
-        v-if="store.currentExecution.error"
-        class="execution-error"
-      >
-        {{ store.currentExecution.error }}
-      </div>
-      <div
-        v-if="executionLogs"
-        class="execution-logs"
-      >
-        <pre>{{ executionLogs }}</pre>
-      </div>
-      <div
-        v-if="!isRunning"
-        class="execution-actions"
-      >
-        <Button
-          label="Dismiss"
-          text
-          size="small"
-          @click="dismissExecution"
-        />
-        <Button
-          v-if="store.currentExecution.status === 'completed'"
-          label="View Results"
-          size="small"
-          @click="store.fetchAnalyses()"
-        />
-      </div>
-    </div>
+    <ExecutionProgressPanel
+      :execution="store.currentExecution"
+      tool-name="Lambda analysis"
+      description="Analyzing Lambda functions for security issues, secrets, and vulnerabilities. This scans function code and configurations."
+      :logs="executionLogs"
+      @dismiss="dismissExecution"
+      @view-results="store.fetchAnalyses()"
+    />
 
     <div
       v-if="store.summary"
@@ -233,6 +189,7 @@ import Button from 'primevue/button'
 import Dropdown from 'primevue/dropdown'
 import ProgressBar from 'primevue/progressbar'
 import Paginator from 'primevue/paginator'
+import ExecutionProgressPanel from '../components/executions/ExecutionProgressPanel.vue'
 
 const store = useLambdaAnalysisStore()
 const executionsStore = useExecutionsStore()
@@ -250,38 +207,6 @@ const riskLevels = ['critical', 'high', 'medium', 'low']
 const isRunning = computed(() =>
   store.currentExecution?.status === 'running',
 )
-
-const executionStatusClass = computed(() => {
-  const status = store.currentExecution?.status
-  return {
-    'status-running': status === 'running',
-    'status-completed': status === 'completed',
-    'status-failed': status === 'failed',
-    'status-pending': status === 'pending',
-  }
-})
-
-const executionIcon = computed(() => {
-  const status = store.currentExecution?.status
-  const icons = {
-    running: 'pi pi-spin pi-spinner',
-    completed: 'pi pi-check-circle',
-    failed: 'pi pi-times-circle',
-    pending: 'pi pi-clock',
-  }
-  return icons[status] || 'pi pi-info-circle'
-})
-
-const executionTitle = computed(() => {
-  const status = store.currentExecution?.status
-  const titles = {
-    running: 'Lambda analysis running...',
-    completed: 'Lambda analysis completed',
-    failed: 'Lambda analysis failed',
-    pending: 'Lambda analysis pending',
-  }
-  return titles[status] || 'Lambda analysis'
-})
 
 function getRiskSeverity(level) {
   const map = { critical: 'danger', high: 'warning', medium: 'info', low: 'success' }
@@ -352,68 +277,6 @@ onUnmounted(() => {
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; }
 .page-header h1 { margin: 0; font-size: 1.75rem; }
 .subtitle { color: var(--text-color-secondary); margin-top: 0.25rem; }
-
-.execution-panel {
-  padding: 1rem;
-  border-radius: 8px;
-  margin-bottom: 1.5rem;
-  background: var(--surface-card);
-  border-left: 4px solid var(--blue-500);
-}
-.execution-panel.status-running { border-left-color: var(--blue-500); background: rgba(59, 130, 246, 0.1); }
-.execution-panel.status-completed { border-left-color: var(--green-500); background: rgba(34, 197, 94, 0.1); }
-.execution-panel.status-failed { border-left-color: var(--red-500); background: rgba(239, 68, 68, 0.1); }
-.execution-panel.status-pending { border-left-color: var(--yellow-500); background: rgba(234, 179, 8, 0.1); }
-
-.execution-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.execution-info {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-.execution-icon { font-size: 1.25rem; }
-.execution-title { font-weight: 600; color: var(--text-color); }
-.execution-id {
-  font-family: monospace;
-  font-size: 0.85rem;
-  color: var(--text-color-secondary);
-}
-.execution-error {
-  margin-top: 0.5rem;
-  padding: 0.75rem;
-  background: rgba(239, 68, 68, 0.15);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  border-radius: 4px;
-  color: #ef4444;
-  font-size: 0.9rem;
-  font-family: monospace;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.execution-logs {
-  margin-top: 0.5rem;
-  max-height: 200px;
-  overflow: auto;
-  background: var(--surface-ground);
-  border-radius: 4px;
-  padding: 0.5rem;
-}
-.execution-logs pre {
-  margin: 0;
-  font-size: 0.8rem;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--text-color);
-}
-.execution-actions {
-  margin-top: 0.75rem;
-  display: flex;
-  gap: 0.5rem;
-}
 
 .summary-cards {
   display: grid;

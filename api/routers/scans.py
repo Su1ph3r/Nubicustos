@@ -1027,6 +1027,19 @@ async def get_scan_status(scan_id: UUID, db: Session = Depends(get_db)):
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
 
+    # Derive tool progress from existing scan_metadata
+    metadata = scan.scan_metadata or {}
+    tools = metadata.get("tools", [])
+    completed_tools = metadata.get("completed_tools", [])
+    tool_errors = metadata.get("tool_errors", {})
+
+    current_tool = None
+    if scan.status == "running":
+        for tool in tools:
+            if tool not in completed_tools and tool not in tool_errors:
+                current_tool = tool
+                break
+
     return {
         "scan_id": str(scan.scan_id),
         "status": scan.status,
@@ -1038,6 +1051,12 @@ async def get_scan_status(scan_id: UUID, db: Session = Depends(get_db)):
             "high": scan.high_findings,
             "medium": scan.medium_findings,
             "low": scan.low_findings,
+        },
+        "tool_progress": {
+            "tools": tools,
+            "completed_tools": completed_tools,
+            "tool_errors": tool_errors,
+            "current_tool": current_tool,
         },
     }
 

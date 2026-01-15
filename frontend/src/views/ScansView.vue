@@ -243,13 +243,21 @@
           header="Status"
         >
           <template #body="{ data }">
-            <Tag
-              v-tooltip.top="getStatusTooltip(data)"
-              :severity="getStatusSeverity(data.status)"
-              :value="data.status"
-              :class="{ 'cursor-pointer': data.status === 'failed' }"
-              @click="data.status === 'failed' && showScanErrors(data.scan_id)"
-            />
+            <div class="status-cell">
+              <Tag
+                v-tooltip.top="getStatusTooltip(data)"
+                :severity="getStatusSeverity(data.status)"
+                :value="data.status"
+                :class="{ 'cursor-pointer': data.status === 'failed' }"
+                @click="data.status === 'failed' && showScanErrors(data.scan_id)"
+              />
+              <span
+                v-if="data.status === 'running' && getToolProgressCount(data)"
+                class="mini-progress"
+              >
+                {{ getToolProgressCount(data) }}
+              </span>
+            </div>
           </template>
         </Column>
         <Column
@@ -626,6 +634,13 @@ function getStatusTooltip(scan) {
   return null
 }
 
+function getToolProgressCount(scan) {
+  if (!scan?.scan_metadata?.tools?.length) return null
+  const tools = scan.scan_metadata.tools
+  const completedTools = scan.scan_metadata.completed_tools || []
+  return `${completedTools.length}/${tools.length}`
+}
+
 async function showScanErrors(scanId) {
   showErrorDialog.value = true
   scanErrorDetails.value = null
@@ -822,6 +837,22 @@ onUnmounted(() => {
   font-size: 1.125rem;
   font-weight: 600;
   margin: 0 0 var(--spacing-md) 0;
+}
+
+/* Status Cell with Progress */
+.status-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mini-progress {
+  font-size: 0.75rem;
+  color: var(--primary-color, #3b82f6);
+  background-color: var(--primary-50, #eff6ff);
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  font-weight: 500;
 }
 
 /* Bulk Actions Toolbar */
