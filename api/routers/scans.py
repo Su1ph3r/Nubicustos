@@ -76,7 +76,7 @@ PROVIDER_TOOLS: dict[str, list[str]] = {
         "cloudfox",
         "enumerate-iam",
     ],
-    "azure": ["prowler", "scoutsuite", "cloudfox"],
+    "azure": ["prowler", "scoutsuite"],  # CloudFox is AWS-only
     "gcp": ["prowler", "scoutsuite", "cloudfox", "cartography"],
     "kubernetes": [
         "kube-bench",
@@ -241,19 +241,81 @@ def _replace_profile_in_command(command: list[str], aws_profile: str, tool: "Too
     return result
 
 
+def _inject_azure_credentials(
+    environment: dict[str, str],
+    azure_credentials: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """
+    Inject Azure credentials into tool environment variables.
+
+    Supports both:
+    1. Passed credentials dict (from API request)
+    2. File-based credentials from mounted Azure config
+
+    Args:
+        environment: Base environment dict to extend
+        azure_credentials: Optional dict with tenant_id, client_id, client_secret, subscription_id
+
+    Returns:
+        Updated environment dict with Azure credentials
+    """
+    import json
+    import os
+
+    if azure_credentials:
+        if azure_credentials.get("tenant_id"):
+            environment["AZURE_TENANT_ID"] = azure_credentials["tenant_id"]
+        if azure_credentials.get("client_id"):
+            environment["AZURE_CLIENT_ID"] = azure_credentials["client_id"]
+        if azure_credentials.get("client_secret"):
+            environment["AZURE_CLIENT_SECRET"] = azure_credentials["client_secret"]
+        if azure_credentials.get("subscription_id"):
+            environment["AZURE_SUBSCRIPTION_ID"] = azure_credentials["subscription_id"]
+    else:
+        # Try file-based credentials
+        azure_creds_path = "/app/credentials/azure/credentials.json"
+        if os.path.exists(azure_creds_path):
+            try:
+                with open(azure_creds_path) as f:
+                    creds = json.load(f)
+                    if creds.get("tenantId"):
+                        environment["AZURE_TENANT_ID"] = creds["tenantId"]
+                    if creds.get("clientId"):
+                        environment["AZURE_CLIENT_ID"] = creds["clientId"]
+                    if creds.get("clientSecret"):
+                        environment["AZURE_CLIENT_SECRET"] = creds["clientSecret"]
+                    if creds.get("subscriptionId"):
+                        environment["AZURE_SUBSCRIPTION_ID"] = creds["subscriptionId"]
+            except (json.JSONDecodeError, IOError) as e:
+                logger.warning(f"Could not load Azure credentials file: {e}")
+
+    return environment
+
+
 async def run_scan_orchestration(
     scan_id: str,
     profile: str,
     severity_filter: str | None,
     db_url: str,
     aws_profile: str | None = None,
+    azure_credentials: dict[str, str] | None = None,
 ) -> None:
     """
     Background task to orchestrate a security scan using Docker SDK.
 
     Launches tools sequentially based on the scan profile, waiting for each
     to complete before starting the next.
+
+    Args:
+        scan_id: Unique scan identifier
+        profile: Scan profile name (e.g., 'quick', 'azure-quick')
+        severity_filter: Optional severity filter
+        db_url: Database URL for status updates
+        aws_profile: AWS profile name for AWS scans
+        azure_credentials: Azure credentials dict for Azure scans
     """
+    # Determine if Azure scan based on profile name
+    is_azure_scan = profile.startswith("azure-")
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
@@ -301,9 +363,26 @@ async def run_scan_orchestration(
                 if severity_filter:
                     command.extend(["--severity", severity_filter])
 
+            elif tool == ToolType.PROWLER_AZURE:
+                command = list(tool_config.get("default_command", []))
+                # Add profile-specific options (same as AWS Prowler)
+                prowler_options = profile_config.get("prowler_options", [])
+                if prowler_options:
+                    command.extend(prowler_options)
+                # Add severity filter if specified
+                if severity_filter:
+                    command.extend(["--severity", severity_filter])
+
             elif tool == ToolType.SCOUTSUITE:
                 command = list(tool_config.get("default_command", []))
                 # Add profile-specific options
+                scoutsuite_options = profile_config.get("scoutsuite_options", [])
+                if scoutsuite_options:
+                    command.extend(scoutsuite_options)
+
+            elif tool == ToolType.SCOUTSUITE_AZURE:
+                command = list(tool_config.get("default_command", []))
+                # Add profile-specific options (same as AWS ScoutSuite)
                 scoutsuite_options = profile_config.get("scoutsuite_options", [])
                 if scoutsuite_options:
                     command.extend(scoutsuite_options)
@@ -318,9 +397,14 @@ async def run_scan_orchestration(
                 if default_cmd:
                     command = list(default_cmd)
 
-            # Build environment with dynamic AWS profile
+            # Build environment with appropriate credentials
             env = {"SCAN_ID": scan_id}
-            if aws_profile:
+
+            if is_azure_scan:
+                # Inject Azure credentials for Azure scans
+                env = _inject_azure_credentials(env, azure_credentials)
+            elif aws_profile:
+                # AWS scan with specified profile
                 env["AWS_PROFILE"] = aws_profile
                 # Also replace hardcoded profile in command if present
                 if command:
@@ -636,6 +720,18 @@ async def create_scan(scan_request: ScanCreate, db: Session = Depends(get_db)):
                 f"Available: {available_tools}",
             )
 
+    # Validate Azure credentials are provided for Azure profiles
+    if profile_name.startswith("azure-"):
+        if not (
+            scan_request.azure_tenant_id
+            and scan_request.azure_client_id
+            and scan_request.azure_client_secret
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Azure scans require azure_tenant_id, azure_client_id, and azure_client_secret",
+            )
+
     # Determine which tools to run
     if scan_request.tools:
         tools_to_run = scan_request.tools
@@ -670,6 +766,16 @@ async def create_scan(scan_request: ScanCreate, db: Session = Depends(get_db)):
         # Get database URL from settings
         settings = get_settings()
 
+        # Build Azure credentials dict if provided
+        azure_credentials = None
+        if scan_request.azure_tenant_id and scan_request.azure_client_id:
+            azure_credentials = {
+                "tenant_id": scan_request.azure_tenant_id,
+                "client_id": scan_request.azure_client_id,
+                "client_secret": scan_request.azure_client_secret,
+                "subscription_id": scan_request.azure_subscription_id,
+            }
+
         def _handle_task_exception(task: asyncio.Task) -> None:
             """Log any unhandled exceptions from the background task."""
             if task.done() and not task.cancelled():
@@ -685,6 +791,7 @@ async def create_scan(scan_request: ScanCreate, db: Session = Depends(get_db)):
                 scan_request.severity_filter,
                 settings.database_url,
                 scan_request.aws_profile,
+                azure_credentials,
             )
         )
         task.add_done_callback(_handle_task_exception)
@@ -703,21 +810,30 @@ async def list_profiles():
     List available scan profiles.
 
     Returns metadata about each predefined scan profile including
-    name, description, estimated duration, and tools included.
+    name, description, estimated duration, provider, and tools included.
 
     Available Profiles:
+        AWS:
         - quick: Fast scan (5-10 min) focusing on critical/high issues
         - comprehensive: Full audit (30-60 min) with all AWS tools enabled
         - compliance-only: Compliance-focused scanning (15-20 min)
 
+        Azure:
+        - azure-quick: Fast Azure scan (5-10 min)
+        - azure-comprehensive: Full Azure security audit (15-25 min)
+        - azure-compliance: Azure CIS compliance scanning (10-15 min)
+
     Returns:
-        dict: List of available profiles with descriptions and tool lists
+        dict: List of available profiles with descriptions, providers, and tool lists
     """
     profiles = []
     for name, config in SCAN_PROFILES.items():
+        # Determine provider from profile name prefix
+        provider = "azure" if name.startswith("azure-") else "aws"
         profiles.append(
             {
                 "name": name,
+                "provider": provider,
                 "description": config.get("description", ""),
                 "duration_estimate": config.get("duration_estimate", "Unknown"),
                 "tools": [t.value for t in config.get("tools", [])],

@@ -46,9 +46,14 @@ class FindingStatus(str, Enum):
 class ScanProfile(str, Enum):
     """Available scan profiles."""
 
+    # AWS profiles
     quick = "quick"
     comprehensive = "comprehensive"
     compliance_only = "compliance-only"
+    # Azure profiles
+    azure_quick = "azure-quick"
+    azure_comprehensive = "azure-comprehensive"
+    azure_compliance = "azure-compliance"
 
 
 # ============================================================================
@@ -86,6 +91,32 @@ class ScanCreate(BaseModel):
         max_length=64,
         pattern=r"^[a-zA-Z0-9_\-]+$",
         description="AWS profile name from credentials file to use for scanning",
+    )
+    # Azure credentials
+    # GUID pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (case-insensitive)
+    azure_tenant_id: str | None = Field(
+        default=None,
+        max_length=36,
+        pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+        description="Azure Tenant ID (UUID format)",
+    )
+    azure_client_id: str | None = Field(
+        default=None,
+        max_length=36,
+        pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+        description="Azure Client/Application ID (UUID format)",
+    )
+    azure_client_secret: str | None = Field(
+        default=None,
+        max_length=256,
+        pattern=r"^[a-zA-Z0-9~._\-]+$",
+        description="Azure Client Secret",
+    )
+    azure_subscription_id: str | None = Field(
+        default=None,
+        max_length=36,
+        pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+        description="Azure Subscription ID (UUID format, optional - scans all if not specified)",
     )
 
     @field_validator("target")
