@@ -108,6 +108,9 @@ class ToolType(str, Enum):
     TFSEC = "tfsec"
     KUBE_LINTER = "kube-linter"
     POLARIS = "polaris"
+    # Azure Security Tools
+    PROWLER_AZURE = "prowler-azure"
+    SCOUTSUITE_AZURE = "scoutsuite-azure"
 
 
 # Build configurations for tools that use local images
@@ -471,6 +474,48 @@ TOOL_CONFIGS = {
         ],
         "expected_exit_codes": [0, 1, 3],  # 0 = pass, 1 = warnings, 3 = danger-level issues
     },
+    # ============================================================================
+    # Azure Security Tools
+    # ============================================================================
+    ToolType.PROWLER_AZURE: {
+        "image": "toniblyx/prowler:4.2.4",
+        "container_name_prefix": "prowler-azure-scan",
+        "volumes": {
+            "/app/reports/prowler-azure": {"bind": "/reports", "mode": "rw"},
+        },
+        "network": None,  # Resolved dynamically via get_security_network()
+        "environment": {},  # Injected dynamically with Azure credentials
+        "default_command": [
+            "azure",
+            "--sp-env-auth",
+            "--output-formats",
+            "json-ocsf",
+            "html",
+            "csv",
+            "--output-directory",
+            "/reports",
+        ],
+        "expected_exit_codes": [0, 1, 3],  # 0=no findings, 1/3=findings found (not errors)
+    },
+    ToolType.SCOUTSUITE_AZURE: {
+        "image": "rossja/ncc-scoutsuite:latest",
+        "container_name_prefix": "scoutsuite-azure-scan",
+        "volumes": {
+            "/app/reports/scoutsuite": {"bind": "/reports", "mode": "rw"},
+        },
+        "network": None,  # Resolved dynamically via get_security_network()
+        "environment": {},  # Injected dynamically with Azure credentials
+        "entrypoint": "scout",  # Image has no entrypoint, must specify
+        "default_command": [
+            "azure",
+            "--service-principal",
+            "--report-dir",
+            "/reports/azure",
+            "--no-browser",
+            "--force",
+        ],
+        "expected_exit_codes": [0, 1, 200],  # 200 = completed with warnings
+    },
 }
 
 
@@ -502,6 +547,25 @@ SCAN_PROFILES = {
         "duration_estimate": "15-20 minutes",
         "prowler_options": ["--compliance", "cis_2.0_aws", "soc2_aws", "pci_3.2.1_aws", "hipaa_aws"],
         # scoutsuite_options removed - causes path handling bug
+    },
+    # Azure Scan Profiles
+    "azure-quick": {
+        "tools": [ToolType.PROWLER_AZURE],
+        "description": "Fast Azure scan focusing on critical/high severity (5-10 min)",
+        "duration_estimate": "5-10 minutes",
+        "prowler_options": ["--severity", "critical", "high"],
+    },
+    "azure-comprehensive": {
+        "tools": [ToolType.PROWLER_AZURE, ToolType.SCOUTSUITE_AZURE],
+        "description": "Full Azure security audit with Prowler and ScoutSuite (15-25 min)",
+        "duration_estimate": "15-25 minutes",
+        "prowler_options": [],
+    },
+    "azure-compliance": {
+        "tools": [ToolType.PROWLER_AZURE],
+        "description": "Azure compliance scanning - CIS benchmarks (10-15 min)",
+        "duration_estimate": "10-15 minutes",
+        "prowler_options": ["--compliance", "cis_2.0_azure"],
     },
 }
 
