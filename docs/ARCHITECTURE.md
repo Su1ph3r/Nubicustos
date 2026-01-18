@@ -400,6 +400,7 @@ Python scripts for parsing and loading scan results:
 ```
 report-processor/
 +-- process_reports.py       # Main report processing orchestrator
++-- remediation_kb.py        # Remediation knowledge base with provider-specific guidance
 +-- compare_scans.py         # Scan diff and trend analysis
 +-- attack_path_analyzer.py  # Attack graph construction and BFS
 +-- attack_path_edges.py     # Edge definitions for path finding
@@ -409,6 +410,27 @@ report-processor/
     +-- kubescape_parser.py
     +-- (etc.)
 ```
+
+**Multi-Provider Support:**
+
+The report processor supports AWS, Azure, and GCP with provider-specific:
+- CLI verification commands (aws, az, gcloud)
+- Remediation guidance
+- Resource path parsing
+
+**Finding Field Definitions:**
+
+| Field | Purpose | Example |
+|-------|---------|---------|
+| `poc_verification` | CLI command user can run to verify finding | `az network nsg list --output json` |
+| `poc_evidence` | Scanner output showing the vulnerability | Resource configs, flagged items |
+| `remediation_code.{provider}_cli` | Provider-specific remediation CLI | `aws_cli`, `azure_cli`, `gcp_cli` |
+| `cloud_provider` | Normalized provider name | `aws`, `azure`, `gcp` |
+
+**Provider Normalization:**
+- `"Amazon Web Services"` → `aws`
+- `"Microsoft Azure"` → `azure`
+- `"Google Cloud Platform"` → `gcp`
 
 ### Scan Profiles (profiles/)
 
