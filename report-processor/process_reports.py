@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pandas as pd
 import psycopg2
+import psycopg2.extensions
 from psycopg2.extras import Json
 
 # Import remediation knowledge base
@@ -39,8 +40,16 @@ except ImportError:
         return d or "Security finding detected."
 
 
-def strip_html_tags(text):
-    """Strip HTML tags from text while preserving content."""
+def strip_html_tags(text: str | None) -> str | None:
+    """Strip HTML tags from text while preserving content.
+
+    Args:
+        text: Input text that may contain HTML tags.
+
+    Returns:
+        Text with HTML tags removed and whitespace normalized,
+        or the original value if input is None or not a string.
+    """
     if not text or not isinstance(text, str):
         return text
     # Remove HTML tags but keep their content
@@ -348,15 +357,38 @@ class ReportProcessor:
 
         return None
 
-    def _validate_resource_id(self, resource_id):
-        """Validate that a resource ID matches expected AWS patterns."""
+    def _validate_resource_id(self, resource_id: str | None) -> bool:
+        """Validate that a resource ID matches expected AWS patterns.
+
+        Args:
+            resource_id: The AWS resource ID to validate.
+
+        Returns:
+            True if the resource ID matches AWS naming patterns, False otherwise.
+
+        Note:
+            This prevents command injection by ensuring resource IDs only
+            contain safe characters: alphanumeric, hyphens, underscores,
+            colons, slashes, periods, and @ symbols.
+        """
         if not resource_id:
             return False
         # Must match safe AWS resource ID pattern
         return bool(self.AWS_RESOURCE_ID_PATTERN.match(resource_id))
 
-    def _validate_azure_resource_id(self, resource_id):
-        """Validate that a resource ID matches expected Azure patterns."""
+    def _validate_azure_resource_id(self, resource_id: str | None) -> bool:
+        """Validate that a resource ID matches expected Azure patterns.
+
+        Args:
+            resource_id: The Azure resource ID to validate.
+
+        Returns:
+            True if the resource ID matches Azure naming patterns, False otherwise.
+
+        Note:
+            Azure resource IDs typically start with /subscriptions/ or are simple names.
+            Allowed characters: alphanumeric, hyphens, underscores, forward slashes, dots.
+        """
         if not resource_id:
             return False
         # Azure resource IDs typically start with /subscriptions/ or are simple names
@@ -364,83 +396,90 @@ class ReportProcessor:
         azure_pattern = re.compile(r"^[a-zA-Z0-9\-_/\.]+$")
         return bool(azure_pattern.match(resource_id))
 
-    def _run_aws_cli(self, command):
+    def _run_cli_command(
+        self, command: str | list[str], cli_name: str, timeout: int = 30
+    ) -> str:
+        """Run a CLI command safely and return the output.
+
+        This is the shared implementation for AWS and Azure CLI execution.
+        Uses shlex for safe command parsing to prevent command injection.
+
+        Args:
+            command: Command string or list of command parts to execute.
+            cli_name: The CLI executable name to validate ('aws' or 'az').
+            timeout: Command timeout in seconds (default: 30).
+
+        Returns:
+            Command output on success, or an error message string on failure.
+
+        Security:
+            - Uses shlex.split() for safe command parsing
+            - Validates command starts with expected CLI binary
+            - Uses shell=False to prevent shell injection
+        """
+        try:
+            # Parse command safely using shlex to prevent command injection
+            if isinstance(command, str):
+                parts = shlex.split(command)
+            else:
+                parts = list(command)
+
+            # Validate command starts with expected CLI
+            if not parts or parts[0] != cli_name:
+                logger.warning(f"Invalid {cli_name} CLI command attempted")
+                return "Invalid command format"
+
+            # Execute with shell=False (explicit for security)
+            result = subprocess.run(
+                parts,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                shell=False,  # Explicit: never use shell=True
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+            else:
+                # Log full error but return sanitized message
+                logger.debug(f"{cli_name} CLI command failed: {result.stderr.strip()}")
+                return "Command execution failed"
+        except subprocess.TimeoutExpired:
+            return "Command timed out"
+        except FileNotFoundError:
+            return f"{cli_name.upper()} CLI not available"
+        except (ValueError, OSError) as e:
+            # ValueError: shlex parsing errors
+            # OSError: process creation errors
+            logger.error(f"Error running {cli_name} CLI: {str(e)}")
+            return "Command execution error"
+
+    def _run_aws_cli(self, command: str | list[str]) -> str:
         """Run an AWS CLI command safely and return the output.
 
-        Security: Uses shlex for safe command parsing to prevent injection.
+        Args:
+            command: AWS CLI command string or list of command parts.
+
+        Returns:
+            Command output on success, or an error message string on failure.
+
+        Security:
+            Uses shlex for safe command parsing to prevent injection.
         """
-        try:
-            # Parse command safely using shlex to prevent command injection
-            if isinstance(command, str):
-                parts = shlex.split(command)
-            else:
-                parts = list(command)
+        return self._run_cli_command(command, "aws")
 
-            # Validate command starts with 'aws'
-            if not parts or parts[0] != "aws":
-                logger.warning("Invalid AWS CLI command attempted")
-                return "Invalid command format"
-
-            # Execute with shell=False (explicit for security)
-            result = subprocess.run(
-                parts,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                shell=False,  # Explicit: never use shell=True
-            )
-            if result.returncode == 0:
-                return result.stdout.strip()
-            else:
-                # Log full error but return sanitized message
-                logger.debug(f"AWS CLI command failed: {result.stderr.strip()}")
-                return "Command execution failed"
-        except subprocess.TimeoutExpired:
-            return "Command timed out"
-        except FileNotFoundError:
-            return "AWS CLI not available"
-        except Exception as e:
-            logger.error(f"Error running AWS CLI: {str(e)}")
-            return "Command execution error"
-
-    def _run_azure_cli(self, command):
+    def _run_azure_cli(self, command: str | list[str]) -> str:
         """Run an Azure CLI command safely and return the output.
 
-        Security: Uses shlex for safe command parsing to prevent injection.
+        Args:
+            command: Azure CLI command string or list of command parts.
+
+        Returns:
+            Command output on success, or an error message string on failure.
+
+        Security:
+            Uses shlex for safe command parsing to prevent injection.
         """
-        try:
-            # Parse command safely using shlex to prevent command injection
-            if isinstance(command, str):
-                parts = shlex.split(command)
-            else:
-                parts = list(command)
-
-            # Validate command starts with 'az'
-            if not parts or parts[0] != "az":
-                logger.warning("Invalid Azure CLI command attempted")
-                return "Invalid command format"
-
-            # Execute with shell=False (explicit for security)
-            result = subprocess.run(
-                parts,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                shell=False,  # Explicit: never use shell=True
-            )
-            if result.returncode == 0:
-                return result.stdout.strip()
-            else:
-                # Log full error but return sanitized message
-                logger.debug(f"Azure CLI command failed: {result.stderr.strip()}")
-                return "Command execution failed"
-        except subprocess.TimeoutExpired:
-            return "Command timed out"
-        except FileNotFoundError:
-            return "Azure CLI not available"
-        except Exception as e:
-            logger.error(f"Error running Azure CLI: {str(e)}")
-            return "Command execution error"
+        return self._run_cli_command(command, "az")
 
     def _enhance_finding(self, finding, service, check_id, cloud_provider="aws"):
         """Enhance a finding with data from remediation KB.
@@ -593,12 +632,23 @@ class ReportProcessor:
 
         return canonical_str
 
-    def connect_db(self):
-        """Connect to PostgreSQL database"""
+    def connect_db(self) -> psycopg2.extensions.connection | None:
+        """Connect to PostgreSQL database.
+
+        Returns:
+            PostgreSQL connection object, or None if connection fails.
+
+        Note:
+            Connection failures are logged but not raised, allowing
+            callers to handle missing connections gracefully.
+        """
         try:
             return psycopg2.connect(**self.db_config)
-        except Exception as e:
-            logger.error(f"Failed to connect to database: {e}")
+        except psycopg2.OperationalError as e:
+            logger.error(f"Database connection failed (operational error): {e}")
+            return None
+        except psycopg2.Error as e:
+            logger.error(f"Database connection failed: {e}")
             return None
 
     def process_scoutsuite_report(self, report_path):
