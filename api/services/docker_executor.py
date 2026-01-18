@@ -111,6 +111,12 @@ class ToolType(str, Enum):
     # Azure Security Tools
     PROWLER_AZURE = "prowler-azure"
     SCOUTSUITE_AZURE = "scoutsuite-azure"
+    # Secrets Scanning Tools
+    TRUFFLEHOG = "trufflehog"
+    GITLEAKS = "gitleaks"
+    # IAM Deep Analysis Tools
+    PMAPPER = "pmapper"
+    CLOUDSPLAINING = "cloudsplaining"
 
 
 # Build configurations for tools that use local images
@@ -140,6 +146,18 @@ LOCAL_BUILD_CONFIGS = {
         "container_context": "/app/cloudmapper",
         "dockerfile": "Dockerfile",
         "image": "cloudmapper:local",
+    },
+    ToolType.PMAPPER: {
+        "context": "docker/pmapper",
+        "container_context": "/app/docker/pmapper",
+        "dockerfile": "Dockerfile",
+        "image": "pmapper:local",
+    },
+    ToolType.CLOUDSPLAINING: {
+        "context": "docker/cloudsplaining",
+        "container_context": "/app/docker/cloudsplaining",
+        "dockerfile": "Dockerfile",
+        "image": "cloudsplaining:local",
     },
 }
 
@@ -516,6 +534,92 @@ TOOL_CONFIGS = {
         ],
         "expected_exit_codes": [0, 1, 200],  # 200 = completed with warnings
     },
+    # ============================================================================
+    # Secrets Scanning Tools
+    # ============================================================================
+    ToolType.TRUFFLEHOG: {
+        "image": "trufflesecurity/trufflehog:latest",
+        "container_name_prefix": "trufflehog-scan",
+        "volumes": {
+            "/app/reports/trufflehog": {"bind": "/output", "mode": "rw"},
+            "/app/target": {"bind": "/target", "mode": "ro"},
+        },
+        "network": None,  # Resolved dynamically via get_security_network()
+        "environment": {},
+        "entrypoint": "/bin/sh",
+        "default_command": [
+            "-c",
+            "trufflehog filesystem /target --json > /output/results.json 2>&1; exit 0",
+        ],
+        "expected_exit_codes": [0],  # Shell wrapper always exits 0
+    },
+    ToolType.GITLEAKS: {
+        "image": "zricethezav/gitleaks:latest",
+        "container_name_prefix": "gitleaks-scan",
+        "volumes": {
+            "/app/reports/gitleaks": {"bind": "/output", "mode": "rw"},
+            "/app/target": {"bind": "/target", "mode": "ro"},
+        },
+        "network": None,  # Resolved dynamically via get_security_network()
+        "environment": {},
+        "default_command": [
+            "detect",
+            "--source",
+            "/target",
+            "--report-format",
+            "json",
+            "--report-path",
+            "/output/results.json",
+            "--no-git",
+        ],
+        "expected_exit_codes": [0, 1],  # 0=no secrets, 1=secrets found
+    },
+    # ============================================================================
+    # IAM Deep Analysis Tools
+    # ============================================================================
+    ToolType.PMAPPER: {
+        "image": "pmapper:local",
+        "container_name_prefix": "pmapper-scan",
+        "volumes": {
+            "/app/reports/pmapper": {"bind": "/output", "mode": "rw"},
+            "/app/credentials/aws": {"bind": "/root/.aws", "mode": "ro"},
+        },
+        "named_volumes": {
+            "cloud-stack_pmapper-data": {"bind": "/root/.principalmap", "mode": "rw"},
+        },
+        "network": None,  # Resolved dynamically via get_security_network()
+        "environment": {
+            "AWS_SHARED_CREDENTIALS_FILE": "/root/.aws/credentials",
+            "AWS_CONFIG_FILE": "/root/.aws/config",
+            "AWS_PROFILE": DEFAULT_AWS_PROFILE,
+        },
+        "entrypoint": "/bin/sh",
+        "default_command": [
+            "-c",
+            "pmapper graph --create && pmapper query 'preset privesc *' --json > /output/privesc-results.json; exit 0",
+        ],
+        "expected_exit_codes": [0],
+    },
+    ToolType.CLOUDSPLAINING: {
+        "image": "cloudsplaining:local",
+        "container_name_prefix": "cloudsplaining-scan",
+        "volumes": {
+            "/app/reports/cloudsplaining": {"bind": "/output", "mode": "rw"},
+            "/app/credentials/aws": {"bind": "/root/.aws", "mode": "ro"},
+        },
+        "network": None,  # Resolved dynamically via get_security_network()
+        "environment": {
+            "AWS_SHARED_CREDENTIALS_FILE": "/root/.aws/credentials",
+            "AWS_CONFIG_FILE": "/root/.aws/config",
+            "AWS_PROFILE": DEFAULT_AWS_PROFILE,
+        },
+        "entrypoint": "/bin/sh",
+        "default_command": [
+            "-c",
+            "cloudsplaining download --output /output/iam-data.json && cloudsplaining scan --input-file /output/iam-data.json --output /output/; exit 0",
+        ],
+        "expected_exit_codes": [0],
+    },
 }
 
 
@@ -534,11 +638,15 @@ SCAN_PROFILES = {
             ToolType.CLOUDFOX,
             ToolType.CLOUDSPLOIT,
             ToolType.CLOUD_CUSTODIAN,
+            ToolType.TRUFFLEHOG,
+            ToolType.GITLEAKS,
+            ToolType.PMAPPER,
+            ToolType.CLOUDSPLAINING,
             # CloudMapper removed: visualization tool requiring manual account config
             # Cartography removed: graph analysis tool requiring Neo4j setup
         ],
-        "description": "Full security audit with all AWS security scanning tools (20-40 min)",
-        "duration_estimate": "20-40 minutes",
+        "description": "Full security audit with all AWS security scanning tools (30-50 min)",
+        "duration_estimate": "30-50 minutes",
         "prowler_options": [],
     },
     "compliance-only": {
@@ -566,6 +674,18 @@ SCAN_PROFILES = {
         "description": "Azure compliance scanning - CIS benchmarks (10-15 min)",
         "duration_estimate": "10-15 minutes",
         "prowler_options": ["--compliance", "cis_2.0_azure"],
+    },
+    # Secrets Scanning Profiles
+    "secrets": {
+        "tools": [ToolType.TRUFFLEHOG, ToolType.GITLEAKS],
+        "description": "Secrets and credential scanning (5-15 min)",
+        "duration_estimate": "5-15 minutes",
+    },
+    # IAM Deep Analysis Profiles
+    "iam-analysis": {
+        "tools": [ToolType.PMAPPER, ToolType.CLOUDSPLAINING],
+        "description": "Deep IAM privilege escalation and policy analysis (10-20 min)",
+        "duration_estimate": "10-20 minutes",
     },
 }
 

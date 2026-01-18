@@ -1,6 +1,6 @@
 # Nubicustos
 
-> **Cloud Security Guardian** - Orchestrate 20+ security tools with one command. Unified findings, attack paths, and compliance across AWS, Azure, GCP, and Kubernetes.
+> **Cloud Security Guardian** - Orchestrate 24+ security tools with one command. Unified findings, attack paths, and compliance across AWS, Azure, GCP, and Kubernetes.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://python.org)
@@ -17,7 +17,7 @@
 
 ## What is Nubicustos?
 
-Nubicustos is a comprehensive Docker Compose-based platform that orchestrates **20+ security scanning tools** for automated cloud security auditing. It provides unified vulnerability identification, compliance assessment, and remediation guidance across AWS, Azure, GCP, and Kubernetes environments.
+Nubicustos is a comprehensive Docker Compose-based platform that orchestrates **24+ security scanning tools** for automated cloud security auditing. It provides unified vulnerability identification, compliance assessment, and remediation guidance across AWS, Azure, GCP, and Kubernetes environments.
 
 ### Key Features
 
@@ -98,6 +98,11 @@ curl -X POST http://localhost:8000/api/scans \
     CloudFox        Enumerate-IAM     kube-linter   Polaris
     CloudMapper                       Falco
 
+    SECRETS SCANNING                  IAM DEEP ANALYSIS
+    ================                  =================
+    TruffleHog (700+ detectors)       PMapper (Privesc paths)
+    Gitleaks (Git secrets)            Cloudsplaining (Policy analysis)
+
     IAC SCANNERS                      ORCHESTRATION
     ============                      =============
     Checkov                           Docker SDK Integration
@@ -168,6 +173,14 @@ curl -X POST http://localhost:8000/api/scans \
 - **Checkov** - Terraform, CloudFormation, Kubernetes, Helm
 - **Terrascan** - Policy-as-code engine
 - **tfsec** - Terraform security scanner
+
+### Secrets Scanning
+- **TruffleHog** - 700+ secret detectors with API verification
+- **Gitleaks** - Fast git secrets scanner with extensive rule set
+
+### IAM Deep Analysis
+- **PMapper** - IAM privilege escalation path analysis
+- **Cloudsplaining** - AWS managed policy analysis and least privilege violations
 
 ---
 
@@ -290,6 +303,43 @@ See [MCP Server Guide](nubicustos-mcp/README.md) for complete documentation.
 # Preview without execution
 ./scripts/run-all-audits.sh --dry-run
 ```
+
+### Secrets Scanning
+
+```bash
+# Scan for exposed secrets with TruffleHog and Gitleaks
+curl -X POST http://localhost:8000/api/scans \
+  -H "Content-Type: application/json" \
+  -d '{"profile": "secrets", "target_path": "/path/to/code"}'
+
+# Query secrets findings
+curl "http://localhost:8000/api/findings?tool=trufflehog"
+curl "http://localhost:8000/api/findings?tool=gitleaks"
+```
+
+**Secrets Scanning Features:**
+- **TruffleHog** - 700+ secret detectors with API verification for active credentials
+- **Gitleaks** - Fast pattern-based detection with extensive rule coverage
+- Automatic secret redaction in findings (only first 4 chars shown)
+- Severity mapping: Verified secrets = Critical, Cloud provider keys = High
+
+### IAM Deep Analysis
+
+```bash
+# Analyze IAM privilege escalation paths and policy risks
+curl -X POST http://localhost:8000/api/scans \
+  -H "Content-Type: application/json" \
+  -d '{"profile": "iam-analysis", "aws_profile": "your-profile"}'
+
+# Query IAM findings
+curl "http://localhost:8000/api/findings?tool=pmapper"
+curl "http://localhost:8000/api/findings?tool=cloudsplaining"
+```
+
+**IAM Analysis Features:**
+- **PMapper** - Graph-based IAM privilege escalation path discovery
+- **Cloudsplaining** - Identifies least privilege violations in IAM policies
+- Risk categories: Privilege Escalation, Resource Exposure, Data Exfiltration, Infrastructure Modification
 
 ### API Access
 
@@ -433,6 +483,10 @@ Nubicustos integrates these excellent open-source security tools:
 | [Checkov](https://github.com/bridgecrewio/checkov) | IaC security scanner | Apache-2.0 |
 | [Falco](https://github.com/falcosecurity/falco) | Runtime threat detection | Apache-2.0 |
 | [Cartography](https://github.com/lyft/cartography) | Asset inventory mapping | Apache-2.0 |
+| [TruffleHog](https://github.com/trufflesecurity/trufflehog) | Secrets detection with verification | AGPL-3.0 |
+| [Gitleaks](https://github.com/gitleaks/gitleaks) | Git secrets scanner | MIT |
+| [PMapper](https://github.com/nccgroup/PMapper) | IAM privilege escalation analysis | AGPL-3.0 |
+| [Cloudsplaining](https://github.com/salesforce/cloudsplaining) | AWS IAM policy analysis | BSD-3-Clause |
 
 See [NOTICE](NOTICE) for full attribution details.
 
