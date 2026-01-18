@@ -204,6 +204,147 @@ RETURN u.name, u.arn
 
 ---
 
+## Secrets Scanning Tools
+
+### TruffleHog
+
+**Purpose**: Secrets detection with 700+ detectors and API verification for active credential detection.
+
+| Property | Value |
+|----------|-------|
+| Image | `trufflesecurity/trufflehog:latest` |
+| Output Formats | JSON (newline-delimited) |
+| Expected Exit Codes | 0 (success) |
+
+**Default Command**:
+```bash
+trufflehog filesystem /target --json > /output/results.json
+```
+
+**Features**:
+- 700+ secret detectors (AWS, GCP, Azure, GitHub, Stripe, etc.)
+- API verification for active credentials
+- Git history scanning
+- Filesystem scanning
+- Entropy-based detection
+
+**Severity Mapping**:
+- **Critical**: Verified (active) secrets
+- **High**: Cloud provider credentials (AWS, GCP, Azure, GitHub)
+- **Medium**: Other detected secrets
+
+**Security Note**: Raw secrets are automatically redacted in findings (only first 4 characters shown).
+
+---
+
+### Gitleaks
+
+**Purpose**: Fast pattern-based secrets scanner with extensive rule coverage.
+
+| Property | Value |
+|----------|-------|
+| Image | `zricethezav/gitleaks:latest` |
+| Output Formats | JSON, CSV, SARIF |
+| Expected Exit Codes | 0 (no secrets), 1 (secrets found) |
+
+**Default Command**:
+```bash
+gitleaks detect --source /target --report-format json --report-path /output/results.json --no-git
+```
+
+**Features**:
+- 150+ built-in rules for common secret patterns
+- Custom rule support via TOML config
+- Git-aware scanning (commits, branches)
+- Filesystem scanning with `--no-git` flag
+- Fingerprinting for deduplication
+
+**High-Severity Rules**:
+- `aws-access-key-id`, `aws-secret-access-key`
+- `github-pat`, `github-oauth`, `gitlab-pat`
+- `gcp-api-key`, `azure-storage-key`
+- `private-key`, `jwt`, `slack-token`, `stripe-api-key`
+
+**Security Note**: Match patterns are excluded from findings to prevent secret leakage.
+
+---
+
+## IAM Deep Analysis Tools
+
+### PMapper (Principal Mapper)
+
+**Purpose**: Graph-based IAM privilege escalation path discovery.
+
+| Property | Value |
+|----------|-------|
+| Image | `pmapper:local` (custom build) |
+| Output Formats | JSON, Markdown, Graph visualization |
+| Expected Exit Codes | 0 (success) |
+
+**Default Command**:
+```bash
+pmapper graph --create && pmapper query 'preset privesc *' --json > /output/privesc-results.json
+```
+
+**Required AWS Permissions**:
+- `iam:GetAccountAuthorizationDetails`
+- `iam:ListRoles`, `iam:ListUsers`
+- `iam:SimulatePrincipalPolicy`
+
+**Features**:
+- Builds IAM relationship graph
+- Discovers privilege escalation paths
+- Identifies admin-equivalent principals
+- Preset queries for common attack patterns:
+  - `preset privesc *` - All privilege escalation paths
+  - `preset connected *` - Reachable principals
+  - `can_privesc user/alice` - Specific principal analysis
+
+**Severity Mapping**:
+- **Critical**: Admin access detected
+- **High**: Privilege escalation path to admin
+- **Medium**: IAM relationship findings
+
+---
+
+### Cloudsplaining
+
+**Purpose**: AWS IAM policy analysis for least privilege violations.
+
+| Property | Value |
+|----------|-------|
+| Image | `cloudsplaining:local` (custom build) |
+| Output Formats | JSON, HTML |
+| Expected Exit Codes | 0 (success) |
+
+**Default Command**:
+```bash
+cloudsplaining download --output /output/iam-data.json && cloudsplaining scan --input-file /output/iam-data.json --output /output/
+```
+
+**Required AWS Permissions**:
+- `iam:GetAccountAuthorizationDetails`
+
+**Features**:
+- Downloads entire IAM authorization structure
+- Analyzes managed and inline policies
+- Identifies overly permissive policies
+- Categorizes risks by type
+
+**Risk Categories**:
+| Category | Severity | Description |
+|----------|----------|-------------|
+| Privilege Escalation | Critical | Allows creating/modifying IAM policies |
+| Resource Exposure | High | Allows sharing resources externally |
+| Data Exfiltration | High | Allows copying data outside account |
+| Infrastructure Modification | Medium | Allows modifying infrastructure |
+
+**Output Files**:
+- `{account_id}-iam-results.json` - Detailed findings
+- `iam-report-{account_id}.html` - Interactive HTML report
+
+---
+
 ## Penetration Testing Tools
 
 ### Pacu
@@ -290,6 +431,12 @@ Security scanning tools commonly return non-zero exit codes when findings are de
 | CloudSploit | Success | Findings detected | Errors | - |
 | Cloud Custodian | Success | Policy violations | - | - |
 | Kubescape | Success | Findings detected | - | - |
+| TruffleHog | Success* | Secrets found | - | - |
+| Gitleaks | No secrets | Secrets found | - | - |
+| PMapper | Success* | - | - | - |
+| Cloudsplaining | Success* | - | - | - |
+
+*Shell wrapper ensures exit 0 for orchestration compatibility.
 
 The orchestration system checks exit codes against each tool's `expected_exit_codes` configuration to determine success or failure.
 

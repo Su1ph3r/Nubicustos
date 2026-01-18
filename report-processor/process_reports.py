@@ -1896,6 +1896,467 @@ class ReportProcessor:
             logger.error(f"Error processing tfsec report: {e}")
             return None, []
 
+    def _redact_secret(self, secret: str, visible_chars: int = 4) -> str:
+        """Redact a secret value, showing only the first few characters.
+
+        Args:
+            secret: The secret value to redact
+            visible_chars: Number of characters to show (default: 4)
+
+        Returns:
+            Redacted string like "AKIA...REDACTED"
+        """
+        if not secret or len(secret) <= visible_chars:
+            return "[REDACTED]"
+        return f"{secret[:visible_chars]}...[REDACTED]"
+
+    def process_trufflehog_report(self, report_path):
+        """Process TruffleHog JSON report for secrets scanning"""
+        logger.info(f"Processing TruffleHog report: {report_path}")
+
+        findings = []
+        try:
+            with open(report_path) as f:
+                content = f.read()
+
+            metadata = {
+                "tool": "trufflehog",
+                "cloud_provider": "secrets",
+                "scan_date": datetime.now().isoformat(),
+            }
+
+            # TruffleHog outputs newline-delimited JSON
+            for line in content.split("\n"):
+                if not line.strip():
+                    continue
+                try:
+                    item = json.loads(line)
+
+                    # Extract source metadata
+                    source_metadata = item.get("SourceMetadata", {})
+                    source_data = source_metadata.get("Data", {})
+                    filesystem_data = source_data.get("Filesystem", {})
+
+                    file_path = filesystem_data.get("file", "unknown")
+                    line_number = filesystem_data.get("line", 0)
+
+                    # Get detector info
+                    detector_name = item.get("DetectorName", "unknown")
+                    detector_type = item.get("DetectorType", 0)
+
+                    # Determine if secret was verified
+                    verified = item.get("Verified", False)
+
+                    # Map severity based on verification status and detector type
+                    if verified:
+                        severity = "critical"  # Verified secrets are critical
+                    elif detector_name.lower() in ["aws", "gcp", "azure", "github"]:
+                        severity = "high"  # Cloud provider secrets are high
+                    else:
+                        severity = "medium"  # Other secrets are medium
+
+                    # Redact the raw secret value
+                    raw_secret = item.get("Raw", "")
+                    redacted_secret = self._redact_secret(raw_secret)
+
+                    # Build evidence with redacted secret (ExtraData excluded - may contain sensitive info)
+                    evidence_obj = {
+                        "detector_name": detector_name,
+                        "detector_type": detector_type,
+                        "verified": verified,
+                        "file": file_path,
+                        "line": line_number,
+                        "redacted_secret": redacted_secret,
+                    }
+
+                    finding = {
+                        "check_id": f"trufflehog-{detector_name.lower().replace(' ', '-')}",
+                        "check_title": f"Secret Detected: {detector_name}",
+                        "severity": severity,
+                        "status": "open",
+                        "region": "secrets",
+                        "resource_id": file_path,
+                        "resource_type": "secret",
+                        "resource_name": f"{file_path}:{line_number}",
+                        "account_id": self._discovered_account_id or "unknown",
+                        "description": f"{'Verified ' if verified else ''}secret detected by {detector_name} detector in {file_path} at line {line_number}",
+                        "remediation": "Remove the secret from the codebase and rotate the credential immediately. Store secrets in a secure secrets manager.",
+                        "compliance": [],
+                        "poc_evidence": json.dumps(evidence_obj, indent=2),
+                        "poc_verification": f"File: {file_path}\nLine: {line_number}\nDetector: {detector_name}\nVerified: {verified}",
+                        "remediation_commands": [],
+                        "remediation_code": {},
+                        "remediation_resources": [
+                            {
+                                "title": "TruffleHog Documentation",
+                                "url": "https://trufflesecurity.com/trufflehog",
+                                "type": "documentation",
+                            }
+                        ],
+                    }
+                    findings.append(finding)
+                except json.JSONDecodeError:
+                    continue
+
+            logger.info(f"Extracted {len(findings)} findings from TruffleHog")
+            return metadata, findings
+
+        except Exception as e:
+            logger.error(f"Error processing TruffleHog report: {e}")
+            return None, []
+
+    def process_gitleaks_report(self, report_path):
+        """Process Gitleaks JSON report for secrets scanning"""
+        logger.info(f"Processing Gitleaks report: {report_path}")
+
+        findings = []
+        try:
+            with open(report_path) as f:
+                data = json.load(f)
+
+            metadata = {
+                "tool": "gitleaks",
+                "cloud_provider": "secrets",
+                "scan_date": datetime.now().isoformat(),
+            }
+
+            # Gitleaks outputs a JSON array of findings
+            if not isinstance(data, list):
+                logger.warning(f"Gitleaks report is not a JSON array: {report_path}")
+                return None, []
+
+            # High severity rules
+            high_severity_rules = {
+                "aws-access-key-id", "aws-secret-access-key", "github-pat",
+                "github-oauth", "gitlab-pat", "gcp-api-key", "azure-storage-key",
+                "private-key", "jwt", "slack-token", "stripe-api-key",
+            }
+
+            for item in data:
+                rule_id = item.get("RuleID", "unknown")
+
+                # Map severity based on rule type
+                if rule_id.lower() in high_severity_rules:
+                    severity = "high"
+                else:
+                    severity = "medium"
+
+                file_path = item.get("File", "unknown")
+                line_number = item.get("StartLine", item.get("Line", 0))
+
+                # Redact the secret value
+                raw_secret = item.get("Secret", "")
+                redacted_secret = self._redact_secret(raw_secret)
+
+                # Build evidence with redacted secret (Match field excluded - may contain secret)
+                evidence_obj = {
+                    "rule_id": rule_id,
+                    "description": item.get("Description", ""),
+                    "file": file_path,
+                    "start_line": line_number,
+                    "end_line": item.get("EndLine", line_number),
+                    "redacted_secret": redacted_secret,
+                    "fingerprint": item.get("Fingerprint", ""),
+                }
+
+                finding = {
+                    "check_id": f"gitleaks-{rule_id.lower()}",
+                    "check_title": item.get("Description", f"Secret Detected: {rule_id}"),
+                    "severity": severity,
+                    "status": "open",
+                    "region": "secrets",
+                    "resource_id": file_path,
+                    "resource_type": "secret",
+                    "resource_name": f"{file_path}:{line_number}",
+                    "account_id": self._discovered_account_id or "unknown",
+                    "description": f"Secret detected by {rule_id} rule in {file_path} at line {line_number}. {item.get('Description', '')}",
+                    "remediation": "Remove the secret from the codebase and rotate the credential immediately. Store secrets in a secure secrets manager.",
+                    "compliance": [],
+                    "poc_evidence": json.dumps(evidence_obj, indent=2),
+                    "poc_verification": f"File: {file_path}\nLine: {line_number}\nRule: {rule_id}",
+                    "remediation_commands": [],
+                    "remediation_code": {},
+                    "remediation_resources": [
+                        {
+                            "title": "Gitleaks Documentation",
+                            "url": "https://github.com/gitleaks/gitleaks",
+                            "type": "documentation",
+                        }
+                    ],
+                }
+                findings.append(finding)
+
+            logger.info(f"Extracted {len(findings)} findings from Gitleaks")
+            return metadata, findings
+
+        except Exception as e:
+            logger.error(f"Error processing Gitleaks report: {e}")
+            return None, []
+
+    def process_pmapper_report(self, report_path):
+        """Process PMapper JSON report for IAM privilege escalation analysis"""
+        logger.info(f"Processing PMapper report: {report_path}")
+
+        findings = []
+        try:
+            with open(report_path) as f:
+                data = json.load(f)
+
+            account_id = self._discovered_account_id or "unknown"
+
+            metadata = {
+                "tool": "pmapper",
+                "cloud_provider": "aws",
+                "scan_date": datetime.now().isoformat(),
+                "account_id": account_id,
+            }
+
+            # PMapper query output format depends on the query type
+            # For privesc queries, results contain escalation paths
+            if isinstance(data, list):
+                for item in data:
+                    # Each item is a privilege escalation finding
+                    # Use `or` to handle None values from JSON
+                    source_principal = item.get("source") or item.get("principal") or "unknown"
+                    target_principal = item.get("target") or item.get("admin_principal") or ""
+                    escalation_method = item.get("method") or item.get("edge_type") or "unknown"
+                    is_admin = item.get("is_admin", False)
+
+                    # Build finding
+                    if is_admin:
+                        severity = "critical"
+                        title = f"Admin Access: {source_principal}"
+                        description = f"Principal {source_principal} has admin-level access to the AWS account"
+                    elif target_principal:
+                        severity = "high"
+                        title = f"Privilege Escalation Path: {source_principal}"
+                        description = f"Principal {source_principal} can escalate privileges to {target_principal} via {escalation_method}"
+                    else:
+                        severity = "medium"
+                        title = f"IAM Finding: {source_principal}"
+                        description = f"IAM finding for principal {source_principal}"
+
+                    evidence_obj = {
+                        "source_principal": source_principal,
+                        "target_principal": target_principal,
+                        "escalation_method": escalation_method,
+                        "is_admin": is_admin,
+                        "raw_data": item,
+                    }
+
+                    finding = {
+                        "check_id": f"pmapper-privesc-{escalation_method.lower().replace(' ', '-') if escalation_method else 'unknown'}",
+                        "check_title": title,
+                        "severity": severity,
+                        "status": "open",
+                        "region": "global",
+                        "resource_id": source_principal,
+                        "resource_type": "iam-principal",
+                        "resource_name": source_principal.split("/")[-1] if "/" in source_principal else source_principal,
+                        "account_id": account_id,
+                        "description": description,
+                        "remediation": "Review and restrict IAM permissions to follow the principle of least privilege. Remove unnecessary privilege escalation paths.",
+                        "compliance": [],
+                        "poc_evidence": json.dumps(evidence_obj, indent=2),
+                        "poc_verification": f"Source: {source_principal}\nTarget: {target_principal or 'N/A'}\nMethod: {escalation_method}",
+                        "remediation_commands": [],
+                        "remediation_code": {},
+                        "remediation_resources": [
+                            {
+                                "title": "PMapper Documentation",
+                                "url": "https://github.com/nccgroup/PMapper",
+                                "type": "documentation",
+                            }
+                        ],
+                    }
+                    findings.append(finding)
+            elif isinstance(data, dict):
+                # Handle graph metadata or summary output
+                if "edges" in data:
+                    # Process edges for privilege escalation paths
+                    for edge in data.get("edges", []):
+                        source = edge.get("source", "unknown")
+                        destination = edge.get("destination", "")
+                        edge_type = edge.get("edge_type", "unknown")
+
+                        evidence_obj = {
+                            "source": source,
+                            "destination": destination,
+                            "edge_type": edge_type,
+                        }
+
+                        finding = {
+                            "check_id": f"pmapper-edge-{edge_type.lower().replace(' ', '-')}",
+                            "check_title": f"IAM Relationship: {edge_type}",
+                            "severity": "medium",
+                            "status": "open",
+                            "region": "global",
+                            "resource_id": source,
+                            "resource_type": "iam-principal",
+                            "resource_name": source.split("/")[-1] if "/" in source else source,
+                            "account_id": account_id,
+                            "description": f"IAM principal {source} has {edge_type} relationship to {destination}",
+                            "remediation": "Review IAM relationships and ensure least privilege access.",
+                            "compliance": [],
+                            "poc_evidence": json.dumps(evidence_obj, indent=2),
+                            "poc_verification": f"Source: {source}\nDestination: {destination}\nType: {edge_type}",
+                            "remediation_commands": [],
+                            "remediation_code": {},
+                            "remediation_resources": [],
+                        }
+                        findings.append(finding)
+
+            logger.info(f"Extracted {len(findings)} findings from PMapper")
+            return metadata, findings
+
+        except Exception as e:
+            logger.error(f"Error processing PMapper report: {e}")
+            return None, []
+
+    def process_cloudsplaining_report(self, report_path):
+        """Process Cloudsplaining JSON report for IAM policy analysis"""
+        logger.info(f"Processing Cloudsplaining report: {report_path}")
+
+        findings = []
+        try:
+            with open(report_path) as f:
+                data = json.load(f)
+
+            account_id = data.get("account_id", self._discovered_account_id or "unknown")
+
+            metadata = {
+                "tool": "cloudsplaining",
+                "cloud_provider": "aws",
+                "scan_date": datetime.now().isoformat(),
+                "account_id": account_id,
+            }
+
+            # Cloudsplaining outputs different risk categories
+            risk_categories = [
+                ("privilege_escalation", "critical", "Privilege Escalation"),
+                ("resource_exposure", "high", "Resource Exposure"),
+                ("infrastructure_modification", "medium", "Infrastructure Modification"),
+                ("data_exfiltration", "high", "Data Exfiltration"),
+            ]
+
+            # Process findings by risk category
+            for category_key, severity, category_name in risk_categories:
+                category_findings = data.get(category_key, [])
+                if not isinstance(category_findings, list):
+                    continue
+
+                for item in category_findings:
+                    if isinstance(item, dict):
+                        policy_name = item.get("PolicyName", item.get("policy_name", "unknown"))
+                        policy_type = item.get("Type", item.get("type", "unknown"))
+                        actions = item.get("Actions", item.get("actions", []))
+                        services = item.get("Services", item.get("services", []))
+                    elif isinstance(item, str):
+                        # Some outputs may be just policy names
+                        policy_name = item
+                        policy_type = "unknown"
+                        actions = []
+                        services = []
+                    else:
+                        continue
+
+                    evidence_obj = {
+                        "policy_name": policy_name,
+                        "policy_type": policy_type,
+                        "risk_category": category_key,
+                        "actions": actions[:20] if isinstance(actions, list) else [],  # Limit actions
+                        "services": services[:10] if isinstance(services, list) else [],
+                    }
+
+                    finding = {
+                        "check_id": f"cloudsplaining-{category_key.replace('_', '-')}",
+                        "check_title": f"{category_name}: {policy_name}",
+                        "severity": severity,
+                        "status": "open",
+                        "region": "global",
+                        "resource_id": policy_name,
+                        "resource_type": "iam-policy",
+                        "resource_name": policy_name,
+                        "account_id": account_id,
+                        "description": f"IAM policy {policy_name} ({policy_type}) has {category_name.lower()} risk. Affected services: {', '.join(services[:5]) if services else 'N/A'}",
+                        "remediation": f"Review and restrict the {policy_name} policy to follow least privilege. Remove unnecessary {category_name.lower()} permissions.",
+                        "compliance": [],
+                        "poc_evidence": json.dumps(evidence_obj, indent=2),
+                        "poc_verification": f"Policy: {policy_name}\nType: {policy_type}\nRisk: {category_name}",
+                        "remediation_commands": [],
+                        "remediation_code": {},
+                        "remediation_resources": [
+                            {
+                                "title": "Cloudsplaining Documentation",
+                                "url": "https://github.com/salesforce/cloudsplaining",
+                                "type": "documentation",
+                            }
+                        ],
+                    }
+                    findings.append(finding)
+
+            # Also process inline_policies and customer_managed_policies if present
+            for policy_section in ["inline_policies", "customer_managed_policies", "aws_managed_policies"]:
+                policies = data.get(policy_section, [])
+                if not isinstance(policies, list):
+                    continue
+
+                for policy in policies:
+                    if not isinstance(policy, dict):
+                        continue
+
+                    policy_name = policy.get("PolicyName", policy.get("policy_name", "unknown"))
+                    risks = policy.get("risks", {})
+
+                    # Process each risk type for this policy
+                    for risk_type, risk_actions in risks.items() if isinstance(risks, dict) else []:
+                        if not risk_actions:
+                            continue
+
+                        # Map risk type to severity
+                        risk_severity_map = {
+                            "PrivilegeEscalation": "critical",
+                            "ResourceExposure": "high",
+                            "DataExfiltration": "high",
+                            "InfrastructureModification": "medium",
+                        }
+                        severity = risk_severity_map.get(risk_type, "medium")
+
+                        evidence_obj = {
+                            "policy_name": policy_name,
+                            "policy_section": policy_section,
+                            "risk_type": risk_type,
+                            "risky_actions": risk_actions[:20] if isinstance(risk_actions, list) else [],
+                        }
+
+                        finding = {
+                            "check_id": f"cloudsplaining-policy-{risk_type.lower()}",
+                            "check_title": f"{risk_type}: {policy_name}",
+                            "severity": severity,
+                            "status": "open",
+                            "region": "global",
+                            "resource_id": policy_name,
+                            "resource_type": "iam-policy",
+                            "resource_name": policy_name,
+                            "account_id": account_id,
+                            "description": f"Policy {policy_name} contains {risk_type} risk with {len(risk_actions) if isinstance(risk_actions, list) else 0} risky actions",
+                            "remediation": f"Review the {policy_name} policy and remove or restrict {risk_type} permissions.",
+                            "compliance": [],
+                            "poc_evidence": json.dumps(evidence_obj, indent=2),
+                            "poc_verification": f"Policy: {policy_name}\nRisk Type: {risk_type}",
+                            "remediation_commands": [],
+                            "remediation_code": {},
+                            "remediation_resources": [],
+                        }
+                        findings.append(finding)
+
+            logger.info(f"Extracted {len(findings)} findings from Cloudsplaining")
+            return metadata, findings
+
+        except Exception as e:
+            logger.error(f"Error processing Cloudsplaining report: {e}")
+            return None, []
+
     def save_to_database(self, metadata, findings, scan_id, existing_scan_id=None):
         """Save processed findings to database.
 
@@ -2215,7 +2676,10 @@ class ReportProcessor:
         processed_files = {}  # tool -> list of file paths
 
         # Process each tool's reports
-        tools_to_process = tools or ["prowler", "scoutsuite", "cloudsploit", "cloudfox"]
+        tools_to_process = tools or [
+            "prowler", "scoutsuite", "cloudsploit", "cloudfox",
+            "trufflehog", "gitleaks", "pmapper", "cloudsplaining"
+        ]
 
         if "prowler" in tools_to_process:
             # Process most recent Prowler reports
@@ -2453,6 +2917,94 @@ class ReportProcessor:
                     )
                     total_findings += len(findings)
                     processed_files["polaris"] = [str(report)]
+
+        # ========================================================================
+        # Secrets Scanning Tools
+        # ========================================================================
+
+        if "trufflehog" in tools_to_process:
+            # Process TruffleHog reports (newline-delimited JSON output)
+            trufflehog_reports = list(self.reports_dir.glob("trufflehog/*.json"))
+            trufflehog_reports += list(self.reports_dir.glob("trufflehog/results.json"))
+            trufflehog_reports = list(set(trufflehog_reports))
+            if trufflehog_reports:
+                trufflehog_reports.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                report = trufflehog_reports[0]
+                logger.info(f"Processing TruffleHog report: {report}")
+                metadata, findings = self.process_trufflehog_report(report)
+                if metadata and findings:
+                    self.save_to_database(
+                        metadata,
+                        findings,
+                        f"trufflehog_{report.stem}",
+                        orchestration_scan_id,
+                    )
+                    total_findings += len(findings)
+                    processed_files["trufflehog"] = [str(report)]
+
+        if "gitleaks" in tools_to_process:
+            # Process Gitleaks reports
+            gitleaks_reports = list(self.reports_dir.glob("gitleaks/*.json"))
+            gitleaks_reports += list(self.reports_dir.glob("gitleaks/results.json"))
+            gitleaks_reports = list(set(gitleaks_reports))
+            if gitleaks_reports:
+                gitleaks_reports.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                report = gitleaks_reports[0]
+                logger.info(f"Processing Gitleaks report: {report}")
+                metadata, findings = self.process_gitleaks_report(report)
+                if metadata and findings:
+                    self.save_to_database(
+                        metadata,
+                        findings,
+                        f"gitleaks_{report.stem}",
+                        orchestration_scan_id,
+                    )
+                    total_findings += len(findings)
+                    processed_files["gitleaks"] = [str(report)]
+
+        # ========================================================================
+        # IAM Deep Analysis Tools
+        # ========================================================================
+
+        if "pmapper" in tools_to_process:
+            # Process PMapper reports
+            pmapper_reports = list(self.reports_dir.glob("pmapper/*.json"))
+            pmapper_reports += list(self.reports_dir.glob("pmapper/privesc-*.json"))
+            pmapper_reports = list(set(pmapper_reports))
+            if pmapper_reports:
+                pmapper_reports.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                report = pmapper_reports[0]
+                logger.info(f"Processing PMapper report: {report}")
+                metadata, findings = self.process_pmapper_report(report)
+                if metadata and findings:
+                    self.save_to_database(
+                        metadata,
+                        findings,
+                        f"pmapper_{report.stem}",
+                        orchestration_scan_id,
+                    )
+                    total_findings += len(findings)
+                    processed_files["pmapper"] = [str(report)]
+
+        if "cloudsplaining" in tools_to_process:
+            # Process Cloudsplaining reports
+            cloudsplaining_reports = list(self.reports_dir.glob("cloudsplaining/*.json"))
+            cloudsplaining_reports += list(self.reports_dir.glob("cloudsplaining/*-iam-results.json"))
+            cloudsplaining_reports = list(set(cloudsplaining_reports))
+            if cloudsplaining_reports:
+                cloudsplaining_reports.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                report = cloudsplaining_reports[0]
+                logger.info(f"Processing Cloudsplaining report: {report}")
+                metadata, findings = self.process_cloudsplaining_report(report)
+                if metadata and findings:
+                    self.save_to_database(
+                        metadata,
+                        findings,
+                        f"cloudsplaining_{report.stem}",
+                        orchestration_scan_id,
+                    )
+                    total_findings += len(findings)
+                    processed_files["cloudsplaining"] = [str(report)]
 
         # Register all processed files with the scan
         for tool, files in processed_files.items():
