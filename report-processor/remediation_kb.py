@@ -294,10 +294,16 @@ aws ec2 describe-network-acls --network-acl-ids <nacl-id>""",
 }
 
 
-def get_remediation(finding_type: str, check_id: str) -> dict:
-    """
-    Get remediation data for a finding type and check ID.
-    Returns dict with 'description', 'remediation', 'poc_command'
+def get_remediation(finding_type: str, check_id: str) -> dict | None:
+    """Get remediation data for a finding type and check ID.
+
+    Args:
+        finding_type: The type/category of the finding (e.g., 's3', 'ec2', 'iam').
+        check_id: The specific check identifier (e.g., 'public-access', 'ssh-open').
+
+    Returns:
+        Dictionary with 'description', 'remediation', and 'poc_command' keys
+        if a matching entry exists in the knowledge base, or None if not found.
     """
     # Normalize finding_type and check_id
     finding_type = finding_type.lower().replace(" ", "-").replace("_", "-")
@@ -314,12 +320,21 @@ def get_remediation(finding_type: str, check_id: str) -> dict:
     return None
 
 
-def get_poc_command(finding_type: str, check_id: str, resource_id: str = None) -> str:
-    """
-    Get AWS CLI command to verify a finding.
-    Returns the command with resource_id substituted if provided.
+def get_poc_command(finding_type: str, check_id: str, resource_id: str | None = None) -> str | None:
+    """Get AWS CLI command to verify a finding.
 
-    Security: resource_id is validated and quoted to prevent command injection.
+    Args:
+        finding_type: The type/category of the finding (e.g., 's3', 'ec2', 'iam').
+        check_id: The specific check identifier (e.g., 'public-access', 'ssh-open').
+        resource_id: Optional resource ID to substitute into the command template.
+
+    Returns:
+        AWS CLI command string with resource_id substituted if provided,
+        or None if no matching PoC command exists or resource_id is invalid.
+
+    Security:
+        resource_id is validated against AWS patterns and quoted to prevent
+        command injection attacks.
     """
     import re
     import shlex

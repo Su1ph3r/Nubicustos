@@ -119,12 +119,23 @@ class AttackPathAnalyzer:
         self.findings: list[dict] = []
         self.discovered_paths: list[AttackPath] = []
 
-    def connect_db(self):
-        """Connect to PostgreSQL database."""
+    def connect_db(self) -> psycopg2.extensions.connection | None:
+        """Connect to PostgreSQL database.
+
+        Returns:
+            PostgreSQL connection object, or None if connection fails.
+
+        Note:
+            Connection failures are logged but not raised, allowing
+            callers to handle missing connections gracefully.
+        """
         try:
             return psycopg2.connect(**self.db_config)
-        except Exception as e:
-            logger.error(f"Failed to connect to database: {e}")
+        except psycopg2.OperationalError as e:
+            logger.error(f"Database connection failed (operational error): {e}")
+            return None
+        except psycopg2.Error as e:
+            logger.error(f"Database connection failed: {e}")
             return None
 
     def load_findings(self, scan_id: str | None = None) -> list[dict]:
