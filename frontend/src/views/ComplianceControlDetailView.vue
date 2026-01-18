@@ -178,7 +178,7 @@
               class="cli-section"
             >
               <div class="cli-header">
-                <span>AWS CLI Command</span>
+                <span>{{ cliLabel }}</span>
                 <button
                   class="btn-copy"
                   @click="copyCliCommand"
@@ -248,6 +248,14 @@ const router = useRouter()
 const complianceStore = useComplianceStore()
 
 const control = computed(() => complianceStore.controlDetail)
+
+// Dynamic CLI label based on cloud provider
+const cliLabel = computed(() => {
+  const provider = control.value?.cloud_provider?.toLowerCase()
+  if (provider === 'azure') return 'Azure CLI Command'
+  if (provider === 'gcp') return 'Google Cloud CLI Command'
+  return 'AWS CLI Command'  // Default to AWS for backwards compatibility
+})
 
 const goBack = () => {
   const framework = route.params.framework

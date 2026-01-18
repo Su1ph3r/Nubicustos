@@ -303,7 +303,8 @@ async def get_control_details(
             f.region,
             f.account_id,
             f.remediation,
-            f.remediation_code
+            f.remediation_code,
+            f.cloud_provider
         FROM findings f
         WHERE f.compliance_frameworks ? :framework
           AND f.compliance_frameworks->:framework ? :control_id
@@ -326,12 +327,14 @@ async def get_control_details(
     severity = None
     remediation_guidance = None
     remediation_cli = None
+    cloud_provider = None
     failed_count = 0
     passed_count = 0
 
     for row in rows:
         finding_id, title, description, status, sev, resource_id, resource_type, \
-            resource_name, region, account_id, remediation, remediation_code_json = row
+            resource_name, region, account_id, remediation, remediation_code_json, \
+            finding_cloud_provider = row
 
         # Use first finding's data for control metadata
         if control_title is None:
@@ -339,10 +342,17 @@ async def get_control_details(
             control_description = description
             severity = sev
             remediation_guidance = remediation
+            cloud_provider = finding_cloud_provider
             # Extract CLI from remediation_code JSONB if available
             if remediation_code_json and isinstance(remediation_code_json, dict):
-                # Try to get CLI command from the JSONB structure
-                cli_cmd = remediation_code_json.get("cli") or remediation_code_json.get("command")
+                # Try provider-specific keys first, then generic keys
+                cli_cmd = (
+                    remediation_code_json.get("aws_cli") or
+                    remediation_code_json.get("azure_cli") or
+                    remediation_code_json.get("gcp_cli") or
+                    remediation_code_json.get("cli") or
+                    remediation_code_json.get("command")
+                )
                 if cli_cmd:
                     remediation_cli = cli_cmd if isinstance(cli_cmd, str) else str(cli_cmd)
             elif remediation_code_json and isinstance(remediation_code_json, str):
@@ -383,6 +393,7 @@ async def get_control_details(
         resources_failed=failed_count,
         remediation_guidance=remediation_guidance,
         remediation_cli=remediation_cli,
+        cloud_provider=cloud_provider,  # For CLI label context (aws/azure/gcp)
         reference_url=None,  # Could link to framework documentation
     )
 

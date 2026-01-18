@@ -341,11 +341,12 @@ def get_poc_command(finding_type: str, check_id: str, resource_id: str = None) -
     return None
 
 
-def get_default_remediation(service: str, description: str) -> str:
+def get_default_remediation(service: str, description: str, cloud_provider: str = "aws") -> str:
     """
-    Generate a generic remediation based on service type.
+    Generate a generic remediation based on service type and cloud provider.
     """
-    generic_remediations = {
+    # AWS-specific generic remediations
+    aws_remediations = {
         "cloudtrail": "Enable CloudTrail logging for this region. See AWS CloudTrail documentation for configuration steps.",
         "ec2": "Review EC2 security group rules and restrict access to only necessary ports and IP ranges.",
         "iam": "Review IAM policies and follow the principle of least privilege. Enable MFA for all users.",
@@ -355,14 +356,48 @@ def get_default_remediation(service: str, description: str) -> str:
         "vpc": "Enable VPC Flow Logs and review Network ACL/Security Group rules.",
     }
 
-    for svc, remediation in generic_remediations.items():
+    # Azure-specific generic remediations
+    azure_remediations = {
+        "keyvault": "Review Key Vault access policies and enable soft delete and purge protection.",
+        "storage": "Enable storage account encryption, secure transfer, and blob versioning.",
+        "virtualmachines": "Review VM network security groups and disable public IP where possible.",
+        "vm": "Review VM network security groups and disable public IP where possible.",
+        "sql": "Enable Azure SQL auditing, threat detection, and transparent data encryption.",
+        "network": "Review NSG rules and restrict access to only necessary ports and IP ranges.",
+        "securitycenter": "Enable Microsoft Defender for Cloud and review security recommendations.",
+        "defender": "Enable Microsoft Defender for Cloud and review security recommendations.",
+        "rbac": "Review role assignments and follow the principle of least privilege.",
+        "iam": "Review role assignments and follow the principle of least privilege. Enable MFA for all users.",
+    }
+
+    # GCP-specific generic remediations
+    gcp_remediations = {
+        "compute": "Review firewall rules and restrict access to only necessary ports and IP ranges.",
+        "iam": "Review IAM policies and follow the principle of least privilege.",
+        "storage": "Enable bucket encryption, uniform bucket-level access, and versioning.",
+        "sql": "Enable Cloud SQL encryption, automated backups, and ensure instances use private IPs.",
+    }
+
+    # Select remediations based on provider
+    provider = cloud_provider.lower() if cloud_provider else "aws"
+    if provider == "azure":
+        remediations = azure_remediations
+        best_practices_text = "Azure security best practices"
+    elif provider == "gcp":
+        remediations = gcp_remediations
+        best_practices_text = "Google Cloud security best practices"
+    else:
+        remediations = aws_remediations
+        best_practices_text = "AWS security best practices"
+
+    for svc, remediation in remediations.items():
         if svc in service.lower():
             return remediation
 
-    return "Review the finding and implement appropriate security controls based on AWS security best practices."
+    return f"Review the finding and implement appropriate security controls based on {best_practices_text}."
 
 
-def get_default_description(service: str, check_id: str, existing_description: str) -> str:
+def get_default_description(service: str, check_id: str, existing_description: str, cloud_provider: str = "aws") -> str:
     """
     Enhance or generate a description for a finding.
     """
@@ -377,6 +412,14 @@ def get_default_description(service: str, check_id: str, existing_description: s
     if data and "description" in data:
         return data["description"]
 
-    # Generate generic description
+    # Generate generic description with provider-appropriate text
+    provider = cloud_provider.lower() if cloud_provider else "aws"
+    if provider == "azure":
+        best_practices_text = "Azure security best practices"
+    elif provider == "gcp":
+        best_practices_text = "Google Cloud security best practices"
+    else:
+        best_practices_text = "AWS security best practices"
+
     check_title = check_id.replace("-", " ").replace("_", " ").title()
-    return f"Security finding detected: {check_title}. Review and remediate according to AWS security best practices."
+    return f"Security finding detected: {check_title}. Review and remediate according to {best_practices_text}."
