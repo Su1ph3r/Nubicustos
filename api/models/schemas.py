@@ -1486,5 +1486,6 @@ class ComplianceControlDetail(BaseModel):
     resources_passed: int = 0
     resources_failed: int = 0
     remediation_guidance: str | None = None
-    remediation_cli: str | None = None  # AWS CLI command if applicable
+    remediation_cli: str | None = None  # CLI command for remediation (AWS/Azure/GCP)
+    cloud_provider: str | None = None  # aws, azure, gcp - for CLI label context
     reference_url: str | None = None

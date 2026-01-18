@@ -32,11 +32,22 @@ except ImportError:
     def get_poc_command(ft, ci, ri=None):
         return None
 
-    def get_default_remediation(s, d):
+    def get_default_remediation(s, d, cloud_provider="aws"):
         return "Review and remediate according to security best practices."
 
-    def get_default_description(s, c, d):
+    def get_default_description(s, c, d, cloud_provider="aws"):
         return d or "Security finding detected."
+
+
+def strip_html_tags(text):
+    """Strip HTML tags from text while preserving content."""
+    if not text or not isinstance(text, str):
+        return text
+    # Remove HTML tags but keep their content
+    clean = re.sub(r'<[^>]+>', '', text)
+    # Normalize whitespace
+    clean = re.sub(r'\s+', ' ', clean).strip()
+    return clean
 
 
 # Import severity scoring module
@@ -250,12 +261,108 @@ class ReportProcessor:
 
         return None
 
+    def _generate_azure_poc_command(self, service, resource_id, finding):
+        """Generate an Azure CLI verification command based on service type."""
+        # Map services to appropriate Azure CLI commands
+        service_commands = {
+            "storageaccounts": "az storage account list --output json",
+            "storage": "az storage account list --output json",
+            "virtualmachines": "az vm list --output json",
+            "vm": "az vm list --output json",
+            "sqldatabases": "az sql db list --output json",
+            "sql": "az sql server list --output json",
+            "keyvault": "az keyvault list --output json",
+            "appservice": "az webapp list --output json",
+            "webapp": "az webapp list --output json",
+            "networkinterfaces": "az network nic list --output json",
+            "nic": "az network nic list --output json",
+            "securitygroups": "az network nsg list --output json",
+            "nsg": "az network nsg list --output json",
+            "virtualnetworks": "az network vnet list --output json",
+            "vnet": "az network vnet list --output json",
+            "loadbalancers": "az network lb list --output json",
+            "lb": "az network lb list --output json",
+            "applicationgateways": "az network application-gateway list --output json",
+            "appgateway": "az network application-gateway list --output json",
+            "cosmosdb": "az cosmosdb list --output json",
+            "aks": "az aks list --output json",
+            "kubernetes": "az aks list --output json",
+            "acr": "az acr list --output json",
+            "containerregistry": "az acr list --output json",
+            "monitor": "az monitor activity-log list --output json",
+            "activitylog": "az monitor activity-log list --output json",
+            "defender": "az security pricing list --output json",
+            "securitycenter": "az security pricing list --output json",
+            "rbac": "az role assignment list --output json",
+            "iam": "az role assignment list --output json",
+            "policy": "az policy assignment list --output json",
+            "resourcegroups": "az group list --output json",
+            "rg": "az group list --output json",
+            "subscriptions": "az account list --output json",
+            "subscription": "az account list --output json",
+            "logging": "az monitor diagnostic-settings list --output json",
+            "diagnostics": "az monitor diagnostic-settings list --output json",
+            # Additional Azure services
+            "appinsights": "az monitor app-insights component list --output json",
+            "applicationinsights": "az monitor app-insights component list --output json",
+            "insights": "az monitor app-insights component list --output json",
+            "network": "az network nsg list --output json",
+            "security": "az security pricing list --output json",
+            "alert": "az monitor activity-log alert list --output json",
+            "activitylogalert": "az monitor activity-log alert list --output json",
+            "logalert": "az monitor activity-log alert list --output json",
+            "contact": "az security contact list --output json",
+            "securitycontact": "az security contact list --output json",
+            "autoprovisioning": "az security auto-provisioning-setting list --output json",
+            "provisioning": "az security auto-provisioning-setting list --output json",
+            "disk": "az disk list --output json",
+            "disks": "az disk list --output json",
+            "manageddisk": "az disk list --output json",
+            "manageddisks": "az disk list --output json",
+            "functionapp": "az functionapp list --output json",
+            "function": "az functionapp list --output json",
+            "functions": "az functionapp list --output json",
+            "logicapp": "az logic workflow list --output json",
+            "logic": "az logic workflow list --output json",
+            "redis": "az redis list --output json",
+            "cache": "az redis list --output json",
+            "servicebus": "az servicebus namespace list --output json",
+            "eventhub": "az eventhubs namespace list --output json",
+            "postgresql": "az postgres server list --output json",
+            "postgres": "az postgres server list --output json",
+            "mysql": "az mysql server list --output json",
+            "mariadb": "az mariadb server list --output json",
+        }
+
+        # Normalize service name
+        normalized_service = service.lower().replace("-", "").replace("_", "")
+
+        # Get service-specific command
+        if normalized_service in service_commands:
+            return service_commands[normalized_service]
+
+        # Try partial matches
+        for key, cmd in service_commands.items():
+            if key in normalized_service or normalized_service in key:
+                return cmd
+
+        return None
+
     def _validate_resource_id(self, resource_id):
         """Validate that a resource ID matches expected AWS patterns."""
         if not resource_id:
             return False
         # Must match safe AWS resource ID pattern
         return bool(self.AWS_RESOURCE_ID_PATTERN.match(resource_id))
+
+    def _validate_azure_resource_id(self, resource_id):
+        """Validate that a resource ID matches expected Azure patterns."""
+        if not resource_id:
+            return False
+        # Azure resource IDs typically start with /subscriptions/ or are simple names
+        # Allow alphanumeric, hyphens, underscores, forward slashes, and dots
+        azure_pattern = re.compile(r"^[a-zA-Z0-9\-_/\.]+$")
+        return bool(azure_pattern.match(resource_id))
 
     def _run_aws_cli(self, command):
         """Run an AWS CLI command safely and return the output.
@@ -296,7 +403,46 @@ class ReportProcessor:
             logger.error(f"Error running AWS CLI: {str(e)}")
             return "Command execution error"
 
-    def _enhance_finding(self, finding, service, check_id):
+    def _run_azure_cli(self, command):
+        """Run an Azure CLI command safely and return the output.
+
+        Security: Uses shlex for safe command parsing to prevent injection.
+        """
+        try:
+            # Parse command safely using shlex to prevent command injection
+            if isinstance(command, str):
+                parts = shlex.split(command)
+            else:
+                parts = list(command)
+
+            # Validate command starts with 'az'
+            if not parts or parts[0] != "az":
+                logger.warning("Invalid Azure CLI command attempted")
+                return "Invalid command format"
+
+            # Execute with shell=False (explicit for security)
+            result = subprocess.run(
+                parts,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                shell=False,  # Explicit: never use shell=True
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+            else:
+                # Log full error but return sanitized message
+                logger.debug(f"Azure CLI command failed: {result.stderr.strip()}")
+                return "Command execution failed"
+        except subprocess.TimeoutExpired:
+            return "Command timed out"
+        except FileNotFoundError:
+            return "Azure CLI not available"
+        except Exception as e:
+            logger.error(f"Error running Azure CLI: {str(e)}")
+            return "Command execution error"
+
+    def _enhance_finding(self, finding, service, check_id, cloud_provider="aws"):
         """Enhance a finding with data from remediation KB.
 
         This method normalizes service/check_id to match KB entries and:
@@ -324,7 +470,7 @@ class ReportProcessor:
                 finding["description"] = kb_data["description"]
             else:
                 finding["description"] = get_default_description(
-                    normalized_service, check_id, current_desc
+                    normalized_service, check_id, current_desc, cloud_provider
                 )
 
         # Add remediation if empty or just contains a status message
@@ -345,7 +491,7 @@ class ReportProcessor:
                 finding["remediation"] = kb_data["remediation"]
             else:
                 finding["remediation"] = get_default_remediation(
-                    normalized_service, finding.get("description", "")
+                    normalized_service, finding.get("description", ""), cloud_provider
                 )
 
         # Generate PoC command for verification reference
@@ -354,60 +500,29 @@ class ReportProcessor:
         if not poc_command:
             poc_command = get_poc_command(service.lower(), check_id.lower(), resource_id)
         if not poc_command:
-            # Generate a generic verification command based on service
-            poc_command = self._generate_generic_poc_command(
-                normalized_service, resource_id, finding
-            )
-
-        # Check if parser already provided good evidence
-        existing_verification = finding.get("poc_verification", "")
-        has_scan_evidence = existing_verification and "Scan Evidence:" in existing_verification
-
-        if has_scan_evidence:
-            # Preserve the good evidence from the parser, optionally append verification command
-            if poc_command and "Verification Command:" not in existing_verification:
-                finding["poc_verification"] = (
-                    existing_verification + f"\n\nVerification Command:\n{poc_command}"
+            # Generate a generic verification command based on service and cloud provider
+            if cloud_provider == "azure":
+                poc_command = self._generate_azure_poc_command(
+                    normalized_service, resource_id, finding
                 )
-        elif poc_command:
-            # No scan evidence extracted - run the verification command to get actual output
-            poc_output = self._run_aws_cli(poc_command)
-
-            # Build verification text with command AND actual output
-            verification_parts = [f"Verification Command:\n{poc_command}"]
-
-            if poc_output and not poc_output.startswith(
-                (
-                    "Error",
-                    "Command failed",
-                    "AWS CLI not",
-                    "Invalid",
-                    "Command execution",
-                    "Command timed",
-                )
-            ):
-                # Got real output - this is the proof of concept
-                verification_parts.append(f"\nCommand Output:\n{poc_output}")
-
-                # Also store in poc_evidence for structured access
-                current_evidence = finding.get("poc_evidence", "")
-                if isinstance(current_evidence, str):
-                    try:
-                        evidence_obj = json.loads(current_evidence) if current_evidence else {}
-                    except:
-                        evidence_obj = {"original": current_evidence}
-                else:
-                    evidence_obj = current_evidence or {}
-                evidence_obj["cli_verification"] = poc_output
-                evidence_obj["cli_command"] = poc_command
-                finding["poc_evidence"] = json.dumps(evidence_obj, indent=2)
             else:
-                # AWS CLI not available or command failed - provide instructions
-                verification_parts.append(
-                    f"\nCommand Output:\n(Run command manually to verify - {poc_output if poc_output else 'no output'})"
+                poc_command = self._generate_generic_poc_command(
+                    normalized_service, resource_id, finding
                 )
 
-            finding["poc_verification"] = "\n".join(verification_parts)
+        # Set poc_verification to ONLY the CLI command (for user to run)
+        # poc_evidence should contain scanner output (set by parser)
+        if poc_command:
+            finding["poc_verification"] = poc_command
+
+            # Update remediation_code with the CLI command
+            current_remediation_code = finding.get("remediation_code", {})
+            if not isinstance(current_remediation_code, dict):
+                current_remediation_code = {}
+            cli_key = f"{cloud_provider}_cli"
+            if cli_key not in current_remediation_code:
+                current_remediation_code[cli_key] = poc_command
+                finding["remediation_code"] = current_remediation_code
 
         # Ensure affected_resources is populated
         if not finding.get("affected_resources") or len(finding.get("affected_resources", [])) == 0:
@@ -518,11 +633,21 @@ class ReportProcessor:
             if account_id and account_id != "unknown":
                 self._discovered_account_id = account_id
 
+            # Normalize cloud provider name to lowercase standard format
+            raw_provider = data.get("provider_name", data.get("provider", "aws"))
+            provider_map = {
+                "amazon web services": "aws",
+                "aws": "aws",
+                "azure": "azure",
+                "microsoft azure": "azure",
+                "google cloud platform": "gcp",
+                "gcp": "gcp",
+            }
+            normalized_provider = provider_map.get(raw_provider.lower(), raw_provider.lower())
+
             metadata = {
                 "tool": "scoutsuite",
-                "cloud_provider": data.get(
-                    "provider_name", data.get("provider", "Amazon Web Services")
-                ),
+                "cloud_provider": normalized_provider,
                 "scan_date": datetime.now().isoformat(),
                 "account_id": account_id,
             }
@@ -558,9 +683,10 @@ class ReportProcessor:
                     # Items array contains ALL affected resources for this finding type
                     items = finding_data.get("items", [])
 
-                    # Get the finding description and rationale
-                    finding_description = finding_data.get("description", "")
-                    finding_rationale = finding_data.get("rationale", "")
+                    # Get the finding description and rationale, stripping HTML tags
+                    finding_description = strip_html_tags(finding_data.get("description", ""))
+                    finding_rationale = strip_html_tags(finding_data.get("rationale", ""))
+                    finding_remediation = strip_html_tags(finding_data.get("remediation", ""))
 
                     # Build a meaningful title from finding_id
                     # e.g., "cloudtrail-not-configured" -> "CloudTrail Not Configured"
@@ -606,29 +732,28 @@ class ReportProcessor:
                     else:
                         resource_name = check_title
 
-                    # Build scan evidence with resource configurations
-                    verification_parts = []
+                    # Build proof of concept evidence from scanner output
+                    evidence_parts = []
                     if resource_configs:
-                        verification_parts.append("Scan Evidence:")
-                        verification_parts.append(
-                            f"  Found {len(resource_configs)} affected resource(s)"
+                        evidence_parts.append(
+                            f"Found {len(resource_configs)} affected resource(s)"
                         )
-                        verification_parts.append("\nResource Configuration(s):")
+                        evidence_parts.append("\nResource Configuration(s):")
                         for rc in resource_configs[:5]:  # Limit to 5 for readability
                             config_json = json.dumps(rc.get("config", {}), indent=2)
                             if len(config_json) > 1500:
                                 config_json = config_json[:1500] + "\n  ... (truncated)"
-                            verification_parts.append(
+                            evidence_parts.append(
                                 f"\n{rc.get('name', rc.get('id', 'Unknown'))}:"
                             )
-                            verification_parts.append(config_json)
+                            evidence_parts.append(config_json)
                         if len(resource_configs) > 5:
-                            verification_parts.append(
+                            evidence_parts.append(
                                 f"\n... and {len(resource_configs) - 5} more resource(s)"
                             )
 
-                    poc_verification_text = (
-                        "\n".join(verification_parts) if verification_parts else ""
+                    poc_evidence_text = (
+                        "\n".join(evidence_parts) if evidence_parts else ""
                     )
 
                     finding = {
@@ -644,26 +769,17 @@ class ReportProcessor:
                         "region": primary_region,
                         "account_id": account_id,
                         "description": finding_rationale if finding_rationale else check_title,
-                        "remediation": finding_data.get("remediation", ""),
+                        "remediation": finding_remediation,
                         "compliance": finding_data.get("compliance", []),
                         "checked_items": finding_data.get("checked_items", 0),
                         "flagged_items": flagged_count,
                         "affected_resources": affected_resources,
                         "affected_count": len(affected_resources),
-                        "poc_verification": poc_verification_text,
-                        "poc_evidence": json.dumps(
-                            {
-                                "finding_id": finding_id,
-                                "flagged_count": flagged_count,
-                                "resource_configs": resource_configs[:10],  # Store up to 10 configs
-                            },
-                            indent=2,
-                        )
-                        if resource_configs
-                        else "",
+                        "poc_verification": "",  # Will be set to CLI command by _enhance_finding
+                        "poc_evidence": poc_evidence_text,
                     }
-                    # Enhance finding with KB data
-                    finding = self._enhance_finding(finding, service, finding_id)
+                    # Enhance finding with KB data and cloud provider context
+                    finding = self._enhance_finding(finding, service, finding_id, normalized_provider)
                     findings.append(finding)
 
             logger.info(f"Extracted {len(findings)} findings from ScoutSuite")
@@ -682,11 +798,12 @@ class ReportProcessor:
     def _parse_scoutsuite_item(self, item, service, all_services=None):
         """Parse a ScoutSuite item path into resource details with actual configuration lookup."""
         if isinstance(item, str):
-            # Parse path like "cloudtrail.regions.ap-northeast-1.NotConfigured"
-            # or "iam.policies.ANPAI7XKCFMBPM3QQRRVQ.PolicyDocument.Statement.0"
+            # Parse path like "cloudtrail.regions.ap-northeast-1.NotConfigured" (AWS)
+            # or "iam.policies.ANPAI7XKCFMBPM3QQRRVQ.PolicyDocument.Statement.0" (AWS)
+            # or "keyvault.subscriptions.SUB_ID.vaults.scoutid-XXX.property" (Azure)
             parts = item.split(".")
 
-            # Extract region from path
+            # Extract region from path (AWS uses 'regions', Azure uses 'location' in data)
             region = "global"
             for i, part in enumerate(parts):
                 if part == "regions" and i + 1 < len(parts):
@@ -706,9 +823,11 @@ class ReportProcessor:
                     service_name = parts[0]
                     service_data = all_services.get(service_name, {})
 
-                    # Determine collection type from path
-                    # Common patterns: iam.policies.ID, iam.roles.ID, ec2.vpcs.ID, etc.
+                    # Collection candidates for both AWS and Azure
+                    # AWS: policies, roles, users, buckets, vpcs, security_groups, instances, etc.
+                    # Azure: vaults, storage_accounts, security_groups, instances, servers, etc.
                     collection_candidates = [
+                        # AWS collections
                         "policies",
                         "roles",
                         "users",
@@ -723,36 +842,111 @@ class ReportProcessor:
                         "topics",
                         "keys",
                         "functions",
+                        # Azure collections
+                        "vaults",
+                        "storage_accounts",
+                        "servers",
+                        "databases",
+                        "web_apps",
+                        "disks",
+                        "images",
+                        "snapshots",
+                        "caches",
+                        "diagnostic_settings",
+                        "log_alerts",
+                        "log_profiles",
+                        "resources_logging",
+                        "network_interfaces",
+                        "public_ip_addresses",
+                        "virtual_networks",
+                        "subnets",
+                        "application_gateways",
+                        "load_balancers",
+                        "role_assignments",
+                        "role_definitions",
+                        "pricings",
+                        "auto_provisioning_settings",
+                        "security_contacts",
+                        "information_protection_policies",
                     ]
 
-                    for i, part in enumerate(parts[1:], 1):
-                        if part in collection_candidates and i + 1 < len(parts):
-                            collection = service_data.get(part, {})
-                            resource_key = parts[i + 1]
-                            # Handle regions in path: service.regions.region.collection.resource_id
-                            if part == "regions" and i + 2 < len(parts):
-                                region_data = collection.get(parts[i + 1], {})
-                                if i + 3 < len(parts) and parts[i + 2] in collection_candidates:
-                                    collection = region_data.get(parts[i + 2], {})
-                                    resource_key = parts[i + 3] if i + 3 < len(parts) else None
+                    # Handle Azure subscriptions path: service.subscriptions.SUB_ID.collection.resource
+                    # Azure paths can be deeply nested: security_groups.scoutid-xxx.security_rules.RULE_ID
+                    if "subscriptions" in parts:
+                        sub_idx = parts.index("subscriptions")
+                        if sub_idx + 1 < len(parts):
+                            sub_id = parts[sub_idx + 1]
+                            subscriptions_data = service_data.get("subscriptions", {})
+                            sub_data = subscriptions_data.get(sub_id, {})
 
-                            if resource_key and isinstance(collection, dict):
-                                resource_data = collection.get(resource_key)
-                                if resource_data and isinstance(resource_data, dict):
-                                    configuration = resource_data
-                                    resource_name = resource_data.get(
-                                        "name", resource_data.get("Name", resource_key)
-                                    )
-                                    resource_id = resource_data.get(
-                                        "id", resource_data.get("arn", resource_key)
-                                    )
-                                    break
+                            # Navigate through nested collections in Azure paths
+                            # Start from subscription data and traverse the path
+                            current_data = sub_data
+                            remaining_parts = parts[sub_idx + 2:]  # Parts after SUB_ID
+
+                            i = 0
+                            while i < len(remaining_parts):
+                                part = remaining_parts[i]
+
+                                if part in collection_candidates and isinstance(current_data, dict):
+                                    # This is a collection - get the collection dict
+                                    collection = current_data.get(part, {})
+
+                                    # Next part should be the resource key
+                                    if i + 1 < len(remaining_parts) and isinstance(collection, dict):
+                                        resource_key = remaining_parts[i + 1]
+                                        next_data = collection.get(resource_key)
+
+                                        if next_data and isinstance(next_data, dict):
+                                            # Found resource data - this might be final or intermediate
+                                            configuration = next_data
+                                            resource_name = next_data.get(
+                                                "name", next_data.get("Name", resource_key)
+                                            )
+                                            resource_id = next_data.get(
+                                                "id", next_data.get("arn", resource_key)
+                                            )
+                                            # Azure resources have location instead of region
+                                            if next_data.get("location"):
+                                                region = next_data["location"]
+
+                                            # Continue deeper if there are more nested collections
+                                            current_data = next_data
+                                            i += 2  # Move past collection and resource key
+                                            continue
+
+                                i += 1
+                    else:
+                        # AWS path handling
+                        for i, part in enumerate(parts[1:], 1):
+                            if part in collection_candidates and i + 1 < len(parts):
+                                collection = service_data.get(part, {})
+                                resource_key = parts[i + 1]
+                                # Handle regions in path: service.regions.region.collection.resource_id
+                                if part == "regions" and i + 2 < len(parts):
+                                    region_data = collection.get(parts[i + 1], {})
+                                    if i + 3 < len(parts) and parts[i + 2] in collection_candidates:
+                                        collection = region_data.get(parts[i + 2], {})
+                                        resource_key = parts[i + 3] if i + 3 < len(parts) else None
+
+                                if resource_key and isinstance(collection, dict):
+                                    resource_data = collection.get(resource_key)
+                                    if resource_data and isinstance(resource_data, dict):
+                                        configuration = resource_data
+                                        resource_name = resource_data.get(
+                                            "name", resource_data.get("Name", resource_key)
+                                        )
+                                        resource_id = resource_data.get(
+                                            "id", resource_data.get("arn", resource_key)
+                                        )
+                                        break
                 except Exception:
                     # Silently fail resource lookup, continue with path-based extraction
                     pass
 
             # Fallback: Extract identifiers from path patterns
             for i, part in enumerate(parts):
+                # AWS resource ID patterns
                 if part.startswith("vpc-"):
                     resource_id = part
                     resource_type = "vpc"
@@ -774,14 +968,30 @@ class ReportProcessor:
                     # IAM resource IDs
                     resource_id = part
                     resource_type = "iam"
-                # Check for named resources
+                # Azure resource ID patterns
+                elif part.startswith("scoutid-"):
+                    # ScoutSuite-generated Azure resource ID
+                    resource_id = part
+                elif part.startswith("/subscriptions/"):
+                    # Full Azure resource path
+                    resource_id = part
+                # Check for named resources (both AWS and Azure collections)
                 elif i > 0 and parts[i - 1] in [
+                    # AWS
                     "buckets",
                     "queues",
                     "topics",
                     "roles",
                     "users",
                     "policies",
+                    # Azure
+                    "vaults",
+                    "storage_accounts",
+                    "servers",
+                    "web_apps",
+                    "security_groups",
+                    "virtual_networks",
+                    "network_interfaces",
                 ]:
                     if resource_name is None:
                         resource_name = part
@@ -819,6 +1029,15 @@ class ReportProcessor:
 
         findings = []
         detected_provider = None  # Will be extracted from report data
+
+        # Pre-detect cloud provider from report path for use during processing
+        report_path_str = str(report_path)
+        path_detected_provider = "aws"  # Default
+        if "prowler-azure" in report_path_str or "/azure/" in report_path_str:
+            path_detected_provider = "azure"
+        elif "prowler-gcp" in report_path_str or "/gcp/" in report_path_str:
+            path_detected_provider = "gcp"
+
         try:
             with open(report_path) as f:
                 content = f.read()
@@ -832,21 +1051,22 @@ class ReportProcessor:
                         # Extract cloud provider from first finding if not yet detected
                         if detected_provider is None:
                             cloud_data = finding_data.get("cloud", {})
-                            detected_provider = cloud_data.get("provider", "").lower()
+                            detected_provider = cloud_data.get("provider", "").lower() or path_detected_provider
                         finding = self._parse_prowler_ocsf(finding_data)
                         if finding:
-                            # Enhance finding with KB data
+                            # Enhance finding with KB data and cloud provider context
                             service = finding.get("resource_type", "aws")
                             check_id = finding.get("check_id", "")
-                            finding = self._enhance_finding(finding, service, check_id)
+                            provider = detected_provider or path_detected_provider
+                            finding = self._enhance_finding(finding, service, check_id, provider)
                             findings.append(finding)
                 else:
                     # Single object - treat as legacy
-                    finding = self._parse_prowler_legacy(data)
+                    finding = self._parse_prowler_legacy(data, path_detected_provider)
                     if finding:
                         service = finding.get("resource_type", "aws")
                         check_id = finding.get("check_id", "")
-                        finding = self._enhance_finding(finding, service, check_id)
+                        finding = self._enhance_finding(finding, service, check_id, path_detected_provider)
                         findings.append(finding)
             except json.JSONDecodeError:
                 # Try newline-delimited JSON (legacy format)
@@ -854,25 +1074,18 @@ class ReportProcessor:
                     if line.strip():
                         try:
                             finding_data = json.loads(line)
-                            finding = self._parse_prowler_legacy(finding_data)
+                            finding = self._parse_prowler_legacy(finding_data, path_detected_provider)
                             if finding:
                                 service = finding.get("resource_type", "aws")
                                 check_id = finding.get("check_id", "")
-                                finding = self._enhance_finding(finding, service, check_id)
+                                finding = self._enhance_finding(finding, service, check_id, path_detected_provider)
                                 findings.append(finding)
                         except json.JSONDecodeError:
                             continue
 
-            # Determine cloud provider: from report data, report path, or default to aws
+            # Final cloud provider: prefer detected from data, fallback to path detection
             if not detected_provider:
-                # Fallback: detect from report path
-                report_path_str = str(report_path)
-                if "prowler-azure" in report_path_str or "/azure/" in report_path_str:
-                    detected_provider = "azure"
-                elif "prowler-gcp" in report_path_str or "/gcp/" in report_path_str:
-                    detected_provider = "gcp"
-                else:
-                    detected_provider = "aws"
+                detected_provider = path_detected_provider
 
             metadata = {
                 "tool": "prowler",
@@ -896,12 +1109,15 @@ class ReportProcessor:
             remediation_data = unmapped.get("remediation", {})
             compliance_data = unmapped.get("compliance", {})
 
-            # Extract account_id from cloud.account.uid
+            # Extract account_id and cloud provider from cloud object
             cloud_data = finding_data.get("cloud", {})
             account_data = cloud_data.get("account", {})
             account_id = account_data.get("uid", "")
             if account_id and account_id != "":
                 self._discovered_account_id = account_id
+
+            # Get cloud provider for correct CLI key naming
+            finding_cloud_provider = cloud_data.get("provider", "aws").lower()
 
             # Map OCSF severity_id to text (1=Info, 2=Low, 3=Medium, 4=High, 5=Critical)
             severity_map = {1: "info", 2: "low", 3: "medium", 4: "high", 5: "critical"}
@@ -914,30 +1130,46 @@ class ReportProcessor:
             # Build remediation commands
             remediation_commands = []
             cli_cmd = remediation_data.get("cli", "") or remediation_data.get("CLI", "")
+
+            # Determine CLI key based on cloud provider
+            cli_key = f"{finding_cloud_provider}_cli"  # aws_cli, azure_cli, gcp_cli
+            cli_description = f"{finding_cloud_provider.upper()} CLI remediation command"
+            if finding_cloud_provider == "azure":
+                cli_description = "Azure CLI remediation command"
+            elif finding_cloud_provider == "gcp":
+                cli_description = "Google Cloud CLI remediation command"
+            else:
+                cli_description = "AWS CLI remediation command"
+
             if cli_cmd:
                 remediation_commands.append(
                     {
                         "type": "cli",
                         "command": cli_cmd,
-                        "description": "AWS CLI remediation command",
+                        "description": cli_description,
                     }
                 )
 
-            # Build remediation code
+            # Build remediation code with provider-specific key
             remediation_code = {}
             iac = remediation_data.get("terraform", "") or remediation_data.get("NativeIaC", "")
             if iac:
                 remediation_code["terraform"] = iac
             if cli_cmd:
-                remediation_code["aws_cli"] = cli_cmd
+                remediation_code[cli_key] = cli_cmd
 
             # Build remediation resources
             remediation_resources = []
             related_url = unmapped.get("related_url", "")
+            doc_title = "AWS Documentation"
+            if finding_cloud_provider == "azure":
+                doc_title = "Azure Documentation"
+            elif finding_cloud_provider == "gcp":
+                doc_title = "Google Cloud Documentation"
             if related_url:
                 remediation_resources.append(
                     {
-                        "title": "AWS Documentation",
+                        "title": doc_title,
                         "url": related_url,
                         "type": "documentation",
                     }
@@ -977,31 +1209,24 @@ class ReportProcessor:
             elif resource_data:
                 evidence_obj["resource_data"] = resource_data
 
-            # Build verification text with actual evidence
-            verification_parts = []
-
-            # Add the command for reference
-            if cli_cmd:
-                verification_parts.append(f"Verification Command:\n{cli_cmd}")
-
-            # Add actual evidence output from the scan
+            # Build proof of concept evidence from scanner output
+            evidence_parts = []
             status_detail = finding_data.get("status_detail", "")
             message = finding_data.get("message", "")
 
             if status_detail or message or resource_metadata:
-                verification_parts.append("\nScan Evidence:")
                 if message:
-                    verification_parts.append(f"  Finding: {message}")
+                    evidence_parts.append(f"Finding: {message}")
                 if status_detail and status_detail != message:
-                    verification_parts.append(f"  Detail: {status_detail}")
+                    evidence_parts.append(f"Detail: {status_detail}")
                 if resource_metadata:
                     # Format key evidence from resource configuration
                     config_preview = json.dumps(resource_metadata, indent=2)
                     if len(config_preview) > 1500:
                         config_preview = config_preview[:1500] + "\n  ... (truncated)"
-                    verification_parts.append(f"\nResource Configuration:\n{config_preview}")
+                    evidence_parts.append(f"\nResource Configuration:\n{config_preview}")
 
-            poc_verification_text = "\n".join(verification_parts) if verification_parts else ""
+            poc_evidence_text = "\n".join(evidence_parts) if evidence_parts else json.dumps(evidence_obj, indent=2)
 
             return {
                 "check_id": check_id,
@@ -1018,8 +1243,8 @@ class ReportProcessor:
                     "text", remediation_data.get("recommendation", "")
                 ),
                 "compliance": compliance_data,
-                "poc_evidence": json.dumps(evidence_obj, indent=2),
-                "poc_verification": poc_verification_text,
+                "poc_evidence": poc_evidence_text,
+                "poc_verification": "",  # Will be set to CLI command by _enhance_finding
                 "remediation_commands": remediation_commands,
                 "remediation_code": remediation_code,
                 "remediation_resources": remediation_resources,
@@ -1028,13 +1253,16 @@ class ReportProcessor:
             logger.error(f"Error parsing OCSF finding: {e}")
             return None
 
-    def _parse_prowler_legacy(self, finding_data):
+    def _parse_prowler_legacy(self, finding_data, cloud_provider="aws"):
         """Parse Prowler legacy format finding"""
         try:
             # Extract account_id from legacy format
             account_id = finding_data.get("AccountId", finding_data.get("account_id", ""))
             if account_id and account_id != "":
                 self._discovered_account_id = account_id
+
+            # Determine CLI key based on cloud provider
+            cli_key = f"{cloud_provider}_cli"  # aws_cli, azure_cli, gcp_cli
 
             # Extract remediation details
             remediation_obj = finding_data.get("Remediation", {})
@@ -1047,31 +1275,41 @@ class ReportProcessor:
             cli_command = code_obj.get("CLI", "")
             native_iac = code_obj.get("NativeIaC", "")
 
-            # Build remediation commands array
+            # Build remediation commands array with provider-aware description
             remediation_commands = []
+            cli_description = "AWS CLI command to remediate"
+            if cloud_provider == "azure":
+                cli_description = "Azure CLI command to remediate"
+            elif cloud_provider == "gcp":
+                cli_description = "Google Cloud CLI command to remediate"
             if cli_command:
                 remediation_commands.append(
                     {
                         "type": "cli",
                         "command": cli_command,
-                        "description": "AWS CLI command to remediate",
+                        "description": cli_description,
                     }
                 )
 
-            # Build remediation code object
+            # Build remediation code object with provider-specific key
             remediation_code = {}
             if native_iac:
                 remediation_code["terraform"] = native_iac
             if cli_command:
-                remediation_code["aws_cli"] = cli_command
+                remediation_code[cli_key] = cli_command
 
-            # Build remediation resources
+            # Build remediation resources with provider-aware title
             remediation_resources = []
             remediation_url = remediation_obj.get("Recommendation", {})
+            doc_title = "AWS Documentation"
+            if cloud_provider == "azure":
+                doc_title = "Azure Documentation"
+            elif cloud_provider == "gcp":
+                doc_title = "Google Cloud Documentation"
             if isinstance(remediation_url, dict) and remediation_url.get("Url"):
                 remediation_resources.append(
                     {
-                        "title": "AWS Documentation",
+                        "title": doc_title,
                         "url": remediation_url.get("Url"),
                         "type": "documentation",
                     }
@@ -1094,16 +1332,11 @@ class ReportProcessor:
                 if isinstance(remediation_text, str)
                 else str(remediation_text),
                 "compliance": finding_data.get("Compliance", []),
-                "poc_evidence": json.dumps(
-                    {
-                        "check_id": finding_data.get("CheckID", ""),
-                        "status_extended": finding_data.get("StatusExtended", ""),
-                        "resource_details": finding_data.get("ResourceDetails", ""),
-                        "risk": finding_data.get("Risk", ""),
-                        "related_url": finding_data.get("RelatedUrl", ""),
-                    }
-                ),
-                "poc_verification": f"aws {finding_data.get('ServiceName', 'service')} describe-* --resource-id {finding_data.get('ResourceId', 'RESOURCE_ID')}",
+                "poc_evidence": f"Check: {finding_data.get('CheckID', '')}\n"
+                    f"Status: {finding_data.get('StatusExtended', '')}\n"
+                    f"Risk: {finding_data.get('Risk', '')}\n"
+                    f"Resource Details: {finding_data.get('ResourceDetails', '')}",
+                "poc_verification": "",  # Will be set to CLI command by _enhance_finding
                 "remediation_commands": remediation_commands,
                 "remediation_code": remediation_code,
                 "remediation_resources": remediation_resources,
@@ -1257,10 +1490,10 @@ class ReportProcessor:
                     "remediation_code": {},
                     "remediation_resources": [],
                 }
-                # Enhance finding with KB data
+                # Enhance finding with KB data (CloudSploit is AWS-only)
                 service = item.get("category", "aws")
                 check_id = item.get("plugin", "")
-                finding = self._enhance_finding(finding, service, check_id)
+                finding = self._enhance_finding(finding, service, check_id, "aws")
                 findings.append(finding)
 
             logger.info(
@@ -2007,6 +2240,32 @@ class ReportProcessor:
                     processed_files["scoutsuite"] = [str(report)]
                 else:
                     logger.warning(f"ScoutSuite report yielded no findings: {report}")
+
+        if "scoutsuite-azure" in tools_to_process:
+            # Process most recent ScoutSuite Azure reports (same format as AWS ScoutSuite)
+            scoutsuite_azure_reports = list(
+                self.reports_dir.glob("scoutsuite/azure/scoutsuite-results/scoutsuite_results*.js")
+            )
+            scoutsuite_azure_reports += list(
+                self.reports_dir.glob("scoutsuite/azure/scoutsuite_results_*.json")
+            )
+            scoutsuite_azure_reports = list(set(scoutsuite_azure_reports))
+            if scoutsuite_azure_reports:
+                scoutsuite_azure_reports.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                report = scoutsuite_azure_reports[0]
+                logger.info(f"Processing ScoutSuite Azure report: {report}")
+                metadata, findings = self.process_scoutsuite_report(report)
+                if metadata and findings:
+                    self.save_to_database(
+                        metadata,
+                        findings,
+                        f"scoutsuite_azure_{report.stem}",
+                        orchestration_scan_id,
+                    )
+                    total_findings += len(findings)
+                    processed_files["scoutsuite-azure"] = [str(report)]
+                else:
+                    logger.warning(f"ScoutSuite Azure report yielded no findings: {report}")
 
         if "cloudsploit" in tools_to_process:
             # Process most recent CloudSploit reports
