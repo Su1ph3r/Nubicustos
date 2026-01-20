@@ -1,6 +1,7 @@
 #!/bin/bash
 # Setup script for Linux deployments of Nubicustos
-# Fixes permission issues with credential storage and Docker socket access
+# Fixes permission issues with credential storage, Docker socket access,
+# and ensures all directories and scripts are properly configured.
 
 set -e
 
@@ -14,15 +15,29 @@ echo ""
 
 # Check if running as root
 if [ "$EUID" -eq 0 ]; then
-    echo "Running as root - will set permissions for API user (UID 1000)"
+    echo "Running as root - will set all permissions"
 else
-    echo "Note: Some operations may require sudo. Run with sudo if you encounter permission errors."
+    echo "Note: Some operations require sudo. Run with sudo for full setup."
+    echo ""
+fi
+
+# ============================================================================
+# SELinux Check
+# ============================================================================
+if command -v getenforce &> /dev/null; then
+    SELINUX_STATUS=$(getenforce 2>/dev/null || echo "Unknown")
+    if [ "$SELINUX_STATUS" = "Enforcing" ]; then
+        echo "WARNING: SELinux is in Enforcing mode."
+        echo "Docker volume mounts may fail. Consider running:"
+        echo "  sudo chcon -Rt svirt_sandbox_file_t $PROJECT_ROOT"
+        echo "Or set SELinux to Permissive: sudo setenforce 0"
+        echo ""
+    fi
 fi
 
 # ============================================================================
 # Docker Socket Group Configuration
 # ============================================================================
-echo ""
 echo "Configuring Docker socket access..."
 
 # Detect Docker socket group ID
@@ -32,21 +47,17 @@ if [ -S /var/run/docker.sock ]; then
 
     # Update or create .env file with DOCKER_GID
     if [ -f "$ENV_FILE" ]; then
-        # Check if DOCKER_GID is already set
         if grep -q "^DOCKER_GID=" "$ENV_FILE"; then
-            # Update existing value
             sed -i "s/^DOCKER_GID=.*/DOCKER_GID=$DOCKER_GID/" "$ENV_FILE" 2>/dev/null || \
             sed -i '' "s/^DOCKER_GID=.*/DOCKER_GID=$DOCKER_GID/" "$ENV_FILE"
             echo "Updated DOCKER_GID in .env"
         else
-            # Append to file
             echo "" >> "$ENV_FILE"
             echo "# Docker socket group ID for Linux (auto-detected)" >> "$ENV_FILE"
             echo "DOCKER_GID=$DOCKER_GID" >> "$ENV_FILE"
             echo "Added DOCKER_GID to .env"
         fi
     else
-        # Create .env with DOCKER_GID
         echo "# Nubicustos Environment Configuration" > "$ENV_FILE"
         echo "" >> "$ENV_FILE"
         echo "# Docker socket group ID for Linux (auto-detected)" >> "$ENV_FILE"
@@ -63,37 +74,98 @@ fi
 # ============================================================================
 echo ""
 echo "Creating required directories..."
+
+# Core directories
 mkdir -p "$PROJECT_ROOT/credentials/aws"
 mkdir -p "$PROJECT_ROOT/credentials/azure"
-mkdir -p "$PROJECT_ROOT/reports"
-mkdir -p "$PROJECT_ROOT/logs"
+mkdir -p "$PROJECT_ROOT/credentials/gcp"
 mkdir -p "$PROJECT_ROOT/iac-staging"
+mkdir -p "$PROJECT_ROOT/iac-code"
+mkdir -p "$PROJECT_ROOT/kubeconfigs"
+mkdir -p "$PROJECT_ROOT/policies"
+mkdir -p "$PROJECT_ROOT/config/cloudmapper"
+mkdir -p "$PROJECT_ROOT/config/falco"
+
+# Log directories
+mkdir -p "$PROJECT_ROOT/logs"
+mkdir -p "$PROJECT_ROOT/logs/nginx"
+mkdir -p "$PROJECT_ROOT/logs/postgresql"
+mkdir -p "$PROJECT_ROOT/logs/falco"
+
+# Report directories (one per tool)
+mkdir -p "$PROJECT_ROOT/reports/prowler"
+mkdir -p "$PROJECT_ROOT/reports/prowler-azure"
+mkdir -p "$PROJECT_ROOT/reports/scoutsuite"
+mkdir -p "$PROJECT_ROOT/reports/cloudfox"
+mkdir -p "$PROJECT_ROOT/reports/cloudsploit"
+mkdir -p "$PROJECT_ROOT/reports/custodian"
+mkdir -p "$PROJECT_ROOT/reports/cloudmapper"
+mkdir -p "$PROJECT_ROOT/reports/pacu"
+mkdir -p "$PROJECT_ROOT/reports/enumerate-iam"
+mkdir -p "$PROJECT_ROOT/reports/kube-bench"
+mkdir -p "$PROJECT_ROOT/reports/kubescape"
+mkdir -p "$PROJECT_ROOT/reports/kube-hunter"
+mkdir -p "$PROJECT_ROOT/reports/trivy"
+mkdir -p "$PROJECT_ROOT/reports/grype"
+mkdir -p "$PROJECT_ROOT/reports/popeye"
+mkdir -p "$PROJECT_ROOT/reports/kube-linter"
+mkdir -p "$PROJECT_ROOT/reports/polaris"
+mkdir -p "$PROJECT_ROOT/reports/checkov"
+mkdir -p "$PROJECT_ROOT/reports/terrascan"
+mkdir -p "$PROJECT_ROOT/reports/tfsec"
+mkdir -p "$PROJECT_ROOT/reports/trufflehog"
+mkdir -p "$PROJECT_ROOT/reports/gitleaks"
+mkdir -p "$PROJECT_ROOT/reports/pmapper"
+mkdir -p "$PROJECT_ROOT/reports/cloudsplaining"
+
+echo "All directories created."
 
 # ============================================================================
-# Permission Configuration
+# Script Permissions
+# ============================================================================
+echo ""
+echo "Setting script execute permissions..."
+chmod +x "$PROJECT_ROOT/scripts/"*.sh 2>/dev/null || true
+echo "Script permissions set."
+
+# ============================================================================
+# Directory Permissions
 # ============================================================================
 echo ""
 echo "Setting directory permissions..."
 
 if [ "$EUID" -eq 0 ]; then
-    # Set ownership to UID 1000 (the API container user)
+    # Credentials - API user (UID 1000) needs write access
     chown -R 1000:1000 "$PROJECT_ROOT/credentials"
+    chmod -R 755 "$PROJECT_ROOT/credentials"
+
+    # IaC staging - API user needs write access
     chown -R 1000:1000 "$PROJECT_ROOT/iac-staging"
-    # Reports needs to be writable by multiple containers
+    chmod -R 755 "$PROJECT_ROOT/iac-staging"
+
+    # Reports - needs to be writable by multiple containers (various UIDs)
     chmod -R 777 "$PROJECT_ROOT/reports"
+
+    # Logs - needs to be writable by multiple containers
     chmod -R 777 "$PROJECT_ROOT/logs"
+
+    # IaC code and kubeconfigs - read-only is fine, but ensure readable
+    chmod -R 755 "$PROJECT_ROOT/iac-code"
+    chmod -R 755 "$PROJECT_ROOT/kubeconfigs"
+    chmod -R 755 "$PROJECT_ROOT/policies"
+    chmod -R 755 "$PROJECT_ROOT/config"
+
     echo "Permissions set successfully."
 else
     echo ""
-    echo "Run the following commands with sudo to set permissions:"
+    echo "Run with sudo to set all permissions, or run these commands:"
     echo ""
     echo "  sudo chown -R 1000:1000 $PROJECT_ROOT/credentials"
     echo "  sudo chown -R 1000:1000 $PROJECT_ROOT/iac-staging"
     echo "  sudo chmod -R 777 $PROJECT_ROOT/reports"
     echo "  sudo chmod -R 777 $PROJECT_ROOT/logs"
     echo ""
-    echo "Or run this script with sudo:"
-    echo "  sudo $0"
+    echo "Or run: sudo $0"
 fi
 
 # ============================================================================
@@ -108,8 +180,11 @@ if [ -n "$DOCKER_GID" ]; then
     echo "Docker GID configured: $DOCKER_GID"
 fi
 echo ""
-echo "You can now run: docker compose up -d"
+echo "Next steps:"
+echo "  1. docker compose up -d"
+echo "  2. Open http://localhost:8080"
 echo ""
-echo "If you still encounter Docker permission issues, ensure your user"
-echo "is in the docker group: sudo usermod -aG docker \$USER"
-echo "(Then log out and back in)"
+echo "If you encounter permission issues:"
+echo "  - Re-run this script with sudo"
+echo "  - Ensure your user is in the docker group:"
+echo "    sudo usermod -aG docker \$USER && newgrp docker"
