@@ -951,6 +951,22 @@ class DockerExecutor:
             logger.info(f"Pulling image {image_name}...")
             self.client.images.pull(image_name)
             return True, f"Successfully pulled image {image_name}"
+        except docker.errors.APIError as e:
+            error_msg = str(e)
+            # Check for common permission issues
+            if "permission denied" in error_msg.lower() or "access denied" in error_msg.lower():
+                return False, (
+                    f"Failed to pull image {image_name}: Permission denied. "
+                    "On Linux, run: ./scripts/setup-linux-permissions.sh to configure Docker socket access, "
+                    "then restart with: docker compose up -d"
+                )
+            # Check for network/registry issues
+            if "connection refused" in error_msg.lower() or "timeout" in error_msg.lower():
+                return False, (
+                    f"Failed to pull image {image_name}: Network error. "
+                    "Check your internet connection and Docker Hub accessibility."
+                )
+            return False, f"Failed to pull image {image_name}: {e}"
         except Exception as e:
             return False, f"Failed to pull image {image_name}: {e}"
 
