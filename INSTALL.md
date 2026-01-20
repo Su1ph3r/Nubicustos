@@ -181,6 +181,33 @@ sudo ./scripts/setup-linux-permissions.sh
 
 This is not required on Docker Desktop for Mac/Windows as they handle UID mapping automatically.
 
+### Linux: Failed to Pull Image (Prowler, ScoutSuite, etc.)
+
+On Linux, the Docker socket requires proper group permissions for the API container to pull images and start security tool containers.
+
+**Quick fix:**
+```bash
+# Run the setup script to auto-detect and configure Docker GID
+./scripts/setup-linux-permissions.sh
+
+# Restart containers
+docker compose down && docker compose up -d
+```
+
+**Manual fix:**
+```bash
+# Get the Docker socket group ID
+DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+
+# Add to your .env file
+echo "DOCKER_GID=$DOCKER_GID" >> .env
+
+# Restart
+docker compose down && docker compose up -d
+```
+
+This is not required on Docker Desktop for Mac/Windows.
+
 ### Container Won't Start
 ```bash
 # View logs

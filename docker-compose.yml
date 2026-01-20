@@ -511,8 +511,10 @@ services:
       - /tmp:mode=1777,size=64m
       - /processed:mode=1777,size=128m
     # Docker socket access for tool execution (required for CloudFox, Pacu, etc.)
+    # On Linux, set DOCKER_GID to the docker group ID (run: getent group docker | cut -d: -f3)
+    # On Mac/Windows Docker Desktop, group 0 works fine
     group_add:
-      - "0"  # Docker socket group on Windows/Mac
+      - "${DOCKER_GID:-0}"
     restart: unless-stopped
 
   # ============================================================================
