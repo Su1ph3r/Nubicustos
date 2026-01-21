@@ -79,7 +79,19 @@ CREATE TABLE IF NOT EXISTS findings (
     -- Enhanced Remediation
     remediation_commands JSONB,
     remediation_code JSONB,
-    remediation_resources JSONB
+    remediation_resources JSONB,
+    -- Deduplication fields
+    canonical_id VARCHAR(256),
+    tool_sources JSONB DEFAULT '[]',
+    affected_resources JSONB DEFAULT '[]',
+    -- Phase 1: Enhanced scoring fields
+    asset_criticality VARCHAR(16) DEFAULT 'medium',
+    blast_radius INTEGER DEFAULT 1,
+    recurrence_count INTEGER DEFAULT 1,
+    scoring_factors JSONB DEFAULT '{}',
+    -- Phase 1: Threat intelligence fields
+    threat_intel_enrichment JSONB DEFAULT NULL,
+    threat_intel_last_checked TIMESTAMP
 );
 
 -- Compliance mappings table
