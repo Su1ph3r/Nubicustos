@@ -44,6 +44,9 @@ click==8.1.7
 # Scheduled Scanning (Phase 1 Feature)
 APScheduler>=3.10.0
 
+# Semantic versioning for K8s CVE checking
+semver>=3.0.0
+
 # Testing (dev dependencies, included for CI)
 pytest==8.1.1
 pytest-cov==5.0.0

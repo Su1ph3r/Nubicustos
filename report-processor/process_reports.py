@@ -2386,6 +2386,16 @@ class ReportProcessor:
             for finding in findings:
                 enrich_finding_with_scoring(finding)
 
+            # Apply security enrichments (CISA KEV, K8s CVE, container escape, IMDS)
+            try:
+                from enrichments import apply_security_enrichments
+
+                for finding in findings:
+                    apply_security_enrichments(finding)
+                logger.debug("Applied security enrichments to findings")
+            except ImportError:
+                pass  # Enrichments not available - continue without
+
             # Count findings by adjusted severity (after scoring)
             critical_count = len(
                 [f for f in findings if f.get("severity", "").lower() == "critical"]
