@@ -55,6 +55,7 @@ from routers.database import router as database_router
 from routers.health import set_startup_time
 from routers.iac import router as iac_router
 from routers.schedules import router as schedules_router
+from services.db_migrations import run_migrations
 from services.orphan_recovery import run_orphan_recovery
 from services.scheduler_service import start_scheduler, stop_scheduler
 
@@ -257,6 +258,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Register signal handlers for graceful shutdown
     signal.signal(signal.SIGTERM, handle_sigterm)
     signal.signal(signal.SIGINT, handle_sigterm)
+
+    # Run database migrations to ensure schema is up to date
+    try:
+        from models.database import SessionLocal
+
+        db = SessionLocal()
+        migration_results = run_migrations(db)
+        db.close()
+        if migration_results["migrations_run"] > 0:
+            logger.info(f"Database migrations: {migration_results['migrations_run']} applied")
+        if migration_results["errors"]:
+            logger.warning(f"Migration errors: {migration_results['errors']}")
+    except Exception as e:
+        logger.warning(f"Database migration check failed (non-fatal): {e}")
 
     # Run orphan recovery to clean up any scans/executions left running from previous API instances
     try:

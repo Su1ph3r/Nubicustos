@@ -104,6 +104,7 @@ class Finding(Base):
     region = Column(String(64))
     risk_score = Column(Numeric(4, 2))
     cvss_score = Column(Numeric(3, 1))
+    exploitability = Column(String(32), default="likely")
     cve_id = Column(String(32))
     compliance_frameworks = Column(JSONB)
     tags = Column(JSONB)
