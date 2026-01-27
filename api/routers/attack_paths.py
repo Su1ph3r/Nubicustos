@@ -62,6 +62,7 @@ def _convert_path_to_response(path: AttackPath) -> AttackPathResponse:
     finding_ids = path.finding_ids or []
     mitre_tactics = path.mitre_tactics or []
     aws_services = path.aws_services or []
+    confidence_factors = path.confidence_factors or {}
 
     # Convert to Pydantic models
     nodes = [AttackPathNode(**n) for n in nodes_data]
@@ -93,6 +94,8 @@ def _convert_path_to_response(path: AttackPath) -> AttackPathResponse:
         mitre_tactics=mitre_tactics,
         aws_services=aws_services,
         created_at=path.created_at,
+        confidence_score=path.confidence_score,
+        confidence_factors=confidence_factors,
     )
 
 

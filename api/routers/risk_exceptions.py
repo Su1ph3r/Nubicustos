@@ -58,50 +58,47 @@ async def create_risk_exception(
     db: Session = Depends(get_db),
 ):
     """
-    Create a risk exception for one or more findings.
+    Create a risk exception for a finding by canonical_id.
 
-    Accepts the specified finding(s) as acknowledged risks. The exception
+    Accepts the specified finding as acknowledged risk. The exception
     persists across scans via the canonical_id, meaning future occurrences
     of the same issue will automatically be marked as accepted.
 
     Args:
         request: Risk exception details
-            - finding_ids: List of finding IDs to accept (required)
-            - justification: Reason for accepting risk (required, min 20 chars)
+            - canonical_id: The canonical ID for cross-scan persistence (required)
+            - finding_id: Optional specific finding ID reference
+            - justification: Reason for accepting risk (required, min 10 chars)
             - expiration_date: Optional expiration (null = permanent)
 
     Returns:
         RiskExceptionResponse: Created exception details
 
     Raises:
-        HTTPException 400: If no valid findings found
         HTTPException 400: If justification is too short
+        HTTPException 409: If active exception already exists for canonical_id
     """
-    if len(request.justification) < 20:
+    if len(request.justification) < 10:
         raise HTTPException(
             status_code=400,
-            detail="Justification must be at least 20 characters",
+            detail="Justification must be at least 10 characters",
         )
 
-    # Get the findings
-    findings = db.query(Finding).filter(Finding.id.in_(request.finding_ids)).all()
+    # Check for existing active exception
+    existing = (
+        db.query(RiskException)
+        .filter(
+            RiskException.canonical_id == request.canonical_id,
+            RiskException.status == "active",
+        )
+        .first()
+    )
 
-    if not findings:
-        raise HTTPException(status_code=400, detail="No valid findings found")
-
-    # Use the canonical_id from the first finding (all should have same canonical)
-    # If findings have different canonical_ids, we use the first one and log warning
-    canonical_ids = set(f.canonical_id for f in findings if f.canonical_id)
-
-    if not canonical_ids:
-        # If no canonical_id, create one from the first finding
-        primary_finding = findings[0]
-        canonical_id = f"accepted:{primary_finding.tool}:{primary_finding.finding_id}"
-    elif len(canonical_ids) > 1:
-        # Multiple canonical IDs - create exception for first, log warning
-        canonical_id = list(canonical_ids)[0]
-    else:
-        canonical_id = list(canonical_ids)[0]
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail="An active exception already exists for this canonical_id",
+        )
 
     # Generate unique exception ID
     exception_id = f"exc-{uuid.uuid4().hex[:16]}"
@@ -109,8 +106,8 @@ async def create_risk_exception(
     # Create the exception
     exception = RiskException(
         exception_id=exception_id,
-        canonical_id=canonical_id,
-        finding_id=findings[0].id,  # Primary finding reference
+        canonical_id=request.canonical_id,
+        finding_id=request.finding_id,
         justification=request.justification,
         expiration_date=request.expiration_date,
         accepted_at=datetime.utcnow(),
@@ -119,23 +116,18 @@ async def create_risk_exception(
 
     db.add(exception)
 
-    # Update all matching findings to 'accepted' status
-    for finding in findings:
-        finding.status = "accepted"
-
-    # Also update any other findings with the same canonical_id
-    if canonical_id:
-        related_findings = (
-            db.query(Finding)
-            .filter(
-                Finding.canonical_id == canonical_id,
-                Finding.id.notin_([f.id for f in findings]),
-                Finding.status.in_(["open", "fail"]),
-            )
-            .all()
+    # Update all findings with this canonical_id to 'accepted' status
+    findings_updated = (
+        db.query(Finding)
+        .filter(
+            Finding.canonical_id == request.canonical_id,
+            Finding.status.in_(["open", "fail"]),
         )
-        for rf in related_findings:
-            rf.status = "accepted"
+        .all()
+    )
+
+    for finding in findings_updated:
+        finding.status = "accepted"
 
     db.commit()
     db.refresh(exception)

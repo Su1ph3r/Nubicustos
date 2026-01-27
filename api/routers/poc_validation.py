@@ -533,14 +533,14 @@ def _generate_finding_poc_commands(finding: Finding) -> list[str]:
 
     # Common patterns based on finding category
     tool = finding.tool.lower() if finding.tool else ""
-    check_id = finding.check_id.lower() if finding.check_id else ""
+    finding_id_str = finding.finding_id.lower() if finding.finding_id else ""
     resource_type = finding.resource_type.lower() if finding.resource_type else ""
     resource_id = finding.resource_id or ""
 
     # AWS-specific checks
     if "aws" in tool or "prowler" in tool or "scoutsuite" in tool:
         # S3 bucket checks
-        if "s3" in check_id or "s3" in resource_type:
+        if "s3" in finding_id_str or "s3" in resource_type:
             if resource_id.startswith("arn:aws:s3"):
                 bucket_name = resource_id.split(":")[-1].split("/")[0]
             else:
@@ -550,27 +550,27 @@ def _generate_finding_poc_commands(finding: Finding) -> list[str]:
             commands.append(f"aws s3api get-public-access-block --bucket {bucket_name}")
 
         # IAM checks
-        elif "iam" in check_id or "iam" in resource_type:
-            if "user" in check_id or "user" in resource_type:
+        elif "iam" in finding_id_str or "iam" in resource_type:
+            if "user" in finding_id_str or "user" in resource_type:
                 if "/" in resource_id:
                     user_name = resource_id.split("/")[-1]
                 else:
                     user_name = resource_id
                 commands.append(f"aws iam get-user --user-name {user_name}")
                 commands.append(f"aws iam list-user-policies --user-name {user_name}")
-            elif "role" in check_id or "role" in resource_type:
+            elif "role" in finding_id_str or "role" in resource_type:
                 if "/" in resource_id:
                     role_name = resource_id.split("/")[-1]
                 else:
                     role_name = resource_id
                 commands.append(f"aws iam get-role --role-name {role_name}")
                 commands.append(f"aws iam list-role-policies --role-name {role_name}")
-            elif "policy" in check_id:
+            elif "policy" in finding_id_str:
                 commands.append(f"aws iam get-policy --policy-arn {resource_id}")
 
         # EC2 checks
-        elif "ec2" in check_id or "ec2" in resource_type:
-            if "security" in check_id or "sg-" in resource_id:
+        elif "ec2" in finding_id_str or "ec2" in resource_type:
+            if "security" in finding_id_str or "sg-" in resource_id:
                 if resource_id.startswith("sg-"):
                     commands.append(f"aws ec2 describe-security-groups --group-ids {resource_id}")
                 else:
@@ -580,7 +580,7 @@ def _generate_finding_poc_commands(finding: Finding) -> list[str]:
                     commands.append(f"aws ec2 describe-instances --instance-ids {resource_id}")
 
         # RDS checks
-        elif "rds" in check_id or "rds" in resource_type:
+        elif "rds" in finding_id_str or "rds" in resource_type:
             if ":" in resource_id:
                 db_id = resource_id.split(":")[-1]
             else:
@@ -588,7 +588,7 @@ def _generate_finding_poc_commands(finding: Finding) -> list[str]:
             commands.append(f"aws rds describe-db-instances --db-instance-identifier {db_id}")
 
         # Lambda checks
-        elif "lambda" in check_id or "lambda" in resource_type:
+        elif "lambda" in finding_id_str or "lambda" in resource_type:
             if ":" in resource_id:
                 func_name = resource_id.split(":")[-1]
             else:
@@ -597,11 +597,11 @@ def _generate_finding_poc_commands(finding: Finding) -> list[str]:
             commands.append(f"aws lambda get-function-configuration --function-name {func_name}")
 
         # CloudTrail checks
-        elif "cloudtrail" in check_id or "cloudtrail" in resource_type:
+        elif "cloudtrail" in finding_id_str or "cloudtrail" in resource_type:
             commands.append("aws cloudtrail describe-trails")
 
         # KMS checks
-        elif "kms" in check_id or "kms" in resource_type:
+        elif "kms" in finding_id_str or "kms" in resource_type:
             if resource_id:
                 commands.append(f"aws kms describe-key --key-id {resource_id}")
 
