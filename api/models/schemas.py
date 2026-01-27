@@ -556,6 +556,9 @@ class AttackPathResponse(BaseModel):
     mitre_tactics: list[str] = []
     aws_services: list[str] = []
     created_at: datetime | None = None
+    # Confidence scoring (Tier 1)
+    confidence_score: int | None = Field(default=None, ge=0, le=100, description="Confidence score 0-100")
+    confidence_factors: dict[str, Any] | None = Field(default=None, description="Breakdown of confidence factors")
 
     class Config:
         from_attributes = True
