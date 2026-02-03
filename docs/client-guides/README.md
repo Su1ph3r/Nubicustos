@@ -6,12 +6,12 @@ This directory contains step-by-step instructions for setting up credentials to 
 
 ## Available Guides
 
-| Cloud Provider | Guide | Scan Duration |
-|----------------|-------|---------------|
-| **Amazon Web Services (AWS)** | [AWS-Credential-Setup-Guide.md](./AWS-Credential-Setup-Guide.md) | 5-50 min |
-| **Microsoft Azure** | [Azure-Credential-Setup-Guide.md](./Azure-Credential-Setup-Guide.md) | 5-25 min |
-| **Google Cloud Platform (GCP)** | [GCP-Credential-Setup-Guide.md](./GCP-Credential-Setup-Guide.md) | 5-20 min |
-| **Kubernetes** | [Kubernetes-Credential-Setup-Guide.md](./Kubernetes-Credential-Setup-Guide.md) | 5-15 min |
+| Cloud Provider | Guide |
+|----------------|-------|
+| **Amazon Web Services (AWS)** | [AWS-Credential-Setup-Guide.md](./AWS-Credential-Setup-Guide.md) |
+| **Microsoft Azure** | [Azure-Credential-Setup-Guide.md](./Azure-Credential-Setup-Guide.md) |
+| **Google Cloud Platform (GCP)** | [GCP-Credential-Setup-Guide.md](./GCP-Credential-Setup-Guide.md) |
+| **Kubernetes** | [Kubernetes-Credential-Setup-Guide.md](./Kubernetes-Credential-Setup-Guide.md) |
 
 ---
 
