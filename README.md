@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://python.org)
 [![Docker](https://img.shields.io/badge/Docker-Required-2496ED?logo=docker&logoColor=white)](https://docker.com)
-[![Version](https://img.shields.io/badge/Version-1.0.3-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-1.0.4-green.svg)](CHANGELOG.md)
 [![GitHub stars](https://img.shields.io/github/stars/Su1ph3r/Nubicustos?style=social)](https://github.com/Su1ph3r/Nubicustos/stargazers)
 [![GitHub last commit](https://img.shields.io/github/last-commit/Su1ph3r/Nubicustos)](https://github.com/Su1ph3r/Nubicustos/commits/main)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -480,6 +480,40 @@ See [MCP Server Guide](nubicustos-mcp/README.md) for setup instructions.
 | 5432 | PostgreSQL | Findings database |
 | 7474 | Neo4j HTTP | Graph browser |
 | 7687 | Neo4j Bolt | Graph queries |
+
+---
+
+## Cross-Tool Integration
+
+Nubicustos participates in a cross-tool security pipeline:
+
+```
+Nubicustos (cloud) ──containers──> Cepheus (container escape)
+Reticustos (network) ──endpoints──> Indago (API fuzzing)
+Indago (API fuzzing) ──WAF-blocked──> BypassBurrito (WAF bypass)
+Ariadne (attack paths) ──endpoints──> Indago (API fuzzing)
+All tools ──findings──> Vinculum (correlation) ──export──> Ariadne (attack paths)
+```
+
+### Exporting Containers
+
+Export container inventory for Cepheus container escape analysis:
+
+```bash
+curl -o containers.json "http://localhost:8000/api/exports/containers"
+cepheus analyze containers.json --from-nubicustos
+```
+
+### Exporting Findings
+
+Export findings for Vinculum correlation:
+
+```bash
+curl -o findings.json "http://localhost:8000/api/exports/findings/json?scan_id=SCAN_ID"
+vinculum ingest findings.json --format ariadne --output correlated.json
+```
+
+See also: [Vinculum](https://github.com/Su1ph3r/vinculum) | [Reticustos](https://github.com/Su1ph3r/Reticustos) | [Indago](https://github.com/Su1ph3r/indago) | [BypassBurrito](https://github.com/Su1ph3r/bypassburrito) | [Cepheus](https://github.com/Su1ph3r/Cepheus) | [Ariadne](https://github.com/Su1ph3r/ariadne)
 
 ---
 

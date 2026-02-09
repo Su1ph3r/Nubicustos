@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.4] - 2026-02-09
+
+### Added
+
+#### Cross-Tool Integration
+- `GET /exports/containers` endpoint exporting container inventory in Cepheus-compatible format
+- `export_source: "nubicustos"` field added to JSON exports for downstream tool identification
+- NULL `resource_id` deduplication fix with `finding-{id}` fallback
+
+---
+
 ## [1.0.3] - 2026-01-18
 
 ### Added
@@ -266,6 +277,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 1.0.4 | 2026-02-09 | Cross-tool integration: container export endpoint, export_source field |
 | 1.0.3 | 2026-01-18 | Phase 1 Open Source features: alert prioritization, threat intel, scheduling, notifications, dashboard |
 | 1.0.2 | 2025-01-14 | Security fixes, bulk operations, error handling improvements |
 | 1.0.1 | 2026-01-09 | Bug fixes from beta testing |
@@ -301,7 +313,8 @@ docker-compose up -d
 
 ---
 
-[Unreleased]: https://github.com/Su1ph3r/Nubicustos/compare/v1.0.3...HEAD
+[Unreleased]: https://github.com/Su1ph3r/Nubicustos/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/Su1ph3r/Nubicustos/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/Su1ph3r/Nubicustos/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/Su1ph3r/Nubicustos/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/Su1ph3r/Nubicustos/compare/v1.0.0...v1.0.1
