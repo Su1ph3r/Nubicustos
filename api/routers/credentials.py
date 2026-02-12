@@ -3,12 +3,15 @@
 import logging
 import os
 import sys
+import threading
+import time
+import uuid
 from datetime import datetime
 from enum import Enum
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
 from models.database import CredentialStatusCache, get_db
@@ -56,6 +59,33 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/credentials", tags=["credentials"])
 
+# Device code session storage (in-memory, ephemeral)
+_device_code_sessions: dict[str, dict] = {}
+_device_code_lock = threading.Lock()
+DEVICE_CODE_CLEANUP_TTL = 86400  # 24 hours
+
+
+def _cleanup_expired_device_sessions():
+    """Remove expired device code sessions."""
+    now = time.time()
+    with _device_code_lock:
+        expired = [
+            sid for sid, session in _device_code_sessions.items()
+            if now - session.get("created_at", 0) > DEVICE_CODE_CLEANUP_TTL
+        ]
+        for sid in expired:
+            # Clean up on-disk files too
+            session_dir = f"/app/credentials/azure/device-sessions/{sid}"
+            if os.path.exists(session_dir):
+                import shutil
+                try:
+                    shutil.rmtree(session_dir)
+                except OSError as e:
+                    logger.warning(f"Failed to clean up device code session dir {sid}: {e}")
+            del _device_code_sessions[sid]
+    if expired:
+        logger.info(f"Cleaned up {len(expired)} expired device code sessions")
+
 
 class Provider(str, Enum):
     """Supported cloud providers."""
@@ -80,10 +110,36 @@ class AWSCredentials(BaseModel):
 class AzureCredentials(BaseModel):
     """Azure credentials input."""
 
-    tenant_id: str = Field(..., description="Azure Tenant ID")
-    client_id: str = Field(..., description="Azure Client/Application ID")
-    client_secret: str = Field(..., description="Azure Client Secret")
+    auth_method: str = Field("service_principal", description="Authentication method: service_principal, cli, username_password, or device_code")
+    tenant_id: str | None = Field(None, description="Azure Tenant ID")
+    client_id: str | None = Field(None, description="Azure Client/Application ID")
+    client_secret: str | None = Field(None, description="Azure Client Secret")
     subscription_id: str | None = Field(None, description="Azure Subscription ID")
+    username: str | None = Field(None, description="Azure AD username for username/password auth")
+    password: str | None = Field(None, description="Azure AD password for username/password auth")
+
+    @model_validator(mode="after")
+    def validate_credentials(self):
+        """Require fields based on auth method."""
+        if self.auth_method == "service_principal":
+            missing = []
+            if not self.tenant_id:
+                missing.append("tenant_id")
+            if not self.client_id:
+                missing.append("client_id")
+            if not self.client_secret:
+                missing.append("client_secret")
+            if missing:
+                raise ValueError(f"Service principal auth requires: {', '.join(missing)}")
+        elif self.auth_method == "username_password":
+            missing = []
+            if not self.username:
+                missing.append("username")
+            if not self.password:
+                missing.append("password")
+            if missing:
+                raise ValueError(f"Username/password auth requires: {', '.join(missing)}")
+        return self
 
 
 class GCPCredentials(BaseModel):
@@ -252,18 +308,49 @@ def verify_azure_credentials(creds: AzureCredentials) -> VerificationResult:
     output_lines = []
 
     try:
-        from azure.identity import ClientSecretCredential
+        from azure.identity import AzureCliCredential, ClientSecretCredential, UsernamePasswordCredential
         from azure.mgmt.resource import SubscriptionClient
 
         output_lines.append("=" * 60)
         output_lines.append("AZURE CREDENTIAL VERIFICATION")
         output_lines.append("=" * 60)
         output_lines.append("")
+        output_lines.append(f"Auth Method: {creds.auth_method}")
+        output_lines.append("")
 
-        # Create credential object
-        credential = ClientSecretCredential(
-            tenant_id=creds.tenant_id, client_id=creds.client_id, client_secret=creds.client_secret
-        )
+        # Create credential object based on auth method
+        if creds.auth_method == "cli":
+            credential = AzureCliCredential()
+            output_lines.append("[INFO] Using Azure CLI authentication")
+        elif creds.auth_method == "username_password":
+            # Use well-known Azure CLI client_id for ROPC
+            cli_client_id = "04b07795-a710-4532-9ddb-53ea1d339180"
+            try:
+                credential = UsernamePasswordCredential(
+                    client_id=cli_client_id,
+                    username=creds.username,
+                    password=creds.password,
+                    tenant_id=creds.tenant_id or "organizations",
+                )
+                output_lines.append("[INFO] Using Username/Password (ROPC) authentication")
+            except Exception as e:
+                error_str = str(e)
+                if "AADSTS50076" in error_str or "AADSTS50079" in error_str:
+                    result.errors.append("MFA is required for this account. Use Device Code authentication instead.")
+                    output_lines.append("[ERROR] MFA is required for this account. Use Device Code authentication instead.")
+                    result.raw_output = "\n".join(output_lines)
+                    return result
+                elif "AADSTS7000218" in error_str:
+                    result.errors.append("ROPC (username/password) authentication is disabled for this tenant. Use Device Code or Service Principal instead.")
+                    output_lines.append("[ERROR] ROPC authentication is disabled for this tenant.")
+                    result.raw_output = "\n".join(output_lines)
+                    return result
+                raise
+        else:
+            credential = ClientSecretCredential(
+                tenant_id=creds.tenant_id, client_id=creds.client_id, client_secret=creds.client_secret
+            )
+            output_lines.append("[INFO] Using Service Principal authentication")
 
         # List subscriptions to verify access
         sub_client = SubscriptionClient(credential)
@@ -275,15 +362,30 @@ def verify_azure_credentials(creds: AzureCredentials) -> VerificationResult:
             first_sub = subscriptions[0]
             result.identity = first_sub.display_name
         else:
-            # Fallback to tenant ID prefix if no subscriptions accessible
-            result.identity = f"Azure-{creds.tenant_id[:8]}"
-        result.account_info = f"Tenant: {creds.tenant_id}"
+            if creds.auth_method == "cli":
+                result.identity = "Azure-CLI"
+            elif creds.auth_method == "username_password":
+                result.identity = f"Azure-{creds.username or 'User'}"
+            else:
+                result.identity = f"Azure-{(creds.tenant_id or 'Unknown')[:8]}"
 
+        # For CLI auth, get tenant info from the subscription
+        if creds.auth_method == "cli" and subscriptions:
+            result.account_info = f"Tenant: {subscriptions[0].tenant_id}"
+        else:
+            result.account_info = f"Tenant: {creds.tenant_id or 'N/A'}"
+
+        output_lines.append("")
         output_lines.append("[SUCCESS] Credentials are valid!")
         output_lines.append("")
         output_lines.append("IDENTITY INFORMATION:")
-        output_lines.append(f"  Tenant ID:  {creds.tenant_id}")
-        output_lines.append(f"  Client ID:  {creds.client_id}")
+        if creds.auth_method == "cli":
+            output_lines.append("  Auth:       Azure CLI")
+            if subscriptions:
+                output_lines.append(f"  Tenant ID:  {subscriptions[0].tenant_id}")
+        else:
+            output_lines.append(f"  Tenant ID:  {creds.tenant_id}")
+            output_lines.append(f"  Client ID:  {creds.client_id}")
         output_lines.append(f"  Identity:   {result.identity}")
         output_lines.append("")
         output_lines.append("ACCESSIBLE SUBSCRIPTIONS:")
@@ -996,3 +1098,181 @@ async def get_tool_requirements_endpoint() -> dict[str, Any]:
             for tool_name, config in KUBERNETES_TOOLS.items()
         },
     }
+
+
+# ============================================================================
+# Device Code Authentication Endpoints
+# ============================================================================
+
+
+class DeviceCodeInitiateResponse(BaseModel):
+    """Response from device code initiation."""
+    session_id: str
+    user_code: str
+    verification_uri: str
+    expires_in: int
+    message: str
+
+
+class DeviceCodeCompleteRequest(BaseModel):
+    """Request to complete device code flow."""
+    session_id: str = Field(..., pattern=r"^[a-zA-Z0-9_\-]+$", max_length=128)
+
+
+@router.post("/azure/device-code/initiate", response_model=DeviceCodeInitiateResponse)
+async def initiate_device_code():
+    """
+    Initiate Azure device code authentication flow.
+
+    Returns a user code and verification URI. The user must visit the URI
+    and enter the code to authenticate.
+    """
+    try:
+        import msal
+    except ImportError:
+        raise HTTPException(status_code=500, detail="msal package not installed. Install with: pip install msal")
+
+    # Cleanup expired sessions
+    _cleanup_expired_device_sessions()
+
+    cli_client_id = "04b07795-a710-4532-9ddb-53ea1d339180"
+    cache = msal.SerializableTokenCache()
+    app = msal.PublicClientApplication(
+        cli_client_id,
+        authority="https://login.microsoftonline.com/organizations",
+        token_cache=cache,
+    )
+
+    flow = app.initiate_device_flow(scopes=["https://management.azure.com/.default"])
+    if "user_code" not in flow:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to initiate device code flow: {flow.get('error_description', 'Unknown error')}",
+        )
+
+    session_id = str(uuid.uuid4()).replace("-", "")[:24]
+
+    with _device_code_lock:
+        _device_code_sessions[session_id] = {
+            "flow": flow,
+            "app": app,
+            "cache": cache,
+            "created_at": time.time(),
+            "completed": False,
+        }
+
+    return DeviceCodeInitiateResponse(
+        session_id=session_id,
+        user_code=flow["user_code"],
+        verification_uri=flow.get("verification_uri", "https://microsoft.com/devicelogin"),
+        expires_in=flow.get("expires_in", 900),
+        message=flow.get("message", f"Go to https://microsoft.com/devicelogin and enter code {flow['user_code']}"),
+    )
+
+
+@router.post("/azure/device-code/complete")
+async def complete_device_code(request: DeviceCodeCompleteRequest):
+    """
+    Complete the device code authentication flow.
+
+    Blocks until the user completes authentication or the code expires.
+    On success, stores tokens for scan container use.
+    """
+    import asyncio
+    import json
+
+    session_id = request.session_id
+
+    with _device_code_lock:
+        session = _device_code_sessions.get(session_id)
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Device code session not found or expired")
+
+    if session.get("completed"):
+        # Return cached result
+        return session.get("result", {"success": False, "error": "Session already completed"})
+
+    app = session["app"]
+    flow = session["flow"]
+    cache = session["cache"]
+
+    # Run the blocking acquire_token_by_device_flow in a thread
+    try:
+        result = await asyncio.to_thread(app.acquire_token_by_device_flow, flow)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+    if "access_token" not in result:
+        error_desc = result.get("error_description", result.get("error", "Authentication failed"))
+        return {"success": False, "error": error_desc}
+
+    # Success - get subscription info
+    try:
+        from azure.identity import AccessToken
+        from azure.mgmt.resource import SubscriptionClient
+
+        class _TokenCredential:
+            """Wrap a raw access token for Azure SDK use."""
+            def __init__(self, token, expires_on):
+                self._token = token
+                self._expires_on = expires_on
+
+            def get_token(self, *scopes, **kwargs):
+                return AccessToken(self._token, self._expires_on)
+
+        token_cred = _TokenCredential(result["access_token"], result.get("expires_in", 3600) + int(time.time()))
+        sub_client = SubscriptionClient(token_cred)
+        subscriptions = list(sub_client.subscriptions.list())
+
+        sub_list = [{"id": s.subscription_id, "name": s.display_name, "tenant_id": s.tenant_id, "state": s.state.value if s.state else "Enabled"} for s in subscriptions]
+
+        # Write token cache and azureProfile.json for scan containers
+        session_dir = f"/app/credentials/azure/device-sessions/{session_id}/.azure"
+        os.makedirs(session_dir, exist_ok=True)
+
+        # Write MSAL token cache
+        with open(os.path.join(session_dir, "msal_token_cache.json"), "w") as f:
+            f.write(cache.serialize())
+
+        # Write azureProfile.json
+        azure_profile = {
+            "installationId": str(uuid.uuid4()),
+            "subscriptions": [
+                {
+                    "id": s["id"],
+                    "name": s["name"],
+                    "state": s["state"],
+                    "tenantId": s["tenant_id"],
+                    "user": {"name": result.get("id_token_claims", {}).get("preferred_username", "user"), "type": "user"},
+                    "environmentName": "AzureCloud",
+                    "isDefault": i == 0,
+                }
+                for i, s in enumerate(sub_list)
+            ],
+        }
+        with open(os.path.join(session_dir, "azureProfile.json"), "w") as f:
+            json.dump(azure_profile, f, indent=2)
+
+        identity = sub_list[0]["name"] if sub_list else "Azure User"
+        account_info = f"Tenant: {sub_list[0]['tenant_id']}" if sub_list else ""
+
+        response = {
+            "success": True,
+            "identity": identity,
+            "account_info": account_info,
+            "subscriptions": sub_list,
+            "session_id": session_id,
+        }
+
+        # Mark session as completed
+        with _device_code_lock:
+            if session_id in _device_code_sessions:
+                _device_code_sessions[session_id]["completed"] = True
+                _device_code_sessions[session_id]["result"] = response
+
+        return response
+
+    except Exception as e:
+        logger.error(f"Device code post-auth failed: {e}")
+        return {"success": False, "error": str(e)}

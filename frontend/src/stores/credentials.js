@@ -385,10 +385,13 @@ export const useCredentialsStore = defineStore('credentials', () => {
         if (response.ok) {
           const creds = await response.json()
           sessionCredentials.value.azure = {
+            auth_method: creds.auth_method || 'service_principal',
             tenant_id: creds.tenant_id,
             client_id: creds.client_id,
             client_secret: creds.client_secret,
             subscription_id: creds.subscription_id,
+            username: creds.username || null,
+            password: creds.password || null,
             profile: profileName,
           }
           // Persist the selected profile name in localStorage

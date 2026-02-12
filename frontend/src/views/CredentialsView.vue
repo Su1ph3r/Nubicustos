@@ -219,8 +219,66 @@
           v-if="selectedProvider === 'azure'"
           class="credential-form"
         >
-          <div class="form-group">
-            <label for="azure-tenant">Tenant ID <span class="required">*</span></label>
+          <div class="auth-method-toggle">
+            <label class="form-label">Authentication Method</label>
+            <div class="toggle-group">
+              <button
+                type="button"
+                class="toggle-btn"
+                :class="{ active: azureForm.auth_method === 'service_principal' }"
+                @click="setAzureAuthMethod('service_principal')"
+              >
+                Service Principal
+              </button>
+              <button
+                type="button"
+                class="toggle-btn"
+                :class="{ active: azureForm.auth_method === 'cli' }"
+                @click="setAzureAuthMethod('cli')"
+              >
+                Azure CLI
+              </button>
+              <button
+                type="button"
+                class="toggle-btn"
+                :class="{ active: azureForm.auth_method === 'username_password' }"
+                @click="setAzureAuthMethod('username_password')"
+              >
+                Username/Password
+              </button>
+              <button
+                type="button"
+                class="toggle-btn"
+                :class="{ active: azureForm.auth_method === 'device_code' }"
+                @click="setAzureAuthMethod('device_code')"
+              >
+                Device Code
+              </button>
+            </div>
+          </div>
+          <div
+            v-if="azureForm.auth_method === 'cli'"
+            class="cli-auth-info"
+          >
+            Requires prior <code>az login</code> on the host machine. Set <code>HOST_AZURE_CLI_PATH</code> in your <code>.env</code> file.
+          </div>
+          <div v-if="azureForm.auth_method === 'username_password'" class="cli-auth-info" style="border-left: 3px solid var(--yellow-500);">
+            <strong>Warning:</strong> Does not work with MFA-enabled accounts. If your account requires MFA, use Device Code authentication instead.
+          </div>
+          <div v-if="azureForm.auth_method === 'device_code'" class="cli-auth-info" style="border-left: 3px solid var(--blue-500);">
+            Opens a browser-based authentication flow. Supports MFA-enabled accounts.
+          </div>
+          <!-- Username/Password fields -->
+          <div v-if="azureForm.auth_method === 'username_password'" class="form-group">
+            <label for="azure-username">Username (Email) <span class="required">*</span></label>
+            <input id="azure-username" v-model="azureForm.username" type="email" placeholder="user@domain.com" class="form-input" />
+          </div>
+          <div v-if="azureForm.auth_method === 'username_password'" class="form-group">
+            <label for="azure-password">Password <span class="required">*</span></label>
+            <input id="azure-password" v-model="azureForm.password" type="password" placeholder="Your Azure AD password" class="form-input" />
+          </div>
+          <div v-if="azureForm.auth_method !== 'device_code'" class="form-group">
+            <label for="azure-tenant">Tenant ID <span v-if="azureForm.auth_method === 'service_principal'" class="required">*</span></label>
             <input
               id="azure-tenant"
               v-model="azureForm.tenant_id"
@@ -229,7 +287,10 @@
               class="form-input"
             >
           </div>
-          <div class="form-group">
+          <div
+            v-if="azureForm.auth_method === 'service_principal'"
+            class="form-group"
+          >
             <label for="azure-client">Client/App ID <span class="required">*</span></label>
             <input
               id="azure-client"
@@ -239,7 +300,10 @@
               class="form-input"
             >
           </div>
-          <div class="form-group">
+          <div
+            v-if="azureForm.auth_method === 'service_principal'"
+            class="form-group"
+          >
             <label for="azure-secret">Client Secret <span class="required">*</span></label>
             <input
               id="azure-secret"
@@ -249,7 +313,43 @@
               class="form-input"
             >
           </div>
-          <div class="form-group">
+          <!-- Device Code Flow -->
+          <div v-if="azureForm.auth_method === 'device_code'" class="device-code-section">
+            <div v-if="!deviceCode.active && !deviceCode.completed" class="device-code-start">
+              <button class="btn-verify" :disabled="deviceCode.loading" @click="initiateDeviceCode">
+                <i :class="deviceCode.loading ? 'pi pi-spin pi-spinner' : 'pi pi-sign-in'" />
+                {{ deviceCode.loading ? 'Starting...' : 'Start Authentication' }}
+              </button>
+            </div>
+            <div v-if="deviceCode.active && !deviceCode.completed" class="device-code-pending">
+              <div class="device-code-instructions">
+                <p>Go to <a :href="deviceCode.verification_uri" target="_blank" rel="noopener"><strong>{{ deviceCode.verification_uri }}</strong></a> and enter this code:</p>
+                <div class="device-code-display">
+                  <span class="code-value">{{ deviceCode.user_code }}</span>
+                  <button class="btn-copy" @click="copyDeviceCode">
+                    <i class="pi pi-copy" /> Copy
+                  </button>
+                </div>
+                <p class="device-code-waiting">
+                  <i class="pi pi-spin pi-spinner" /> Waiting for authentication...
+                </p>
+              </div>
+            </div>
+            <div v-if="deviceCode.completed" class="device-code-complete">
+              <div class="device-code-success">
+                <i class="pi pi-check-circle" />
+                <span>Authenticated successfully</span>
+              </div>
+            </div>
+            <div v-if="deviceCode.error" class="device-code-error">
+              <i class="pi pi-exclamation-triangle" />
+              <span>{{ deviceCode.error }}</span>
+              <button class="btn-clear" @click="resetDeviceCode">
+                <i class="pi pi-refresh" /> Retry
+              </button>
+            </div>
+          </div>
+          <div v-if="azureForm.auth_method !== 'device_code' || deviceCode.completed" class="form-group">
             <label for="azure-subscription">Subscription ID (optional)</label>
             <input
               id="azure-subscription"
@@ -326,7 +426,7 @@ clusters:
           </div>
         </div>
 
-        <div class="form-actions">
+        <div v-if="!(selectedProvider === 'azure' && azureForm.auth_method === 'device_code')" class="form-actions">
           <button
             class="btn-verify"
             :disabled="loading || !isFormValid"
@@ -458,7 +558,7 @@ clusters:
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useCredentialsStore } from '../stores/credentials'
 import { useToast } from 'primevue/usetoast'
 
@@ -580,6 +680,10 @@ onMounted(async () => {
     credentialsStore.fetchAwsProfiles(),
     credentialsStore.fetchAzureProfiles(),
   ])
+})
+
+onUnmounted(() => {
+  resetDeviceCode()
 })
 
 // Profile selection
@@ -765,10 +869,24 @@ const awsForm = ref({
 })
 
 const azureForm = ref({
+  auth_method: 'service_principal',
   tenant_id: '',
   client_id: '',
   client_secret: '',
   subscription_id: '',
+  username: '',
+  password: '',
+})
+
+const deviceCode = ref({
+  active: false,
+  loading: false,
+  completed: false,
+  session_id: null,
+  user_code: '',
+  verification_uri: '',
+  error: null,
+  pollTimer: null,
 })
 
 const gcpForm = ref({
@@ -806,6 +924,15 @@ const isFormValid = computed(() => {
   if (selectedProvider.value === 'aws') {
     return awsForm.value.access_key_id && awsForm.value.secret_access_key
   } else if (selectedProvider.value === 'azure') {
+    if (azureForm.value.auth_method === 'cli') {
+      return true
+    }
+    if (azureForm.value.auth_method === 'username_password') {
+      return azureForm.value.username && azureForm.value.password
+    }
+    if (azureForm.value.auth_method === 'device_code') {
+      return false // Device code uses its own button
+    }
     return azureForm.value.tenant_id && azureForm.value.client_id && azureForm.value.client_secret
   } else if (selectedProvider.value === 'gcp') {
     return gcpForm.value.project_id && gcpForm.value.credentials_json
@@ -821,11 +948,136 @@ function selectProvider(id) {
   error.value = null
 }
 
+function setAzureAuthMethod(method) {
+  azureForm.value.auth_method = method
+  // Reset device code state when switching away
+  if (method !== 'device_code') {
+    resetDeviceCode()
+  }
+  result.value = null
+  error.value = null
+}
+
+async function initiateDeviceCode() {
+  deviceCode.value.loading = true
+  deviceCode.value.error = null
+  try {
+    const response = await fetch(`${API_BASE}/credentials/azure/device-code/initiate`, {
+      method: 'POST',
+    })
+    if (!response.ok) {
+      const errData = await response.json()
+      throw new Error(errData.detail || 'Failed to initiate device code flow')
+    }
+    const data = await response.json()
+    deviceCode.value.session_id = data.session_id
+    deviceCode.value.user_code = data.user_code
+    deviceCode.value.verification_uri = data.verification_uri
+    deviceCode.value.active = true
+    // Start polling for completion
+    pollDeviceCode()
+  } catch (e) {
+    deviceCode.value.error = e.message
+  } finally {
+    deviceCode.value.loading = false
+  }
+}
+
+async function pollDeviceCode() {
+  if (!deviceCode.value.active || deviceCode.value.completed) return
+
+  try {
+    const response = await fetch(`${API_BASE}/credentials/azure/device-code/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: deviceCode.value.session_id }),
+    })
+    const data = await response.json()
+
+    if (data.success) {
+      deviceCode.value.completed = true
+      deviceCode.value.active = false
+
+      // Build result for the results section
+      result.value = {
+        success: true,
+        identity: data.identity,
+        account_info: data.account_info,
+        permissions_available: data.subscriptions ? data.subscriptions.map(s => `Subscription: ${s.name}`) : [],
+        permissions_missing: [],
+        raw_output: `Device Code Authentication Successful\n\nIdentity: ${data.identity}\n${data.account_info}\nSubscriptions: ${data.subscriptions ? data.subscriptions.length : 0}`,
+      }
+
+      // Store session_id in credentials store
+      credentialsStore.setSessionCredentials('azure', {
+        auth_method: 'device_code',
+        device_code_session: deviceCode.value.session_id,
+        subscription_id: azureForm.value.subscription_id || (data.subscriptions && data.subscriptions[0] ? data.subscriptions[0].id : null),
+      })
+
+      // Generate profile name
+      await credentialsStore.fetchAzureProfiles()
+      profileNameToSave.value = generateUniqueAzureProfileName(data.identity)
+
+      toast.add({
+        severity: 'success',
+        summary: 'Authenticated',
+        detail: `Device code authentication successful: ${data.identity}`,
+        life: 5000,
+      })
+    } else if (data.error) {
+      if (data.error.includes('expired') || data.error.includes('Expired')) {
+        deviceCode.value.error = 'Code expired. Please try again.'
+        deviceCode.value.active = false
+      } else if (data.error.includes('declined') || data.error.includes('cancel')) {
+        deviceCode.value.error = 'Authentication was declined.'
+        deviceCode.value.active = false
+      } else {
+        // Still waiting - poll again
+        deviceCode.value.pollTimer = setTimeout(pollDeviceCode, 5000)
+      }
+    } else {
+      // Still waiting
+      deviceCode.value.pollTimer = setTimeout(pollDeviceCode, 5000)
+    }
+  } catch (e) {
+    // Network error - retry
+    deviceCode.value.pollTimer = setTimeout(pollDeviceCode, 5000)
+  }
+}
+
+function resetDeviceCode() {
+  if (deviceCode.value.pollTimer) {
+    clearTimeout(deviceCode.value.pollTimer)
+  }
+  deviceCode.value = {
+    active: false,
+    loading: false,
+    completed: false,
+    session_id: null,
+    user_code: '',
+    verification_uri: '',
+    error: null,
+    pollTimer: null,
+  }
+}
+
+function copyDeviceCode() {
+  navigator.clipboard.writeText(deviceCode.value.user_code)
+  toast.add({
+    severity: 'info',
+    summary: 'Copied',
+    detail: 'Device code copied to clipboard',
+    life: 2000,
+  })
+}
+
 function clearForm() {
   if (selectedProvider.value === 'aws') {
     awsForm.value = { access_key_id: '', secret_access_key: '', session_token: '', region: 'us-east-1' }
   } else if (selectedProvider.value === 'azure') {
-    azureForm.value = { tenant_id: '', client_id: '', client_secret: '', subscription_id: '' }
+    azureForm.value = { auth_method: 'service_principal', tenant_id: '', client_id: '', client_secret: '', subscription_id: '', username: '', password: '' }
+    resetDeviceCode()
   } else if (selectedProvider.value === 'gcp') {
     gcpForm.value = { project_id: '', credentials_json: '' }
   } else if (selectedProvider.value === 'kubernetes') {
@@ -855,10 +1107,13 @@ async function verifyCredentials() {
       }
     } else if (selectedProvider.value === 'azure') {
       payload.azure = {
-        tenant_id: azureForm.value.tenant_id,
-        client_id: azureForm.value.client_id,
-        client_secret: azureForm.value.client_secret,
+        auth_method: azureForm.value.auth_method,
+        tenant_id: azureForm.value.tenant_id || null,
+        client_id: azureForm.value.client_id || null,
+        client_secret: azureForm.value.client_secret || null,
         subscription_id: azureForm.value.subscription_id || null,
+        username: azureForm.value.username || null,
+        password: azureForm.value.password || null,
       }
     } else if (selectedProvider.value === 'gcp') {
       payload.gcp = {
@@ -976,10 +1231,13 @@ async function useForScans() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           profile_name: profileNameToSave.value.trim(),
-          tenant_id: azureForm.value.tenant_id,
-          client_id: azureForm.value.client_id,
-          client_secret: azureForm.value.client_secret,
+          auth_method: azureForm.value.auth_method,
+          tenant_id: azureForm.value.tenant_id || null,
+          client_id: azureForm.value.client_id || null,
+          client_secret: azureForm.value.client_secret || null,
           subscription_id: azureForm.value.subscription_id || null,
+          username: azureForm.value.username || null,
+          password: azureForm.value.password || null,
         }),
       })
 
@@ -990,8 +1248,12 @@ async function useForScans() {
 
       const data = await response.json()
 
-      // Store in session
-      credentialsStore.setSessionCredentials('azure', { ...azureForm.value })
+      // Store in session (include auth_method)
+      credentialsStore.setSessionCredentials('azure', {
+        ...azureForm.value,
+        auth_method: azureForm.value.auth_method,
+        device_code_session: deviceCode.value.session_id || null,
+      })
 
       // Refresh the profiles list
       await credentialsStore.fetchAzureProfiles()
@@ -1007,7 +1269,8 @@ async function useForScans() {
       })
 
       // Reset form
-      azureForm.value = { tenant_id: '', client_id: '', client_secret: '', subscription_id: '' }
+      azureForm.value = { auth_method: 'service_principal', tenant_id: '', client_id: '', client_secret: '', subscription_id: '', username: '', password: '' }
+      resetDeviceCode()
       result.value = null
       profileNameToSave.value = ''
       showManualForm.value = false
@@ -1608,5 +1871,133 @@ async function useForScans() {
 .form-section.collapsed .credential-form,
 .form-section.collapsed .form-actions {
   display: none;
+}
+
+/* Auth Method Toggle */
+.auth-method-toggle {
+  margin-bottom: 1rem;
+}
+
+.toggle-group {
+  display: flex;
+  gap: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--surface-border);
+}
+
+.toggle-btn {
+  flex: 1;
+  padding: 0.5rem 1rem;
+  border: none;
+  background: var(--surface-ground);
+  color: var(--text-color-secondary);
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.2s ease;
+}
+
+.toggle-btn:hover {
+  background: var(--surface-hover);
+}
+
+.toggle-btn.active {
+  background: var(--primary-color);
+  color: white;
+}
+
+.cli-auth-info {
+  background: var(--surface-ground);
+  border: 1px solid var(--surface-border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+  color: var(--text-color-secondary);
+}
+
+.cli-auth-info code {
+  background: var(--surface-hover);
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.8rem;
+}
+
+.device-code-section {
+  margin: 1rem 0;
+}
+
+.device-code-instructions {
+  background: var(--surface-ground);
+  border: 1px solid var(--surface-border);
+  border-radius: 6px;
+  padding: 1.25rem;
+}
+
+.device-code-instructions p {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.9rem;
+}
+
+.device-code-instructions a {
+  color: var(--primary-color);
+}
+
+.device-code-display {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.code-value {
+  font-family: monospace;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  padding: 0.5rem 1rem;
+  background: var(--surface-card);
+  border: 2px solid var(--primary-color);
+  border-radius: 6px;
+  color: var(--primary-color);
+}
+
+.device-code-waiting {
+  color: var(--text-color-secondary);
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.device-code-success {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  border-radius: 6px;
+  color: var(--green-700);
+}
+
+.device-code-success > i {
+  color: var(--green-500);
+  font-size: 1.25rem;
+}
+
+.device-code-error {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--red-50);
+  border: 1px solid var(--red-200);
+  border-radius: 6px;
+  color: var(--red-700);
+}
+
+.device-code-error > i {
+  color: var(--red-500);
 }
 </style>

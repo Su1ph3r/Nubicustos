@@ -477,12 +477,14 @@ services:
       - SHUTDOWN_TIMEOUT=${SHUTDOWN_TIMEOUT:-30}
       - HOST_REPORTS_PATH=${HOST_REPORTS_PATH:-${PWD}/reports}
       - HOST_PROJECT_PATH=${HOST_PROJECT_PATH:-${PWD}}
+      - HOST_AZURE_CLI_PATH=${HOST_AZURE_CLI_PATH:-}
     volumes:
       - ./reports:/reports:rw
       - ./scripts:/app/scripts:ro
       - ./report-processor:/app/report-processor:ro
       - ./credentials/aws:/app/credentials/aws:rw
       - ./credentials/azure:/app/credentials/azure:rw
+      - ${HOST_AZURE_CLI_PATH:-./credentials/azure-cli}:/root/.azure:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       # Tool build contexts for on-demand image building
       - ./tools:/app/tools:ro

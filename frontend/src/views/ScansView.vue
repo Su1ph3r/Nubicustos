@@ -877,11 +877,21 @@ async function startQuickScan(profileId) {
       if (provider === 'azure') {
         const azureCreds = credentialsStore.getSessionCredentials('azure')
         if (azureCreds) {
-          scanPayload.azure_tenant_id = azureCreds.tenant_id
-          scanPayload.azure_client_id = azureCreds.client_id
-          scanPayload.azure_client_secret = azureCreds.client_secret
+          scanPayload.azure_auth_method = azureCreds.auth_method || null
+          scanPayload.azure_tenant_id = azureCreds.tenant_id || null
+          scanPayload.azure_client_id = azureCreds.client_id || null
+          scanPayload.azure_client_secret = azureCreds.client_secret || null
           if (azureCreds.subscription_id) {
             scanPayload.azure_subscription_id = azureCreds.subscription_id
+          }
+          // Username/password auth
+          if (azureCreds.auth_method === 'username_password') {
+            scanPayload.azure_username = azureCreds.username
+            scanPayload.azure_password = azureCreds.password
+          }
+          // Device code auth
+          if (azureCreds.auth_method === 'device_code') {
+            scanPayload.device_code_session = azureCreds.device_code_session
           }
         } else {
           toast.add({
@@ -942,11 +952,21 @@ async function startScan() {
       if (provider === 'azure') {
         const azureCreds = credentialsStore.getSessionCredentials('azure')
         if (azureCreds) {
-          scanPayload.azure_tenant_id = azureCreds.tenant_id
-          scanPayload.azure_client_id = azureCreds.client_id
-          scanPayload.azure_client_secret = azureCreds.client_secret
+          scanPayload.azure_auth_method = azureCreds.auth_method || null
+          scanPayload.azure_tenant_id = azureCreds.tenant_id || null
+          scanPayload.azure_client_id = azureCreds.client_id || null
+          scanPayload.azure_client_secret = azureCreds.client_secret || null
           if (azureCreds.subscription_id) {
             scanPayload.azure_subscription_id = azureCreds.subscription_id
+          }
+          // Username/password auth
+          if (azureCreds.auth_method === 'username_password') {
+            scanPayload.azure_username = azureCreds.username
+            scanPayload.azure_password = azureCreds.password
+          }
+          // Device code auth
+          if (azureCreds.auth_method === 'device_code') {
+            scanPayload.device_code_session = azureCreds.device_code_session
           }
         } else {
           toast.add({

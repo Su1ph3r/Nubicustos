@@ -122,6 +122,27 @@ class ScanCreate(BaseModel):
         pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
         description="Azure Subscription ID (UUID format, optional - scans all if not specified)",
     )
+    azure_auth_method: str | None = Field(
+        default=None,
+        pattern=r"^(service_principal|cli|username_password|device_code)$",
+        description="Azure authentication method: service_principal (default), cli, username_password, or device_code",
+    )
+    azure_username: str | None = Field(
+        default=None,
+        max_length=256,
+        description="Azure AD username (email) for username/password auth",
+    )
+    azure_password: str | None = Field(
+        default=None,
+        max_length=256,
+        description="Azure AD password for username/password auth",
+    )
+    device_code_session: str | None = Field(
+        default=None,
+        max_length=128,
+        pattern=r"^[a-zA-Z0-9_\-]+$",
+        description="Device code session ID from completed device code flow",
+    )
 
     @field_validator("target")
     @classmethod

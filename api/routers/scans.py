@@ -22,6 +22,7 @@ Endpoints:
 
 import asyncio
 import logging
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -444,6 +445,17 @@ async def run_scan_orchestration(
 
             elif tool == ToolType.PROWLER_AZURE:
                 command = list(tool_config.get("default_command", []))
+                # Switch auth flag based on auth method
+                if azure_credentials and azure_credentials.get("auth_method") in ("cli", "username_password", "device_code"):
+                    # Replace --sp-env-auth with --az-cli-auth if present
+                    if "--sp-env-auth" in command:
+                        idx = command.index("--sp-env-auth")
+                        command[idx] = "--az-cli-auth"
+                    elif "--az-cli-auth" not in command:
+                        command.append("--az-cli-auth")
+                    # Only add subscription if provided
+                    if azure_credentials.get("subscription_id"):
+                        command.extend(["--azure-subscription-id", azure_credentials["subscription_id"]])
                 # Add profile-specific options (same as AWS Prowler)
                 prowler_options = profile_config.get("prowler_options", [])
                 if prowler_options:
@@ -462,8 +474,13 @@ async def run_scan_orchestration(
             elif tool == ToolType.SCOUTSUITE_AZURE:
                 command = list(tool_config.get("default_command", []))
                 # ScoutSuite Azure requires credentials as CLI flags, not env vars
-                # Unlike Prowler which uses --sp-env-auth, ScoutSuite needs explicit flags
-                if azure_credentials:
+                if azure_credentials and azure_credentials.get("auth_method") in ("cli", "username_password", "device_code"):
+                    # Use --cli flag for Azure CLI / username_password / device_code auth
+                    command.append("--cli")
+                    if azure_credentials.get("subscription_id"):
+                        command.extend(["--subscriptions", azure_credentials["subscription_id"]])
+                elif azure_credentials:
+                    # Service principal: pass explicit flags
                     if azure_credentials.get("tenant_id"):
                         command.extend(["--tenant", azure_credentials["tenant_id"]])
                     if azure_credentials.get("client_id"):
@@ -489,10 +506,54 @@ async def run_scan_orchestration(
 
             # Build environment with appropriate credentials
             env = {"SCAN_ID": scan_id}
+            extra_volumes = None
 
             if is_azure_scan:
-                # Inject Azure credentials for Azure scans
-                env = _inject_azure_credentials(env, azure_credentials)
+                if azure_credentials and azure_credentials.get("auth_method") in ("cli", "device_code"):
+                    if azure_credentials.get("auth_method") == "device_code":
+                        # Mount the device code session's .azure directory
+                        session_id = azure_credentials.get("session_id")
+                        if not session_id:
+                            raise HTTPException(
+                                status_code=400,
+                                detail="Device code auth requires a valid session_id",
+                            )
+                        host_azure_path = os.environ.get("HOST_CREDENTIALS_PATH", "/app/credentials")
+                        host_azure_path = f"{host_azure_path}/azure/device-sessions/{session_id}/.azure"
+                        if not os.path.exists(host_azure_path):
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Device code session not found or not completed. Please re-authenticate.",
+                            )
+                    else:
+                        # CLI auth: mount host ~/.azure/
+                        host_azure_path = os.environ.get("HOST_AZURE_CLI_PATH", "")
+                        if not host_azure_path:
+                            raise HTTPException(
+                                status_code=500,
+                                detail="Azure CLI auth requires HOST_AZURE_CLI_PATH environment variable to be set",
+                            )
+                    if host_azure_path:
+                        if tool in (ToolType.PROWLER_AZURE,):
+                            mount_target = "/home/prowler/.azure"
+                        else:
+                            mount_target = "/root/.azure"
+                        extra_volumes = {
+                            host_azure_path: {"bind": mount_target, "mode": "ro"}
+                        }
+                    if azure_credentials.get("subscription_id"):
+                        env["AZURE_SUBSCRIPTION_ID"] = azure_credentials["subscription_id"]
+                elif azure_credentials and azure_credentials.get("auth_method") == "username_password":
+                    # Username/password: use az login -u -p inside container
+                    # Set env vars for the login command
+                    env["AZURE_USERNAME"] = azure_credentials.get("username", "")
+                    env["AZURE_PASSWORD"] = azure_credentials.get("password", "")
+                    if azure_credentials.get("subscription_id"):
+                        env["AZURE_SUBSCRIPTION_ID"] = azure_credentials["subscription_id"]
+                    # Don't inject SP env vars - we'll wrap the command below
+                else:
+                    # Service principal: inject Azure credentials as env vars
+                    env = _inject_azure_credentials(env, azure_credentials)
             elif aws_profile:
                 # AWS scan with specified profile
                 env["AWS_PROFILE"] = aws_profile
@@ -500,12 +561,36 @@ async def run_scan_orchestration(
                 if command:
                     command = _replace_profile_in_command(command, aws_profile, tool)
 
+            # For username_password auth, wrap command with az login
+            if is_azure_scan and azure_credentials and azure_credentials.get("auth_method") == "username_password":
+                # Build original command as string
+                original_entrypoint = entrypoint or ""
+                original_cmd_parts = []
+                if original_entrypoint:
+                    original_cmd_parts.append(original_entrypoint)
+                if command:
+                    original_cmd_parts.extend(command)
+                original_cmd_str = " ".join(original_cmd_parts)
+
+                # Build az login command
+                az_login = 'az login -u "$AZURE_USERNAME" -p "$AZURE_PASSWORD"'
+                if azure_credentials.get("tenant_id"):
+                    # Quote tenant_id for defense-in-depth (already UUID-validated by schema)
+                    tenant_id = azure_credentials["tenant_id"].replace("'", "")
+                    az_login += f" --tenant '{tenant_id}'"
+                az_login += " --only-show-errors > /dev/null 2>&1"
+
+                # Override to shell execution
+                entrypoint = "/bin/sh"
+                command = ["-c", f"{az_login} && {original_cmd_str}"]
+
             # Start the tool execution
             result = await executor.start_execution(
                 tool_type=tool,
                 command=command,
                 environment=env,
                 entrypoint=entrypoint,
+                extra_volumes=extra_volumes,
             )
 
             if result.get("status") == ExecutionStatus.FAILED:
@@ -849,16 +934,31 @@ async def create_scan(scan_request: ScanCreate, db: Session = Depends(get_db)):
             )
 
     # Validate Azure credentials are provided for Azure profiles OR Azure provider
+    azure_auth_method = scan_request.azure_auth_method or "service_principal"
     if profile_name.startswith("azure-") or scan_request.provider == "azure":
-        if not (
-            scan_request.azure_tenant_id
-            and scan_request.azure_client_id
-            and scan_request.azure_client_secret
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail="Azure scans require azure_tenant_id, azure_client_id, and azure_client_secret",
-            )
+        if azure_auth_method == "service_principal":
+            if not (
+                scan_request.azure_tenant_id
+                and scan_request.azure_client_id
+                and scan_request.azure_client_secret
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Azure scans with service_principal auth require azure_tenant_id, azure_client_id, and azure_client_secret",
+                )
+        elif azure_auth_method == "username_password":
+            if not (scan_request.azure_username and scan_request.azure_password):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Azure scans with username_password auth require azure_username and azure_password",
+                )
+        elif azure_auth_method == "device_code":
+            if not scan_request.device_code_session:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Azure scans with device_code auth require device_code_session",
+                )
+        # CLI auth does not require SP fields
 
     # Determine which tools to run
     if scan_request.tools:
@@ -896,8 +996,28 @@ async def create_scan(scan_request: ScanCreate, db: Session = Depends(get_db)):
 
         # Build Azure credentials dict if provided
         azure_credentials = None
-        if scan_request.azure_tenant_id and scan_request.azure_client_id:
+        if azure_auth_method == "cli":
             azure_credentials = {
+                "auth_method": "cli",
+                "subscription_id": scan_request.azure_subscription_id,
+            }
+        elif azure_auth_method == "username_password":
+            azure_credentials = {
+                "auth_method": "username_password",
+                "username": scan_request.azure_username,
+                "password": scan_request.azure_password,
+                "tenant_id": scan_request.azure_tenant_id,
+                "subscription_id": scan_request.azure_subscription_id,
+            }
+        elif azure_auth_method == "device_code":
+            azure_credentials = {
+                "auth_method": "device_code",
+                "session_id": scan_request.device_code_session,
+                "subscription_id": scan_request.azure_subscription_id,
+            }
+        elif scan_request.azure_tenant_id and scan_request.azure_client_id:
+            azure_credentials = {
+                "auth_method": "service_principal",
                 "tenant_id": scan_request.azure_tenant_id,
                 "client_id": scan_request.azure_client_id,
                 "client_secret": scan_request.azure_client_secret,
