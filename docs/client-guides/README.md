@@ -21,10 +21,12 @@ This directory contains step-by-step instructions for setting up credentials to 
 - IAM User with `SecurityAudit` policy
 - Access Key ID and Secret Access Key
 
-### Azure
-- Service Principal (App Registration)
-- Tenant ID, Client ID, Client Secret
-- `Reader` and `Security Reader` roles
+### Azure (4 authentication methods)
+- **Service Principal** — Tenant ID, Client ID, Client Secret (best for CI/CD and automation)
+- **Azure CLI** — Reuses existing `az login` session (best for developers)
+- **Username/Password** — Azure AD email and password, no MFA support (best for testing)
+- **Device Code** — Browser-based approval, supports MFA (best for interactive use)
+- All methods require `Reader` and `Security Reader` roles
 
 ### GCP
 - Service Account with `Viewer` role

@@ -262,23 +262,55 @@
           >
             Requires prior <code>az login</code> on the host machine. Set <code>HOST_AZURE_CLI_PATH</code> in your <code>.env</code> file.
           </div>
-          <div v-if="azureForm.auth_method === 'username_password'" class="cli-auth-info" style="border-left: 3px solid var(--yellow-500);">
+          <div
+            v-if="azureForm.auth_method === 'username_password'"
+            class="cli-auth-info"
+            style="border-left: 3px solid var(--yellow-500);"
+          >
             <strong>Warning:</strong> Does not work with MFA-enabled accounts. If your account requires MFA, use Device Code authentication instead.
           </div>
-          <div v-if="azureForm.auth_method === 'device_code'" class="cli-auth-info" style="border-left: 3px solid var(--blue-500);">
+          <div
+            v-if="azureForm.auth_method === 'device_code'"
+            class="cli-auth-info"
+            style="border-left: 3px solid var(--blue-500);"
+          >
             Opens a browser-based authentication flow. Supports MFA-enabled accounts.
           </div>
           <!-- Username/Password fields -->
-          <div v-if="azureForm.auth_method === 'username_password'" class="form-group">
+          <div
+            v-if="azureForm.auth_method === 'username_password'"
+            class="form-group"
+          >
             <label for="azure-username">Username (Email) <span class="required">*</span></label>
-            <input id="azure-username" v-model="azureForm.username" type="email" placeholder="user@domain.com" class="form-input" />
+            <input
+              id="azure-username"
+              v-model="azureForm.username"
+              type="email"
+              placeholder="user@domain.com"
+              class="form-input"
+            >
           </div>
-          <div v-if="azureForm.auth_method === 'username_password'" class="form-group">
+          <div
+            v-if="azureForm.auth_method === 'username_password'"
+            class="form-group"
+          >
             <label for="azure-password">Password <span class="required">*</span></label>
-            <input id="azure-password" v-model="azureForm.password" type="password" placeholder="Your Azure AD password" class="form-input" />
+            <input
+              id="azure-password"
+              v-model="azureForm.password"
+              type="password"
+              placeholder="Your Azure AD password"
+              class="form-input"
+            >
           </div>
-          <div v-if="azureForm.auth_method !== 'device_code'" class="form-group">
-            <label for="azure-tenant">Tenant ID <span v-if="azureForm.auth_method === 'service_principal'" class="required">*</span></label>
+          <div
+            v-if="azureForm.auth_method !== 'device_code'"
+            class="form-group"
+          >
+            <label for="azure-tenant">Tenant ID <span
+              v-if="azureForm.auth_method === 'service_principal'"
+              class="required"
+            >*</span></label>
             <input
               id="azure-tenant"
               v-model="azureForm.tenant_id"
@@ -314,19 +346,41 @@
             >
           </div>
           <!-- Device Code Flow -->
-          <div v-if="azureForm.auth_method === 'device_code'" class="device-code-section">
-            <div v-if="!deviceCode.active && !deviceCode.completed" class="device-code-start">
-              <button class="btn-verify" :disabled="deviceCode.loading" @click="initiateDeviceCode">
+          <div
+            v-if="azureForm.auth_method === 'device_code'"
+            class="device-code-section"
+          >
+            <div
+              v-if="!deviceCode.active && !deviceCode.completed"
+              class="device-code-start"
+            >
+              <button
+                class="btn-verify"
+                :disabled="deviceCode.loading"
+                @click="initiateDeviceCode"
+              >
                 <i :class="deviceCode.loading ? 'pi pi-spin pi-spinner' : 'pi pi-sign-in'" />
                 {{ deviceCode.loading ? 'Starting...' : 'Start Authentication' }}
               </button>
             </div>
-            <div v-if="deviceCode.active && !deviceCode.completed" class="device-code-pending">
+            <div
+              v-if="deviceCode.active && !deviceCode.completed"
+              class="device-code-pending"
+            >
               <div class="device-code-instructions">
-                <p>Go to <a :href="deviceCode.verification_uri" target="_blank" rel="noopener"><strong>{{ deviceCode.verification_uri }}</strong></a> and enter this code:</p>
+                <p>
+                  Go to <a
+                    :href="deviceCode.verification_uri"
+                    target="_blank"
+                    rel="noopener"
+                  ><strong>{{ deviceCode.verification_uri }}</strong></a> and enter this code:
+                </p>
                 <div class="device-code-display">
                   <span class="code-value">{{ deviceCode.user_code }}</span>
-                  <button class="btn-copy" @click="copyDeviceCode">
+                  <button
+                    class="btn-copy"
+                    @click="copyDeviceCode"
+                  >
                     <i class="pi pi-copy" /> Copy
                   </button>
                 </div>
@@ -335,21 +389,33 @@
                 </p>
               </div>
             </div>
-            <div v-if="deviceCode.completed" class="device-code-complete">
+            <div
+              v-if="deviceCode.completed"
+              class="device-code-complete"
+            >
               <div class="device-code-success">
                 <i class="pi pi-check-circle" />
                 <span>Authenticated successfully</span>
               </div>
             </div>
-            <div v-if="deviceCode.error" class="device-code-error">
+            <div
+              v-if="deviceCode.error"
+              class="device-code-error"
+            >
               <i class="pi pi-exclamation-triangle" />
               <span>{{ deviceCode.error }}</span>
-              <button class="btn-clear" @click="resetDeviceCode">
+              <button
+                class="btn-clear"
+                @click="resetDeviceCode"
+              >
                 <i class="pi pi-refresh" /> Retry
               </button>
             </div>
           </div>
-          <div v-if="azureForm.auth_method !== 'device_code' || deviceCode.completed" class="form-group">
+          <div
+            v-if="azureForm.auth_method !== 'device_code' || deviceCode.completed"
+            class="form-group"
+          >
             <label for="azure-subscription">Subscription ID (optional)</label>
             <input
               id="azure-subscription"
@@ -426,7 +492,10 @@ clusters:
           </div>
         </div>
 
-        <div v-if="!(selectedProvider === 'azure' && azureForm.auth_method === 'device_code')" class="form-actions">
+        <div
+          v-if="!(selectedProvider === 'azure' && azureForm.auth_method === 'device_code')"
+          class="form-actions"
+        >
           <button
             class="btn-verify"
             :disabled="loading || !isFormValid"
