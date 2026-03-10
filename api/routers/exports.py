@@ -38,7 +38,7 @@ def _strip_instance_parts(finding_id: str) -> str:
     Examples:
         ec2_openallportsprotocols_991249186791_us-east-1 -> ec2_openallportsprotocols
         iam_maxpasswordage_991249186791_global -> iam_maxpasswordage
-        awsec2instance_ec2_instance_account_imdsv2_enabled_390804086868 -> awsec2instance_ec2_instance_account_imdsv2_enabled
+        awsec2instance_ec2_instance_account_imdsv2_enabled_123456789012 -> awsec2instance_ec2_instance_account_imdsv2_enabled
     """
     return re.sub(r'_\d{12}(_[a-z][-a-z0-9]*)?$', '', finding_id)
 
@@ -49,6 +49,7 @@ async def export_findings_csv(
     severity: str | None = Query(None, description="Filter by severity (comma-separated)"),
     status: str | None = Query("open", description="Filter by status"),
     cloud_provider: str | None = Query(None, description="Filter by cloud provider"),
+    account_id: str | None = Query(None, description="Filter by AWS account ID"),
     include_remediation: bool = Query(True, description="Include remediation guidance"),
 ):
     """
@@ -84,6 +85,9 @@ async def export_findings_csv(
 
     if cloud_provider:
         query = query.filter(Finding.cloud_provider == cloud_provider.lower())
+
+    if account_id:
+        query = query.filter(Finding.account_id == account_id)
 
     findings = query.order_by(Finding.severity, desc(Finding.scan_date)).all()
 
@@ -148,6 +152,7 @@ async def export_findings_json(
     severity: str | None = Query(None, description="Filter by severity (comma-separated)"),
     status: str | None = Query("open", description="Filter by status"),
     cloud_provider: str | None = Query(None, description="Filter by cloud provider"),
+    account_id: str | None = Query(None, description="Filter by AWS account ID"),
 ):
     """
     Export findings as JSON file download.
@@ -185,13 +190,16 @@ async def export_findings_json(
     if cloud_provider:
         query = query.filter(Finding.cloud_provider == cloud_provider.lower())
 
+    if account_id:
+        query = query.filter(Finding.account_id == account_id)
+
     findings = query.order_by(Finding.severity, desc(Finding.scan_date)).all()
 
     # Build JSON structure
     export_data = {
         "export_source": "nubicustos",
         "export_timestamp": datetime.utcnow().isoformat(),
-        "filters": {"severity": severity, "status": status, "cloud_provider": cloud_provider},
+        "filters": {"severity": severity, "status": status, "cloud_provider": cloud_provider, "account_id": account_id},
         "total_findings": len(findings),
         "findings": [
             {
