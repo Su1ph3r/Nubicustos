@@ -47,6 +47,8 @@ from models.schemas import (
     ScanListResponse,
     ScanResponse,
 )
+from services.audit_service import log_audit
+from services.task_registry import tracked_task
 from services.docker_executor import (
     SCAN_PROFILES,
     TOOL_CONFIGS,
@@ -136,8 +138,8 @@ def _sanitize_log_snippet(log_text: str) -> str:
     # Redact potential tokens/keys (long base64-like strings 32+ chars with optional padding)
     log_text = re.sub(r"\b[a-zA-Z0-9+/]{32,}={0,2}\b", "[TOKEN]", log_text)
 
-    # Redact hex-encoded secrets (32+ hex chars)
-    log_text = re.sub(r"\b[a-fA-F0-9]{32,}\b", "[HEX_TOKEN]", log_text)
+    # Redact hex-encoded secrets (64+ hex chars to avoid redacting UUIDs and scan IDs)
+    log_text = re.sub(r"\b[a-fA-F0-9]{64,}\b", "[HEX_TOKEN]", log_text)
 
     # Redact Unix file paths (simpler pattern to avoid ReDoS)
     log_text = re.sub(r"/[a-zA-Z0-9_.\-]+(?:/[a-zA-Z0-9_.\-]+){2,}", "/...[PATH]", log_text)
@@ -208,8 +210,8 @@ async def _fix_report_permissions(tools: list[str]) -> None:
                         # Add read and execute for all users
                         new_mode = current_mode | stat.S_IROTH | stat.S_IXOTH | stat.S_IRGRP | stat.S_IXGRP
                         os.chmod(dir_path, new_mode)
-                    except (PermissionError, OSError):
-                        pass  # Best effort
+                    except (PermissionError, OSError) as e:
+                        logger.debug(f"Could not fix permissions on {dir_path}: {e}")
 
                 # Make files readable
                 for f in files:
@@ -219,8 +221,8 @@ async def _fix_report_permissions(tools: list[str]) -> None:
                         # Add read permission for all users
                         new_mode = current_mode | stat.S_IROTH | stat.S_IRGRP
                         os.chmod(file_path, new_mode)
-                    except (PermissionError, OSError):
-                        pass  # Best effort
+                    except (PermissionError, OSError) as e:
+                        logger.debug(f"Could not fix permissions on {file_path}: {e}")
 
             logger.debug(f"Fixed permissions for {tool_dir}")
         except Exception as e:
@@ -708,7 +710,17 @@ async def run_scan_orchestration(
             logger.info(f"Scan {scan_id}: Report processing completed")
         except Exception as report_err:
             logger.error(f"Scan {scan_id}: Report processing failed: {report_err}")
-            # Still mark scan as completed - reports can be reprocessed
+            try:
+                _update_scan_status(
+                    db, scan_id, "completed",
+                    error=f"Report processing failed: {report_err}. Findings may be incomplete.",
+                    execution_ids=execution_ids,
+                    tool_errors=tool_errors,
+                    completed_tools=completed_tools,
+                )
+            except Exception as status_err:
+                logger.critical(f"Scan {scan_id}: Failed to update status after report error: {status_err}")
+            return
 
         logger.info(f"Scan {scan_id}: All tools completed successfully")
 
@@ -741,13 +753,16 @@ async def run_scan_orchestration(
 
     except Exception as e:
         logger.error(f"Scan {scan_id} orchestration error: {str(e)}")
-        _update_scan_status(
-            db, scan_id, "failed",
-            error=str(e),
-            execution_ids=execution_ids,
-            tool_errors=tool_errors,
-            completed_tools=completed_tools,
-        )
+        try:
+            _update_scan_status(
+                db, scan_id, "failed",
+                error=str(e),
+                execution_ids=execution_ids,
+                tool_errors=tool_errors,
+                completed_tools=completed_tools,
+            )
+        except Exception as status_err:
+            logger.critical(f"Scan {scan_id}: Failed to mark scan as failed: {status_err}")
     finally:
         db.close()
 
@@ -782,7 +797,12 @@ def _update_scan_status(
             db.commit()
             logger.info(f"Updated scan {scan_id} status to {status}")
     except Exception as e:
-        logger.error(f"Failed to update scan status: {e}")
+        logger.error(f"Failed to update scan {scan_id} status to {status}: {e}", exc_info=True)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        raise
 
 
 @router.get("", response_model=ScanListResponse)
@@ -989,6 +1009,13 @@ async def create_scan(scan_request: ScanCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(scan)
 
+    log_audit(
+        db,
+        "scan_created",
+        {"scan_id": str(scan.scan_id), "profile": profile_name},
+        scan_id=scan.scan_id,
+    )
+
     # Queue background task to run the scan
     if not scan_request.dry_run:
         # Get database URL from settings
@@ -1024,15 +1051,9 @@ async def create_scan(scan_request: ScanCreate, db: Session = Depends(get_db)):
                 "subscription_id": scan_request.azure_subscription_id,
             }
 
-        def _handle_task_exception(task: asyncio.Task) -> None:
-            """Log any unhandled exceptions from the background task."""
-            if task.done() and not task.cancelled():
-                exc = task.exception()
-                if exc:
-                    logger.error(f"Scan orchestration task failed: {exc}")
-
-        # Launch async task in background with exception handling
-        task = asyncio.create_task(
+        # Launch async task in background with tracking
+        await tracked_task(
+            f"scan_orchestration_{scan.scan_id}",
             run_scan_orchestration(
                 str(scan.scan_id),
                 profile_name,
@@ -1040,9 +1061,8 @@ async def create_scan(scan_request: ScanCreate, db: Session = Depends(get_db)):
                 settings.database_url,
                 scan_request.aws_profile,
                 azure_credentials,
-            )
+            ),
         )
-        task.add_done_callback(_handle_task_exception)
 
     return ScanResponse.model_validate(scan)
 
@@ -1491,6 +1511,8 @@ async def cancel_scan(scan_id: UUID, db: Session = Depends(get_db)):
     scan.status = "cancelled"
     scan.completed_at = datetime.utcnow()
     db.commit()
+
+    log_audit(db, "scan_cancelled", {"scan_id": str(scan_id)}, scan_id=scan_id)
 
     return {"message": "Scan cancelled", "scan_id": str(scan_id)}
 

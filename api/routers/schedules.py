@@ -236,13 +236,23 @@ async def create_schedule(
     db.refresh(schedule)
 
     # Add to scheduler if enabled
+    warning = None
     if schedule.is_enabled:
-        await add_schedule_job(schedule)
-        schedule.next_run_at = calculate_next_run(schedule)
+        job_added = await add_schedule_job(schedule)
+        if not job_added:
+            schedule.is_enabled = False
+            db.commit()
+            db.refresh(schedule)
+            warning = "Schedule saved but job could not be added to the scheduler. Schedule has been disabled."
+        else:
+            schedule.next_run_at = calculate_next_run(schedule)
 
     logger.info(f"Created schedule: {schedule.name} ({schedule.schedule_id})")
 
-    return ScheduleResponse.model_validate(schedule)
+    response = ScheduleResponse.model_validate(schedule).model_dump()
+    if warning:
+        response["warning"] = warning
+    return response
 
 
 @router.get("/{schedule_id}", response_model=ScheduleResponse)
@@ -294,8 +304,14 @@ async def update_schedule(
     db.refresh(schedule)
 
     # Update scheduler job
+    warning = None
     if schedule.is_enabled:
-        await add_schedule_job(schedule)
+        job_added = await add_schedule_job(schedule)
+        if not job_added:
+            schedule.is_enabled = False
+            db.commit()
+            db.refresh(schedule)
+            warning = "Schedule updated but job could not be added to the scheduler. Schedule has been disabled."
     else:
         await remove_schedule_job(str(schedule_id))
 
@@ -303,7 +319,10 @@ async def update_schedule(
 
     logger.info(f"Updated schedule: {schedule.name} ({schedule.schedule_id})")
 
-    return ScheduleResponse.model_validate(schedule)
+    response = ScheduleResponse.model_validate(schedule).model_dump()
+    if warning:
+        response["warning"] = warning
+    return response
 
 
 @router.delete("/{schedule_id}")

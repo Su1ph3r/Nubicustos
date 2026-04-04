@@ -1,5 +1,8 @@
 """Pacu Integration API endpoints."""
 
+import re
+import shlex
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
@@ -272,6 +275,14 @@ async def run_pacu_module(request: PacuRunRequest, db: Session = Depends(get_db)
 
     Use GET /api/executions/{execution_id} to check status.
     """
+    # Validate module name and session name to prevent command injection
+    if not re.match(r"^[a-zA-Z0-9_]+$", request.module):
+        raise HTTPException(status_code=400, detail="Invalid module name: must contain only alphanumeric characters and underscores")
+
+    session_name = request.session_name or "api-session"
+    if not re.match(r"^[a-zA-Z0-9_\-]+$", session_name):
+        raise HTTPException(status_code=400, detail="Invalid session name: must contain only alphanumeric characters, underscores, and hyphens")
+
     # Build environment with credentials if provided
     environment = {}
     if request.access_key:
@@ -286,13 +297,9 @@ async def run_pacu_module(request: PacuRunRequest, db: Session = Depends(get_db)
     # Build the Pacu command
     # Pacu picks up AWS creds from environment variables (AWS_ACCESS_KEY_ID, etc.)
     # We pipe multiple "y" answers for various prompts (regions, credentials, etc.)
-    session_name = request.session_name or "api-session"
-
-    # Use --module-name and --exec flags (not --exec "run module")
-    # Use yes command to auto-answer all prompts with "y"
     command = [
         "-c",
-        f"yes y | pacu --new-session {session_name} --module-name {request.module} --exec",
+        f"yes y | pacu --new-session {shlex.quote(session_name)} --module-name {shlex.quote(request.module)} --exec",
     ]
 
     # Build config for tracking

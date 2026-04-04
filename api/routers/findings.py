@@ -214,7 +214,10 @@ async def list_findings(
                 asc(Finding.scan_date),
             ]
     elif sort_by == "severity":
-        # Sort by severity using proper criticality order
+        # severity_case maps critical=0, info=4.
+        # "desc" = most severe first = ascending case number (critical=0 first).
+        # This is intentionally inverted relative to numeric sorts because
+        # "sort by severity descending" means "show most severe first".
         if is_desc:
             order_clauses = [severity_case.asc(), desc(Finding.risk_score).nulls_last()]
         else:
@@ -434,7 +437,7 @@ async def get_findings_trend(
     # Organize results by date
     trend_data = {}
     for row in results:
-        date_str = row.scan_day.isoformat() if row.scan_day else "unknown"
+        date_str = row.scan_day.isoformat() if hasattr(row.scan_day, 'isoformat') else str(row.scan_day) if row.scan_day else "unknown"
         if date_str not in trend_data:
             trend_data[date_str] = {
                 "date": date_str,

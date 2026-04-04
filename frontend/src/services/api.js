@@ -109,14 +109,11 @@ export const api = {
     if (params.status) searchParams.set('status', params.status)
     if (params.tool) searchParams.set('tool', params.tool)
     if (params.include_remediation) searchParams.set('include_remediation', 'true')
+    if (params.cloud_provider) searchParams.set('cloud_provider', params.cloud_provider)
+    if (params.account_id) searchParams.set('account_id', params.account_id)
 
     const query = searchParams.toString()
     return `${API_BASE}/exports/${format}${query ? `?${query}` : ''}`
-  },
-
-  // Executions
-  async getExecutionsHealthSummary(days = 30) {
-    return request(`/executions/health/summary?days=${days}`)
   },
 
   // Health

@@ -9,6 +9,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.5] - 2026-04-04
+
+### Added
+
+#### Audit Logging
+- `api/services/audit_service.py` — Structured audit trail for administrative actions (database purge, settings changes)
+- `AuditHistory` model with action, details, and timestamp fields
+- `GET /api/settings/audit-log` endpoint for retrieving audit history
+
+#### Background Task Registry
+- `api/services/task_registry.py` — Centralized tracking for background tasks (scans, sync, analysis)
+- `GET /api/health/tasks` endpoint listing active background tasks
+- Enhanced health endpoint with scheduler and background task status
+
+#### Report Processor Modularization
+- `report-processor/parsers/` — Extracted parser modules: `cloud_parsers.py`, `iac_parsers.py`, `iam_parsers.py`, `secrets_parsers.py`, `utils.py`
+- `report-processor/db_writer.py` — Extracted database writer with dead-letter queue for failed processing
+- `process_reports.py` reduced from 3,346 to 530 lines via modular extraction
+
+#### Test Suites
+- `nubicustos-mcp/tests/` — MCP contract tests (68 tests) covering all tools, client methods, and error handling
+- `report-processor/tests/` — Report processor tests (14 tests) for parsers and database writes
+- `frontend/src/__tests__/api-contract.spec.js` — Frontend API contract tests (30 tests)
+- `api/tests/test_audit.py` — Audit logging tests
+- `api/tests/test_settings.py` — Settings endpoint tests
+
+#### Export Enhancements
+- `tool` query parameter on `/api/exports/csv` and `/api/exports/json` endpoints for tool-filtered exports
+- Export summary now includes both "open" and "fail" status findings for accurate counts
+- `/api/exports/generate` download URL now preserves filter parameters
+
+#### Blast Radius Improvements
+- `skipped_identities` count in blast radius responses when identity analysis fails
+- Mutually exclusive risk level bucketing (critical/high/medium/low no longer double-count overlapping capabilities)
+
+#### Scheduler Reliability
+- Schedules auto-disable after 5 consecutive execution failures with warning log
+- Schedule create/update endpoints now verify job scheduling succeeded; disable with warning if not
+
+### Fixed
+
+#### Critical
+- **Scan status stuck in "running"**: `_update_scan_status` no longer swallows exceptions silently; re-raises after logging so callers can handle the failure
+- **MCP `verify_credentials` always returned 400**: Client now passes provider-specific credential sub-objects to the API
+- **MCP `run_enumerate_iam` always returned 400**: Client now sends `access_key`/`secret_key` instead of the non-existent `principal_arn` field
+- **Report processing failure hidden**: Scans now carry error metadata when report processing fails instead of showing "Completed — 0 findings"
+
+#### Security
+- **SSRF in report-processor notifications**: Added `_validate_webhook_url()` with hostname resolution and private IP rejection
+- **DNS rebinding bypass in webhook validation**: Added `SSRFSafeAdapter` that validates resolved IPs at connect time, eliminating the TOCTOU gap
+- **Command injection in PoC commands**: Resource IDs now shell-quoted with `shlex.quote()` in generated CLI commands
+- SSRF validation on both Slack and Teams webhook URLs in report-processor
+
+#### Data Integrity
+- `risk_score` and `cvss_score` of 0.0 no longer exported as `null` (was treated as falsy)
+- `mark_stale_assets` now respects the `hours` parameter instead of marking all missing assets as stale immediately
+- `tool_sources` JSON field properly validated as list type to prevent substring matching bugs
+- `FINDING_INSERT_MAP` key corrected from `exploitability` to `exploitation_likelihood`
+- Neo4j partial sync now correctly reports `success = False` when label sync fails
+- Audit log entry after database purge is now committed to the database
+- Background sync task creates its own DB session instead of using the request-scoped session that may be closed
+
+#### Error Handling
+- Blast radius identity analysis failures logged with ARN context instead of silently dropped
+- ScoutSuite resource extraction failures logged instead of silently swallowed
+- `_get_validation_settings` handles non-string values (int, None, bool) without crashing on `.lower()`
+- `cloudtrail_lookback_hours` setting parsing handles non-numeric strings gracefully
+- Settings query failures logged at WARNING level instead of invisible DEBUG
+- Database rollback failures now logged instead of silently swallowed
+- Notification error strings include exception type name for diagnostics
+- IMDS STS identity failures logged at WARNING before defaulting to "unknown"
+- `fetchSummary` in findings store now shows toast notification on error (consistent with other store actions)
+- `send_slack_notification` narrowed from bare `except Exception` to specific `HTTPError`/`RequestException`
+- `findings.py` trend endpoint handles both date objects and SQLite string returns
+
+#### Pagination
+- Validation history double-offset fixed — Python-level slice only applied for combined queries, not when DB already applied offset
+- Odd `limit` values in combined validation history queries no longer silently lose one entry
+
+#### Other
+- CISA KEV cache handles missing or empty `cached_at` timestamps without crashing
+- Empty ARN segments from trailing colons no longer produce invalid CLI commands
+- Removed dead `getExecutionsHealthSummary` frontend method (endpoint never existed)
+- Health check table counts use ORM queries instead of raw SQL
+
+### Changed
+- Pydantic schemas use strict mode when `STRICT_MODE=true` is set, rejecting unknown fields
+- Default password warnings logged at startup when using default database credentials
+- Webhook URL validation requires HTTPS scheme and rejects private/loopback/link-local IPs
+- Version bumped to 1.0.5 across API, frontend, and MCP server
+
+---
+
 ## [1.0.4] - 2026-02-09
 
 ### Added
@@ -277,6 +370,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 1.0.5 | 2026-04-04 | Security hardening, 80 bug fixes, audit logging, report processor modularization, test suites |
 | 1.0.4 | 2026-02-09 | Cross-tool integration: container export endpoint, export_source field |
 | 1.0.3 | 2026-01-18 | Phase 1 Open Source features: alert prioritization, threat intel, scheduling, notifications, dashboard |
 | 1.0.2 | 2025-01-14 | Security fixes, bulk operations, error handling improvements |
@@ -286,6 +380,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## Upgrade Notes
+
+### Upgrading to 1.0.5
+No breaking changes. No database migration required. Rebuild and restart:
+```bash
+git pull origin main
+docker compose build api && docker compose up -d api
+```
 
 ### Upgrading to 1.0.3
 No breaking changes. Apply database migration and rebuild:
@@ -313,7 +414,8 @@ docker-compose up -d
 
 ---
 
-[Unreleased]: https://github.com/Su1ph3r/Nubicustos/compare/v1.0.4...HEAD
+[Unreleased]: https://github.com/Su1ph3r/Nubicustos/compare/v1.0.5...HEAD
+[1.0.5]: https://github.com/Su1ph3r/Nubicustos/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/Su1ph3r/Nubicustos/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/Su1ph3r/Nubicustos/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/Su1ph3r/Nubicustos/compare/v1.0.1...v1.0.2

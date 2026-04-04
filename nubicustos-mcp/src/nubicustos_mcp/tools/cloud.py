@@ -70,14 +70,30 @@ def register_cloud_tools(mcp: FastMCP) -> None:
         )
 
     @mcp.tool()
-    async def run_enumerate_iam(principal_arn: str) -> dict:
+    async def run_enumerate_iam(
+        access_key: str | None = None,
+        secret_key: str | None = None,
+        session_token: str | None = None,
+        region: str | None = None,
+        principal_arn: str | None = None,
+    ) -> dict:
         """Enumerate IAM permissions for a principal.
 
         Args:
+            access_key: AWS access key ID
+            secret_key: AWS secret access key
+            session_token: Optional AWS session token for temporary credentials
+            region: AWS region to target
             principal_arn: ARN of the IAM principal to enumerate
 
         Returns:
             Permission enumeration results including confirmed/denied permissions,
             privesc capability, admin capability, and data access capability
         """
-        return await client.run_enumerate_iam(principal_arn=principal_arn)
+        return await client.run_enumerate_iam(
+            access_key=access_key,
+            secret_key=secret_key,
+            session_token=session_token,
+            region=region,
+            principal_arn=principal_arn,
+        )

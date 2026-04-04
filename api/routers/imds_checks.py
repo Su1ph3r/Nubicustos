@@ -96,7 +96,8 @@ async def _run_imds_scan(
         sts = session.client("sts")
         try:
             account_id = sts.get_caller_identity()["Account"]
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Could not determine AWS account ID via STS: {e}")
             account_id = "unknown"
 
         instances_checked = 0

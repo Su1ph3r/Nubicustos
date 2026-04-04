@@ -39,7 +39,7 @@ if str(api_dir) not in sys.path:
     sys.path.insert(0, str(api_dir))
 
 from main import app
-from models.database import AttackPath, Base, Finding, Scan, get_db
+from models.database import AttackPath, AuditHistory, Base, Finding, Scan, get_db
 
 # Create in-memory SQLite database for testing
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"

@@ -57,7 +57,7 @@ class ArchiveService:
                     try:
                         # Security: resolve symlinks and validate path is within reports directory
                         real_path = os.path.realpath(file_path)
-                        if not real_path.startswith(real_base + os.sep):
+                        if not (real_path + os.sep).startswith(real_base + os.sep):
                             logger.warning(f"Skipping file outside reports directory: {file_path}")
                             continue
 
@@ -129,7 +129,7 @@ class ArchiveService:
                 if os.path.exists(path):
                     # Security check: resolve symlinks and ensure path is within reports directory
                     real_path = os.path.realpath(path)
-                    if not real_path.startswith(real_base + os.sep):
+                    if not (real_path + os.sep).startswith(real_base + os.sep):
                         errors.append(f"{path}: path outside reports directory")
                         continue
 

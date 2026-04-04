@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     # For production, set API_CORS_ORIGINS to specific trusted domains only
     # Example: "https://yourdomain.com,https://app.yourdomain.com"
 
+    # Webhook Settings
+    webhook_allowed_domains: str = ""  # Comma-separated list of allowed webhook domains (empty = allow all HTTPS)
+
+    # Strict Mode
+    strict_mode: bool = False  # When True, request schemas reject unknown fields
+
     # Paths
     reports_dir: str = "/reports"
     docker_compose_file: str = "../docker-compose.yml"
@@ -50,12 +56,18 @@ class Settings(BaseSettings):
     @property
     def database_url(self) -> str:
         """Generate PostgreSQL connection URL."""
-        return f"postgresql://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
+        from urllib.parse import quote_plus
+        return f"postgresql://{quote_plus(self.db_user)}:{quote_plus(self.db_password)}@{self.db_host}:{self.db_port}/{self.db_name}"
 
     @property
     def cors_origins_list(self) -> list[str]:
         """Parse CORS origins into list."""
-        return [origin.strip() for origin in self.api_cors_origins.split(",")]
+        return [origin.strip() for origin in self.api_cors_origins.split(",") if origin.strip()]
+
+    @property
+    def webhook_allowed_domains_list(self) -> list[str]:
+        """Parse webhook allowed domains into list."""
+        return [d.strip() for d in self.webhook_allowed_domains.split(",") if d.strip()]
 
     class Config:
         env_prefix = ""

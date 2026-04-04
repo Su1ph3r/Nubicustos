@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from models.database import UserSetting, get_db
+from services.audit_service import log_audit
 from models.schemas import (
     SettingsResetResponse,
     UserSettingListResponse,
@@ -194,12 +195,32 @@ async def update_setting(
                 status_code=400, detail=f"Invalid threshold. Must be one of: {valid_thresholds}"
             )
 
+    # Validate webhook URLs
+    if "webhook_url" in setting_key and update.value is not None and update.value not in ("null", "None", ""):
+        from urllib.parse import urlparse
+
+        from config import get_settings
+
+        parsed = urlparse(str(update.value))
+        if parsed.scheme != "https":
+            raise HTTPException(status_code=400, detail="Webhook URL must use HTTPS")
+        if not parsed.hostname:
+            raise HTTPException(status_code=400, detail="Webhook URL must have a valid hostname")
+        allowed = get_settings().webhook_allowed_domains_list
+        if allowed and parsed.hostname not in allowed:
+            raise HTTPException(
+                status_code=400,
+                detail="Webhook domain is not in the allowed domains list",
+            )
+
     # Update the setting
     setting.setting_value = update.value
     setting.updated_at = datetime.utcnow()
 
     db.commit()
     db.refresh(setting)
+
+    log_audit(db, "setting_updated", {"key": setting_key, "category": setting.category})
 
     return UserSettingResponse.model_validate(setting)
 

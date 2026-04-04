@@ -522,6 +522,17 @@ async def validate_finding(
     )
 
 
+def _safe_resource_value(value: str) -> str | None:
+    """Validate a resource identifier for safe use in CLI commands.
+
+    Returns the value if safe, or None if it contains suspicious characters.
+    """
+    import re
+    if not value or not re.match(r'^[a-zA-Z0-9_\-\./:=@]+$', value):
+        return None
+    return value
+
+
 def _generate_finding_poc_commands(finding: Finding) -> list[str]:
     """
     Generate PoC commands for a finding based on its type.
@@ -529,6 +540,8 @@ def _generate_finding_poc_commands(finding: Finding) -> list[str]:
     This function analyzes the finding and generates appropriate
     read-only verification commands.
     """
+    import shlex
+
     commands = []
 
     # Common patterns based on finding category
@@ -545,9 +558,11 @@ def _generate_finding_poc_commands(finding: Finding) -> list[str]:
                 bucket_name = resource_id.split(":")[-1].split("/")[0]
             else:
                 bucket_name = resource_id
-            commands.append(f"aws s3api get-bucket-acl --bucket {bucket_name}")
-            commands.append(f"aws s3api get-bucket-policy --bucket {bucket_name}")
-            commands.append(f"aws s3api get-public-access-block --bucket {bucket_name}")
+            safe_bucket = _safe_resource_value(bucket_name)
+            if safe_bucket:
+                commands.append(f"aws s3api get-bucket-acl --bucket {shlex.quote(safe_bucket)}")
+                commands.append(f"aws s3api get-bucket-policy --bucket {shlex.quote(safe_bucket)}")
+                commands.append(f"aws s3api get-public-access-block --bucket {shlex.quote(safe_bucket)}")
 
         # IAM checks
         elif "iam" in finding_id_str or "iam" in resource_type:
@@ -556,28 +571,36 @@ def _generate_finding_poc_commands(finding: Finding) -> list[str]:
                     user_name = resource_id.split("/")[-1]
                 else:
                     user_name = resource_id
-                commands.append(f"aws iam get-user --user-name {user_name}")
-                commands.append(f"aws iam list-user-policies --user-name {user_name}")
+                safe_user = _safe_resource_value(user_name)
+                if safe_user:
+                    commands.append(f"aws iam get-user --user-name {shlex.quote(safe_user)}")
+                    commands.append(f"aws iam list-user-policies --user-name {shlex.quote(safe_user)}")
             elif "role" in finding_id_str or "role" in resource_type:
                 if "/" in resource_id:
                     role_name = resource_id.split("/")[-1]
                 else:
                     role_name = resource_id
-                commands.append(f"aws iam get-role --role-name {role_name}")
-                commands.append(f"aws iam list-role-policies --role-name {role_name}")
+                safe_role = _safe_resource_value(role_name)
+                if safe_role:
+                    commands.append(f"aws iam get-role --role-name {shlex.quote(safe_role)}")
+                    commands.append(f"aws iam list-role-policies --role-name {shlex.quote(safe_role)}")
             elif "policy" in finding_id_str:
-                commands.append(f"aws iam get-policy --policy-arn {resource_id}")
+                safe_arn = _safe_resource_value(resource_id)
+                if safe_arn:
+                    commands.append(f"aws iam get-policy --policy-arn {shlex.quote(safe_arn)}")
 
         # EC2 checks
         elif "ec2" in finding_id_str or "ec2" in resource_type:
             if "security" in finding_id_str or "sg-" in resource_id:
-                if resource_id.startswith("sg-"):
-                    commands.append(f"aws ec2 describe-security-groups --group-ids {resource_id}")
+                safe_sg = _safe_resource_value(resource_id)
+                if safe_sg and resource_id.startswith("sg-"):
+                    commands.append(f"aws ec2 describe-security-groups --group-ids {shlex.quote(safe_sg)}")
                 else:
                     commands.append("aws ec2 describe-security-groups")
             elif "instance" in resource_type or "i-" in resource_id:
-                if resource_id.startswith("i-"):
-                    commands.append(f"aws ec2 describe-instances --instance-ids {resource_id}")
+                safe_instance = _safe_resource_value(resource_id)
+                if safe_instance and resource_id.startswith("i-"):
+                    commands.append(f"aws ec2 describe-instances --instance-ids {shlex.quote(safe_instance)}")
 
         # RDS checks
         elif "rds" in finding_id_str or "rds" in resource_type:
@@ -585,7 +608,9 @@ def _generate_finding_poc_commands(finding: Finding) -> list[str]:
                 db_id = resource_id.split(":")[-1]
             else:
                 db_id = resource_id
-            commands.append(f"aws rds describe-db-instances --db-instance-identifier {db_id}")
+            safe_db = _safe_resource_value(db_id)
+            if safe_db:
+                commands.append(f"aws rds describe-db-instances --db-instance-identifier {shlex.quote(safe_db)}")
 
         # Lambda checks
         elif "lambda" in finding_id_str or "lambda" in resource_type:
@@ -593,8 +618,10 @@ def _generate_finding_poc_commands(finding: Finding) -> list[str]:
                 func_name = resource_id.split(":")[-1]
             else:
                 func_name = resource_id
-            commands.append(f"aws lambda get-function --function-name {func_name}")
-            commands.append(f"aws lambda get-function-configuration --function-name {func_name}")
+            safe_func = _safe_resource_value(func_name)
+            if safe_func:
+                commands.append(f"aws lambda get-function --function-name {shlex.quote(safe_func)}")
+                commands.append(f"aws lambda get-function-configuration --function-name {shlex.quote(safe_func)}")
 
         # CloudTrail checks
         elif "cloudtrail" in finding_id_str or "cloudtrail" in resource_type:
@@ -602,8 +629,9 @@ def _generate_finding_poc_commands(finding: Finding) -> list[str]:
 
         # KMS checks
         elif "kms" in finding_id_str or "kms" in resource_type:
-            if resource_id:
-                commands.append(f"aws kms describe-key --key-id {resource_id}")
+            safe_key = _safe_resource_value(resource_id)
+            if safe_key:
+                commands.append(f"aws kms describe-key --key-id {shlex.quote(safe_key)}")
 
     # Fallback: if no specific commands generated, try generic describe
     if not commands and resource_id:
@@ -612,7 +640,9 @@ def _generate_finding_poc_commands(finding: Finding) -> list[str]:
             parts = resource_id.split(":")
             if len(parts) >= 6:
                 service = parts[2]
-                commands.append(f"aws {service} describe-* --help")  # Safe help command
+                safe_service = _safe_resource_value(service)
+                if safe_service:
+                    commands.append(f"aws {shlex.quote(safe_service)} describe-* --help")
 
     return commands
 
@@ -796,7 +826,7 @@ async def get_validation_history(
             .filter(AttackPath.poc_available == True)  # noqa: E712
             .order_by(desc(AttackPath.updated_at))
             .offset(offset if path_type == "attack" else 0)
-            .limit(limit if path_type == "attack" else limit // 2)
+            .limit(limit if path_type == "attack" else (limit + 1) // 2)
             .all()
         )
 
@@ -836,8 +866,9 @@ async def get_validation_history(
     # Sort combined entries by timestamp
     entries.sort(key=lambda e: e.validation_timestamp or datetime.min, reverse=True)
 
-    # Apply final pagination
-    entries = entries[offset : offset + limit]
+    # Apply final pagination only for combined query (sub-queries used offset=0)
+    if path_type is None:
+        entries = entries[offset : offset + limit]
 
     # Get total count
     total_attack = db.query(AttackPath).filter(AttackPath.poc_available == True).count()  # noqa: E712

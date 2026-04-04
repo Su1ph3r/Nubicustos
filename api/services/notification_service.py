@@ -11,15 +11,66 @@ Usage:
     await send_scan_notification(db, scan_id, "scan_complete", summary)
 """
 
+import ipaddress
 import logging
+import socket
 from datetime import datetime
+from urllib.parse import urlparse
 
 import requests
+from requests.adapters import HTTPAdapter
 from sqlalchemy.orm import Session
 
 from models.database import UserSetting
 
 logger = logging.getLogger(__name__)
+
+
+class _SSRFSafeAdapter(HTTPAdapter):
+    """HTTP adapter that validates resolved IPs to prevent SSRF via DNS rebinding."""
+
+    def send(self, request, **kwargs):
+        from urllib.parse import urlparse
+        parsed = urlparse(request.url)
+        hostname = parsed.hostname
+        if hostname:
+            resolved = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+            for _, _, _, _, addr in resolved:
+                ip = ipaddress.ip_address(addr[0])
+                if ip.is_private or ip.is_loopback or ip.is_link_local:
+                    raise ValueError(f"Request blocked: {hostname} resolves to private IP {addr[0]}")
+        return super().send(request, **kwargs)
+
+
+def _get_safe_session():
+    """Create an HTTP session with SSRF protection at connect time."""
+    session = requests.Session()
+    session.mount("https://", _SSRFSafeAdapter())
+    session.mount("http://", _SSRFSafeAdapter())
+    return session
+
+
+def _validate_webhook_url(url: str) -> bool:
+    """Validate that a webhook URL is not targeting internal/private networks."""
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme != "https":
+            logger.warning(f"Webhook URL has unsupported scheme: {parsed.scheme}")
+            return False
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        # Resolve hostname and check for private IP ranges
+        resolved = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        for _, _, _, _, addr in resolved:
+            ip = ipaddress.ip_address(addr[0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local:
+                logger.warning(f"Webhook URL resolves to private/internal IP: {addr[0]}")
+                return False
+        return True
+    except (socket.gaierror, ValueError) as e:
+        logger.warning(f"Webhook URL validation failed for {url}: {e}")
+        return False
 
 
 def _get_setting_value(db: Session, key: str, default=None):
@@ -38,6 +89,8 @@ def _send_slack_notification(webhook_url: str, summary: dict, scan_id: str = Non
     """Send notification to Slack."""
     if not webhook_url or webhook_url in ("null", "None", ""):
         return False
+    if not _validate_webhook_url(webhook_url):
+        raise ValueError(f"Webhook URL failed SSRF validation for host: {urlparse(webhook_url).hostname}")
 
     # Calculate total
     total = sum([
@@ -67,19 +120,25 @@ def _send_slack_notification(webhook_url: str, summary: dict, scan_id: str = Non
     }
 
     try:
-        response = requests.post(webhook_url, json=message, timeout=10)
+        session = _get_safe_session()
+        response = session.post(webhook_url, json=message, timeout=10)
         response.raise_for_status()
         logger.info(f"Slack notification sent for scan {scan_id}")
         return True
-    except Exception as e:
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"Slack webhook returned error ({e.response.status_code}): {e}")
+        raise
+    except requests.exceptions.RequestException as e:
         logger.error(f"Failed to send Slack notification: {e}")
-        return False
+        raise
 
 
 def _send_teams_notification(webhook_url: str, summary: dict, scan_id: str = None) -> bool:
     """Send notification to Microsoft Teams."""
     if not webhook_url or webhook_url in ("null", "None", ""):
         return False
+    if not _validate_webhook_url(webhook_url):
+        raise ValueError(f"Webhook URL failed SSRF validation for host: {urlparse(webhook_url).hostname}")
 
     # Calculate total
     total = sum([
@@ -121,13 +180,17 @@ def _send_teams_notification(webhook_url: str, summary: dict, scan_id: str = Non
     }
 
     try:
-        response = requests.post(webhook_url, json=message, timeout=10)
+        session = _get_safe_session()
+        response = session.post(webhook_url, json=message, timeout=10)
         response.raise_for_status()
         logger.info(f"Teams notification sent for scan {scan_id}")
         return True
-    except Exception as e:
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"Teams webhook returned error ({e.response.status_code}): {e}")
+        raise
+    except requests.exceptions.RequestException as e:
         logger.error(f"Failed to send Teams notification: {e}")
-        return False
+        raise
 
 
 async def send_scan_notification(
@@ -170,7 +233,7 @@ async def send_scan_notification(
             try:
                 results["slack_sent"] = _send_slack_notification(slack_url, summary, scan_id)
             except Exception as e:
-                results["errors"].append(f"Slack: {e}")
+                results["errors"].append(f"Slack: {type(e).__name__}: {e}")
 
         # Send Teams notification if configured
         teams_url = _get_setting_value(db, "teams_webhook_url")
@@ -178,7 +241,7 @@ async def send_scan_notification(
             try:
                 results["teams_sent"] = _send_teams_notification(teams_url, summary, scan_id)
             except Exception as e:
-                results["errors"].append(f"Teams: {e}")
+                results["errors"].append(f"Teams: {type(e).__name__}: {e}")
 
         logger.info(f"Notification results for scan {scan_id}: {results}")
 

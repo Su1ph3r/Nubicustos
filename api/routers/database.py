@@ -6,6 +6,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from services.audit_service import log_audit
 from models.database import (
     AssumedRoleMapping,
     AttackPath,
@@ -160,6 +161,9 @@ async def purge_database(
 
         total_rows = sum(rows_deleted.values())
         logger.info(f"Database purged: {total_rows} rows deleted from {len(tables_purged)} tables")
+
+        log_audit(db, "database_purged", {"tables_cleared": tables_purged})
+        db.commit()
 
         return {
             "success": True,

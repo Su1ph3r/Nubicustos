@@ -135,10 +135,7 @@ export const useFindingsStore = defineStore('findings', () => {
 
   async function fetchSummary() {
     try {
-      const response = await fetch('/api/findings/summary')
-      if (!response.ok) throw new Error('Failed to fetch summary')
-
-      const data = await response.json()
+      const data = await api.getSummary()
       summary.value = data
 
       // Update filter options from summary
@@ -151,7 +148,8 @@ export const useFindingsStore = defineStore('findings', () => {
 
       return data
     } catch (err) {
-      console.error('Failed to fetch summary:', err)
+      error.value = err.message
+      toast.apiError(err, 'Failed to load findings summary')
       return null
     }
   }
@@ -203,10 +201,6 @@ export const useFindingsStore = defineStore('findings', () => {
       'risk_score': 'risk_score',
       'scan_date': 'scan_date',
       'title': 'title',
-      'tool': 'tool',
-      'resource_type': 'resource_type',
-      'region': 'region',
-      'status': 'status',
     }
 
     const mappedField = fieldMapping[field] || 'risk_score'

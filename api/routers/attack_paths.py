@@ -24,9 +24,12 @@ Endpoints:
     DELETE /attack-paths/{path_id} - Delete an attack path
 """
 
+import logging
 import sys
 import time
 import uuid as uuid_module
+
+logger = logging.getLogger(__name__)
 from collections import defaultdict
 from datetime import datetime
 from uuid import UUID
@@ -352,10 +355,11 @@ async def analyze_attack_paths(
             paths_discovered=len(paths), analysis_time_ms=elapsed_ms, summary=summary
         )
 
-    except ImportError as e:
-        raise HTTPException(status_code=500, detail=f"Attack path analyzer not available: {str(e)}")
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Attack path analyzer not available")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+        logger.error(f"Attack path analysis failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Analysis failed unexpectedly")
 
 
 def _run_analysis_job(job_id: str, scan_id: str | None, db_url: str):

@@ -90,12 +90,17 @@ class RateLimiter:
         forwarded = request.headers.get("X-Forwarded-For")
         if forwarded:
             return forwarded.split(",")[0].strip()
-        return request.client.host if request.client else "unknown"
+        if request.client:
+            return request.client.host
+        logger.debug("request.client is None, rate limiting may be shared across proxied clients")
+        return "unknown"
 
     def _cleanup_old_requests(self, client_id: str, current_time: float) -> None:
         """Remove requests outside the current window."""
         cutoff = current_time - self.window_seconds
         self.requests[client_id] = [t for t in self.requests[client_id] if t > cutoff]
+        if not self.requests[client_id]:
+            del self.requests[client_id]
 
     def is_allowed(self, request: Request) -> tuple[bool, dict[str, str]]:
         """Check if request is allowed and return rate limit info.
@@ -305,6 +310,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Scheduler startup failed (non-fatal): {e}")
         # NON-FATAL: API continues to work even if scheduler fails
+
+    # Security: warn about default passwords
+    _KNOWN_DEFAULTS = {"changeme", "cloudsecurity", "password", "secret", ""}
+    if settings.db_password in _KNOWN_DEFAULTS:
+        logger.warning(
+            "SECURITY: Database password is a known default value. "
+            "Set DB_PASSWORD environment variable for production use."
+        )
+    if settings.neo4j_password in _KNOWN_DEFAULTS:
+        logger.warning(
+            "SECURITY: Neo4j password is a known default value. "
+            "Set NEO4J_PASSWORD environment variable for production use."
+        )
 
     logger.info("Nubicustos API started successfully")
 

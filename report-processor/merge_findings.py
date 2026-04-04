@@ -11,13 +11,17 @@ def merge_findings(scoutsuite_findings, prowler_findings):
     merged = {}
 
     # Process ScoutSuite findings
-    for finding in scoutsuite_findings:
-        key = f"{finding.get('resource_id')}_{finding.get('type')}"
+    for i, finding in enumerate(scoutsuite_findings):
+        resource_id = finding.get('resource_id') or f"_unknown_ss_{i}"
+        finding_type = finding.get('type') or 'unknown'
+        key = f"{resource_id}_{finding_type}"
         merged[key] = finding
 
     # Process Prowler findings
-    for finding in prowler_findings:
-        key = f"{finding.get('resource_id')}_{finding.get('check_id')}"
+    for i, finding in enumerate(prowler_findings):
+        resource_id = finding.get('resource_id') or f"_unknown_pr_{i}"
+        check_id = finding.get('check_id') or 'unknown'
+        key = f"{resource_id}_{check_id}"
         if key not in merged:
             merged[key] = finding
 

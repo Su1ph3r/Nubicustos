@@ -32,7 +32,7 @@ from models.schemas import ExportRequest, ExportResponse
 router: APIRouter = APIRouter(prefix="/exports", tags=["Exports"])
 
 
-def _strip_instance_parts(finding_id: str) -> str:
+def _strip_instance_parts(finding_id: str | None) -> str:
     """Strip account_id (12-digit) and region from finding_id to get a check-type canonical ID.
 
     Examples:
@@ -40,6 +40,8 @@ def _strip_instance_parts(finding_id: str) -> str:
         iam_maxpasswordage_991249186791_global -> iam_maxpasswordage
         awsec2instance_ec2_instance_account_imdsv2_enabled_123456789012 -> awsec2instance_ec2_instance_account_imdsv2_enabled
     """
+    if not finding_id:
+        return ""
     return re.sub(r'_\d{12}(_[a-z][-a-z0-9]*)?$', '', finding_id)
 
 
@@ -50,6 +52,7 @@ async def export_findings_csv(
     status: str | None = Query("open", description="Filter by status"),
     cloud_provider: str | None = Query(None, description="Filter by cloud provider"),
     account_id: str | None = Query(None, description="Filter by AWS account ID"),
+    tool: str | None = Query(None, description="Filter by scanning tool"),
     include_remediation: bool = Query(True, description="Include remediation guidance"),
 ):
     """
@@ -62,6 +65,7 @@ async def export_findings_csv(
         severity: Comma-separated severity levels to include
         status: Comma-separated statuses to include (default: open)
         cloud_provider: Filter by cloud provider
+        tool: Filter by scanning tool
         include_remediation: Include remediation column (default: true)
 
     Returns:
@@ -88,6 +92,9 @@ async def export_findings_csv(
 
     if account_id:
         query = query.filter(Finding.account_id == account_id)
+
+    if tool:
+        query = query.filter(Finding.tool == tool.lower())
 
     findings = query.order_by(Finding.severity, desc(Finding.scan_date)).all()
 
@@ -153,6 +160,7 @@ async def export_findings_json(
     status: str | None = Query("open", description="Filter by status"),
     cloud_provider: str | None = Query(None, description="Filter by cloud provider"),
     account_id: str | None = Query(None, description="Filter by AWS account ID"),
+    tool: str | None = Query(None, description="Filter by scanning tool"),
 ):
     """
     Export findings as JSON file download.
@@ -164,6 +172,7 @@ async def export_findings_json(
         severity: Comma-separated severity levels to include
         status: Comma-separated statuses to include (default: open)
         cloud_provider: Filter by cloud provider
+        tool: Filter by scanning tool
 
     Returns:
         StreamingResponse: JSON file download
@@ -193,6 +202,9 @@ async def export_findings_json(
     if account_id:
         query = query.filter(Finding.account_id == account_id)
 
+    if tool:
+        query = query.filter(Finding.tool == tool.lower())
+
     findings = query.order_by(Finding.severity, desc(Finding.scan_date)).all()
 
     # Build JSON structure
@@ -216,8 +228,8 @@ async def export_findings_json(
                 "resource_id": f.resource_id,
                 "resource_name": f.resource_name,
                 "region": f.region,
-                "risk_score": float(f.risk_score) if f.risk_score else None,
-                "cvss_score": float(f.cvss_score) if f.cvss_score else None,
+                "risk_score": float(f.risk_score) if f.risk_score is not None else None,
+                "cvss_score": float(f.cvss_score) if f.cvss_score is not None else None,
                 "cve_id": f.cve_id,
                 "first_seen": f.first_seen.isoformat() if f.first_seen else None,
                 "last_seen": f.last_seen.isoformat() if f.last_seen else None,
@@ -273,12 +285,26 @@ async def generate_export(export_request: ExportRequest, db: Session = Depends(g
     export_id = str(uuid4())[:8]
     filename = f"findings_export_{export_id}.{export_request.format}"
 
+    params = []
+    if export_request.severity_filter:
+        for s in export_request.severity_filter:
+            params.append(f"severity={s.value if hasattr(s, 'value') else s}")
+    if export_request.status_filter:
+        for s in export_request.status_filter:
+            params.append(f"status={s.value if hasattr(s, 'value') else s}")
+    if export_request.cloud_provider:
+        params.append(f"cloud_provider={export_request.cloud_provider}")
+    query_string = "&".join(params)
+    download_url = f"/api/exports/{export_request.format}"
+    if query_string:
+        download_url += f"?{query_string}"
+
     return ExportResponse(
         export_id=export_id,
         filename=filename,
         format=export_request.format,
         record_count=count,
-        download_url=f"/api/exports/{export_request.format}",
+        download_url=download_url,
         generated_at=datetime.utcnow(),
     )
 
@@ -304,7 +330,7 @@ async def export_summary(db: Session = Depends(get_db)):
     # Severity breakdown
     severity_data = dict(
         db.query(Finding.severity, func.count(Finding.id))
-        .filter(Finding.status == "open")
+        .filter(Finding.status.in_(["open", "fail"]))
         .group_by(Finding.severity)
         .all()
     )
@@ -312,7 +338,7 @@ async def export_summary(db: Session = Depends(get_db)):
     # Provider breakdown
     provider_data = dict(
         db.query(Finding.cloud_provider, func.count(Finding.id))
-        .filter(Finding.status == "open")
+        .filter(Finding.status.in_(["open", "fail"]))
         .group_by(Finding.cloud_provider)
         .all()
     )
@@ -320,12 +346,12 @@ async def export_summary(db: Session = Depends(get_db)):
     # Tool breakdown
     tool_data = dict(
         db.query(Finding.tool, func.count(Finding.id))
-        .filter(Finding.status == "open")
+        .filter(Finding.status.in_(["open", "fail"]))
         .group_by(Finding.tool)
         .all()
     )
 
-    total = db.query(Finding).filter(Finding.status == "open").count()
+    total = db.query(Finding).filter(Finding.status.in_(["open", "fail"])).count()
 
     return {
         "generated_at": datetime.utcnow().isoformat(),

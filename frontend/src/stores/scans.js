@@ -107,6 +107,8 @@ export const useScansStore = defineStore('scans', () => {
     }
   }
 
+  let consecutiveFetchFailures = 0
+
   async function fetchScan(scanId) {
     try {
       const response = await fetch(`${API_BASE}/scans/${scanId}`)
@@ -114,9 +116,14 @@ export const useScansStore = defineStore('scans', () => {
 
       const data = await response.json()
       currentScan.value = data
+      consecutiveFetchFailures = 0
       return data
     } catch (e) {
+      consecutiveFetchFailures++
       console.error('Error fetching scan:', e)
+      if (consecutiveFetchFailures >= 3) {
+        error.value = 'Unable to reach server - scan status may be stale'
+      }
       return null
     }
   }

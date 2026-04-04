@@ -19,9 +19,10 @@ Circuit Breaker Pattern:
 
 import logging
 import threading
+import re
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -297,7 +298,8 @@ class Neo4jConnection:
         try:
             self._driver.verify_connectivity()
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Neo4j connectivity check failed: {e}")
             return False
 
     def is_available(self) -> bool:
@@ -402,6 +404,9 @@ class Neo4jSyncService:
                 label_counts = {}
 
                 for label in self.CARTOGRAPHY_LABEL_MAP.keys():
+                    if not re.match(r'^[A-Za-z][A-Za-z0-9_]*$', label):
+                        logger.warning(f"Skipping invalid Neo4j label: {label}")
+                        continue
                     result = session.run(f"MATCH (n:{label}) RETURN count(n) as count")
                     count = result.single()["count"]
                     if count > 0:
@@ -486,6 +491,7 @@ class Neo4jSyncService:
                         error_msg = f"Error syncing {neo4j_label}: {e}"
                         logger.error(error_msg)
                         result.errors.append(error_msg)
+                        result.success = False
 
             db.commit()
             logger.info(f"Synced {result.assets_synced} assets from Neo4j to PostgreSQL")
@@ -683,7 +689,7 @@ class Neo4jSyncService:
 
         Returns count of assets marked as stale.
         """
-        cutoff = datetime.utcnow()
+        cutoff = datetime.utcnow() - timedelta(hours=hours)
         stale_count = 0
 
         try:
@@ -699,10 +705,10 @@ class Neo4jSyncService:
                         if record["id"]:
                             neo4j_ids.add(record["id"])
 
-            # Mark assets not in Neo4j as inactive
+            # Mark assets not in Neo4j as inactive if not updated recently
             stale_assets = (
                 db.query(Asset)
-                .filter(Asset.asset_id.notin_(neo4j_ids), Asset.is_active == True)
+                .filter(Asset.asset_id.notin_(neo4j_ids), Asset.is_active == True, Asset.updated_at < cutoff)
                 .all()
             )
 

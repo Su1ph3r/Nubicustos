@@ -343,18 +343,32 @@ class NubicustosClient:
         self, module_name: str, target_account: str | None = None
     ) -> dict[str, Any]:
         """Run CloudFox enumeration module."""
-        data: dict[str, Any] = {"module_name": module_name}
+        data: dict[str, Any] = {"modules": [module_name]}
         if target_account:
-            data["target_account"] = target_account
+            data["profile"] = target_account
         return await self.post("/api/cloudfox/run", data=data)
 
     async def run_enumerate_iam(
-        self, principal_arn: str
+        self,
+        access_key: str | None = None,
+        secret_key: str | None = None,
+        session_token: str | None = None,
+        region: str | None = None,
+        principal_arn: str | None = None,
     ) -> dict[str, Any]:
         """Enumerate IAM permissions for a principal."""
-        return await self.post(
-            "/api/enumerate-iam/run", data={"principal_arn": principal_arn}
-        )
+        data: dict[str, Any] = {}
+        if access_key:
+            data["access_key"] = access_key
+        if secret_key:
+            data["secret_key"] = secret_key
+        if session_token:
+            data["session_token"] = session_token
+        if region:
+            data["region"] = region
+        if principal_arn:
+            data["principal_arn"] = principal_arn
+        return await self.post("/api/enumerate-iam/run", data=data)
 
     # Exports
     async def export_findings(
@@ -365,9 +379,11 @@ class NubicustosClient:
         cloud_provider: str | None = None,
     ) -> dict[str, Any]:
         """Generate findings export."""
-        data: dict[str, Any] = {"format": format, "status": status}
+        data: dict[str, Any] = {"format": format}
         if severity:
-            data["severity"] = severity
+            data["severity_filter"] = [s.strip() for s in severity.split(",")]
+        if status:
+            data["status_filter"] = [s.strip() for s in status.split(",")]
         if cloud_provider:
             data["cloud_provider"] = cloud_provider
         return await self.post("/api/exports/generate", data=data)
@@ -387,12 +403,13 @@ class NubicustosClient:
         return await self.get("/api/sync/status")
 
     async def verify_credentials(
-        self, provider: str
+        self, provider: str, credentials: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         """Verify cloud provider credentials."""
-        return await self.post(
-            "/api/credentials/check-permissions", data={"provider": provider}
-        )
+        data: dict[str, Any] = {"provider": provider}
+        if credentials:
+            data[provider] = credentials
+        return await self.post("/api/credentials/verify", data=data)
 
 
 # Global client instance

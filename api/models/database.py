@@ -126,13 +126,13 @@ class Finding(Base):
     impact = Column(Text)
     # Deduplication fields
     canonical_id = Column(String(256))
-    tool_sources = Column(JSONB, default=[])
-    affected_resources = Column(JSONB, default=[])
+    tool_sources = Column(JSONB, default=list)
+    affected_resources = Column(JSONB, default=list)
     # Enhanced scoring fields (Phase 1)
     asset_criticality = Column(String(16), default="medium")
     blast_radius = Column(Integer, default=1)
     recurrence_count = Column(Integer, default=1)
-    scoring_factors = Column(JSONB, default={})
+    scoring_factors = Column(JSONB, default=dict)
     # Threat intelligence fields (Phase 1)
     threat_intel_enrichment = Column(JSONB, default=None)
     threat_intel_last_checked = Column(DateTime)
@@ -196,10 +196,10 @@ class AttackPath(Base):
     validation_error = Column(Text)
     # Runtime correlation fields (v2)
     runtime_confirmed = Column(Boolean, default=False)
-    cloudtrail_events = Column(JSONB, default=[])
+    cloudtrail_events = Column(JSONB, default=list)
     # Confidence scoring fields (Tier 1)
     confidence_score = Column(Integer, default=0)  # 0-100 confidence score
-    confidence_factors = Column(JSONB, default={})  # Breakdown of score factors
+    confidence_factors = Column(JSONB, default=dict)  # Breakdown of score factors
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -323,7 +323,7 @@ class PrivescPath(Base):
     validation_evidence = Column(JSONB)
     # Runtime correlation fields (v2)
     runtime_confirmed = Column(Boolean, default=False)
-    cloudtrail_events = Column(JSONB, default=[])
+    cloudtrail_events = Column(JSONB, default=list)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -510,7 +510,7 @@ class ToolExecution(Base):
     tool_type = Column(String(32))
     status = Column(String(32), default="pending")
     container_id = Column(String(128))
-    config = Column(JSONB, default={})
+    config = Column(JSONB, default=dict)
     output_path = Column(String(512))
     error_message = Column(Text)
     exit_code = Column(Integer)
@@ -574,9 +574,9 @@ class CredentialStatusCache(Base):
     status = Column(String(32), nullable=False, default="unknown")
     identity = Column(String(256))
     account_info = Column(String(256))
-    tools_ready = Column(JSONB, default=[])
-    tools_partial = Column(JSONB, default=[])
-    tools_failed = Column(JSONB, default=[])
+    tools_ready = Column(JSONB, default=list)
+    tools_partial = Column(JSONB, default=list)
+    tools_failed = Column(JSONB, default=list)
     last_verified = Column(DateTime)
     verification_error = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -606,7 +606,7 @@ class BlastRadiusAnalysis(Base):
     assumable_roles_count = Column(Integer, default=0)
     assumption_chain_depth = Column(Integer, default=1)
     cross_account_roles_count = Column(Integer, default=0)
-    affected_accounts = Column(JSONB, default=[])
+    affected_accounts = Column(JSONB, default=list)
     # Calculated blast radius
     total_blast_radius = Column(Integer, default=0)
     risk_level = Column(String(16), default="medium")
@@ -711,10 +711,25 @@ class FindingValidation(Base):
     finding_id = Column(Integer, ForeignKey("findings.id", ondelete="CASCADE"), nullable=False)
     validation_status = Column(String(32), default="pending")  # pending, validated, blocked, failed
     validation_timestamp = Column(DateTime)
-    evidence = Column(JSONB, default=[])  # List of validation evidence
+    evidence = Column(JSONB, default=list)  # List of validation evidence
     error_message = Column(Text)
     dry_run = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
     finding = relationship("Finding")
+
+
+class AuditHistory(Base):
+    """Audit trail for destructive and sensitive operations."""
+
+    __tablename__ = "audit_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    scan_id = Column(
+        UUID(as_uuid=True), ForeignKey("scans.scan_id", ondelete="SET NULL"), nullable=True
+    )
+    action = Column(String(100), nullable=False)
+    performed_by = Column(String(255), default="system")
+    details = Column(JSONB)
+    created_at = Column(DateTime, default=datetime.utcnow)

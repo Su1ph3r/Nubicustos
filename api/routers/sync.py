@@ -281,21 +281,26 @@ async def trigger_sync_background(
     """
 
     def run_sync():
+        from models.database import SessionLocal
+
+        bg_db = SessionLocal()
         try:
             sync_service = get_neo4j_sync_service()
             if request.direction == SyncDirectionEnum.bidirectional:
-                sync_service.full_sync(db)
+                sync_service.full_sync(bg_db)
             elif request.direction == SyncDirectionEnum.neo4j_to_pg:
-                sync_service.sync_from_neo4j(db)
+                sync_service.sync_from_neo4j(bg_db)
             else:
-                sync_service.propagate_findings_to_neo4j(db)
+                sync_service.propagate_findings_to_neo4j(bg_db)
 
             if request.mark_stale:
-                sync_service.mark_stale_assets(db)
+                sync_service.mark_stale_assets(bg_db)
 
             logger.info("Background sync completed successfully")
         except Exception as e:
-            logger.error(f"Background sync failed: {e}")
+            logger.error(f"Background sync failed: {e}", exc_info=True)
+        finally:
+            bg_db.close()
 
     background_tasks.add_task(run_sync)
 

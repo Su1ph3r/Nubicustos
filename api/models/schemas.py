@@ -6,13 +6,23 @@ Security Notes:
 - Enum types restrict values to known safe options
 """
 
+import os
 import re
 from datetime import datetime
 from enum import Enum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+_STRICT_MODE = os.environ.get("STRICT_MODE", "").lower() in ("1", "true", "yes")
+
+
+class RequestBase(BaseModel):
+    """Base class for request schemas. Rejects unknown fields when STRICT_MODE is enabled."""
+
+    if _STRICT_MODE:
+        model_config = ConfigDict(extra="forbid")
 
 
 class SeverityLevel(str, Enum):
@@ -65,7 +75,7 @@ class ScanProfile(str, Enum):
 # ============================================================================
 
 
-class ScanCreate(BaseModel):
+class ScanCreate(RequestBase):
     """Request schema for creating a new scan."""
 
     profile: ScanProfile = Field(
@@ -219,7 +229,7 @@ class ScanFileResponse(BaseModel):
         from_attributes = True
 
 
-class BulkDeleteRequest(BaseModel):
+class BulkDeleteRequest(RequestBase):
     """Request schema for bulk delete operation."""
 
     scan_ids: list[UUID] = Field(min_length=1, max_length=100, description="List of scan IDs to delete")
@@ -236,7 +246,7 @@ class BulkDeleteResponse(BaseModel):
     errors: list[str] = Field(default=[], description="Any errors encountered")
 
 
-class BulkArchiveRequest(BaseModel):
+class BulkArchiveRequest(RequestBase):
     """Request schema for bulk archive operation."""
 
     scan_ids: list[UUID] = Field(min_length=1, max_length=100, description="List of scan IDs to archive")
@@ -362,7 +372,7 @@ class FindingResponse(BaseModel):
         from_attributes = True
 
 
-class FindingUpdate(BaseModel):
+class FindingUpdate(RequestBase):
     """Request schema for updating a finding."""
 
     status: FindingStatus | None = None
@@ -485,7 +495,7 @@ class ExportFormat(str, Enum):
     json = "json"
 
 
-class ExportRequest(BaseModel):
+class ExportRequest(RequestBase):
     """Request schema for generating exports."""
 
     format: ExportFormat = Field(default=ExportFormat.csv, description="Export format: csv, json")
@@ -608,7 +618,7 @@ class AttackPathSummary(BaseModel):
     avg_risk_score: float = 0.0
 
 
-class AttackPathAnalyzeRequest(BaseModel):
+class AttackPathAnalyzeRequest(RequestBase):
     """Request to trigger attack path analysis."""
 
     scan_id: UUID | None = Field(default=None, description="Specific scan to analyze")
@@ -729,7 +739,7 @@ class ExposedCredentialSummary(BaseModel):
     by_provider: dict[str, int] = {}
 
 
-class CredentialRemediationUpdate(BaseModel):
+class CredentialRemediationUpdate(RequestBase):
     """Request to update credential remediation status."""
 
     remediation_status: str = Field(description="Status: pending, in_progress, resolved, accepted")
@@ -741,7 +751,7 @@ class CredentialRemediationUpdate(BaseModel):
 # ============================================================================
 
 
-class SeverityOverrideCreate(BaseModel):
+class SeverityOverrideCreate(RequestBase):
     """Request schema for creating a severity override."""
 
     finding_id: int
@@ -779,7 +789,7 @@ class SeverityOverrideListResponse(BaseModel):
     page_size: int
 
 
-class SeverityOverrideApproval(BaseModel):
+class SeverityOverrideApproval(RequestBase):
     """Request to approve or reject a severity override."""
 
     approved: bool
@@ -863,7 +873,7 @@ class PrivescPathSummary(BaseModel):
     by_target: dict[str, int] = {}
 
 
-class PrivescPathAnalyzeRequest(BaseModel):
+class PrivescPathAnalyzeRequest(RequestBase):
     """Request to trigger privilege escalation path analysis."""
 
     scan_id: UUID | None = Field(default=None, description="Specific scan to analyze")
@@ -977,7 +987,7 @@ class CloudfoxSummary(BaseModel):
     by_risk: dict[str, int] = {}
 
 
-class CloudfoxRunRequest(BaseModel):
+class CloudfoxRunRequest(RequestBase):
     """Request to run CloudFox modules."""
 
     modules: list[str] = Field(default=["all"], description="Modules to run")
@@ -1033,7 +1043,7 @@ class PacuSummary(BaseModel):
     by_category: dict[str, int] = {}
 
 
-class PacuRunRequest(BaseModel):
+class PacuRunRequest(RequestBase):
     """Request to run Pacu modules."""
 
     module: str = Field(description="Module to execute")
@@ -1096,7 +1106,7 @@ class EnumerateIamSummary(BaseModel):
     avg_permissions: float = 0.0
 
 
-class EnumerateIamRunRequest(BaseModel):
+class EnumerateIamRunRequest(RequestBase):
     """Request to run enumerate-iam."""
 
     access_key: str | None = None
@@ -1159,7 +1169,7 @@ class AssumedRoleSummary(BaseModel):
     by_risk: dict[str, int] = {}
 
 
-class Neo4jSyncRequest(BaseModel):
+class Neo4jSyncRequest(RequestBase):
     """Request to sync role mappings to Neo4j."""
 
     mapping_ids: list[int] | None = None
@@ -1258,7 +1268,7 @@ class LambdaAnalysisSummary(BaseModel):
     by_region: dict[str, int] = {}
 
 
-class LambdaAnalyzeRequest(BaseModel):
+class LambdaAnalyzeRequest(RequestBase):
     """Request to analyze Lambda functions."""
 
     function_arns: list[str] | None = None
@@ -1380,13 +1390,13 @@ class UserSettingsByCategory(BaseModel):
     display: dict[str, Any] = {}
 
 
-class UserSettingUpdate(BaseModel):
+class UserSettingUpdate(RequestBase):
     """Request schema for updating a setting."""
 
     value: Any = Field(description="The new value for the setting")
 
 
-class UserSettingCreate(BaseModel):
+class UserSettingCreate(RequestBase):
     """Request schema for creating a new setting."""
 
     setting_key: str = Field(max_length=128, pattern=r"^[a-z0-9_]+$")

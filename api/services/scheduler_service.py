@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 # Global scheduler instance
 _scheduler: AsyncIOScheduler | None = None
 
+# Auto-disable schedules after this many consecutive failures
+MAX_CONSECUTIVE_FAILURES = 5
+
 
 def get_scheduler() -> AsyncIOScheduler | None:
     """Get the global scheduler instance."""
@@ -95,6 +98,7 @@ async def _load_schedules_from_db() -> None:
         db.close()
     except Exception as e:
         logger.error(f"Failed to load schedules from database: {e}")
+        raise
 
 
 def _parse_cron_expression(cron_expr: str) -> CronTrigger:
@@ -265,7 +269,7 @@ async def execute_scheduled_scan(schedule_id: str) -> None:
         settings = get_settings()
 
         # Run the scan orchestration in background
-        asyncio.create_task(
+        task = asyncio.create_task(
             run_scan_orchestration(
                 str(scan.scan_id),
                 schedule.profile,
@@ -275,6 +279,14 @@ async def execute_scheduled_scan(schedule_id: str) -> None:
                 azure_credentials,
             )
         )
+
+        def _handle_scheduled_task_exception(t: asyncio.Task, _scan_id=str(scan.scan_id)) -> None:
+            if t.done() and not t.cancelled():
+                exc = t.exception()
+                if exc:
+                    logger.error(f"Scheduled scan orchestration failed for {_scan_id}: {exc}")
+
+        task.add_done_callback(_handle_scheduled_task_exception)
 
         logger.info(f"Scheduled scan started: {scan.scan_id}")
 
@@ -300,6 +312,16 @@ async def execute_scheduled_scan(schedule_id: str) -> None:
                 # Truncate error message to avoid storing sensitive details
                 schedule.last_error = str(e)[:500] if str(e) else "Unknown error"
                 schedule.error_count += 1
+                if schedule.error_count >= MAX_CONSECUTIVE_FAILURES:
+                    schedule.is_enabled = False
+                    logger.warning(
+                        f"Schedule {schedule_id} auto-disabled after {schedule.error_count} "
+                        f"consecutive failures. Last error: {e}"
+                    )
+                    try:
+                        await remove_schedule_job(schedule_id)
+                    except Exception:
+                        pass
                 error_db.commit()
         except Exception as inner_e:
             logger.error(f"Failed to update error status for schedule {schedule_id}: {inner_e}")

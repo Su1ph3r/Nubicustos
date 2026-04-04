@@ -5,9 +5,12 @@ of compromised identities, including permission analysis, role assumption
 chains, and cross-account scope.
 """
 
+import logging
 import sys
 import time
 from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, Integer
@@ -96,12 +99,13 @@ async def analyze_blast_radius(
             },
         }
 
-    except ImportError as e:
+    except ImportError:
         raise HTTPException(
-            status_code=500, detail=f"Blast radius analyzer not available: {str(e)}"
+            status_code=500, detail="Blast radius analyzer not available"
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+        logger.error(f"Blast radius analysis failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Analysis failed unexpectedly")
 
 
 @router.get("/identity/{arn:path}")
@@ -151,12 +155,13 @@ async def get_identity_blast_radius(
             "not_found": False,
         }
 
-    except ImportError as e:
+    except ImportError:
         raise HTTPException(
-            status_code=500, detail=f"Blast radius analyzer not available: {str(e)}"
+            status_code=500, detail="Blast radius analyzer not available"
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+        logger.error(f"Blast radius analysis failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Analysis failed unexpectedly")
 
 
 @router.get("/findings/{finding_id}")
@@ -232,12 +237,13 @@ async def get_finding_blast_radius(
             "max_risk_level": max_risk_level,
         }
 
-    except ImportError as e:
+    except ImportError:
         raise HTTPException(
-            status_code=500, detail=f"Blast radius analyzer not available: {str(e)}"
+            status_code=500, detail="Blast radius analyzer not available"
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+        logger.error(f"Blast radius analysis failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Analysis failed unexpectedly")
 
 
 @router.get("/summary")
@@ -339,6 +345,7 @@ async def get_blast_radius_summary(
 
         # Analyze top risk identities
         top_risk_identities = []
+        skipped_identities = []
         for result in top_risk_results:
             if result.principal_arn:
                 try:
@@ -346,19 +353,20 @@ async def get_blast_radius_summary(
                         result.principal_arn, str(scan_id) if scan_id else None
                     )
                     top_risk_identities.append(analysis)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to analyze identity {result.principal_arn}: {e}")
+                    skipped_identities.append(str(result.principal_arn))
 
-        # Calculate risk level distribution (estimate based on capabilities)
+        # Calculate risk level distribution (mutually exclusive buckets)
+        admin_count = int(caps_row.admin or 0) if caps_row else 0
+        privesc_count = int(caps_row.privesc or 0) if caps_row else 0
+        data_access_count = int(caps_row.data_access or 0) if caps_row else 0
+
         by_risk_level = {
-            "critical": int(caps_row.admin or 0) if caps_row else 0,
-            "high": int(caps_row.privesc or 0) if caps_row else 0,
-            "medium": int(caps_row.data_access or 0) if caps_row else 0,
-            "low": max(0, total_identities - (
-                int(caps_row.admin or 0) +
-                int(caps_row.privesc or 0) +
-                int(caps_row.data_access or 0)
-            )) if caps_row else total_identities,
+            "critical": admin_count,
+            "high": max(0, privesc_count - admin_count),
+            "medium": max(0, data_access_count - max(admin_count, privesc_count)),
+            "low": max(0, total_identities - max(admin_count, privesc_count, data_access_count)),
         }
 
         # Calculate average blast radius from top identities
@@ -374,6 +382,7 @@ async def get_blast_radius_summary(
             "cross_account_identities": cross_account_count,
             "avg_blast_radius": avg_blast_radius,
             "top_risk_identities": top_risk_identities,
+            "skipped_identities": len(skipped_identities),
         }
 
     except ImportError as e:
@@ -436,6 +445,7 @@ async def get_high_risk_identities(
 
         # Analyze each identity
         analyses = []
+        skipped_identities = []
         for result in results:
             if result.principal_arn:
                 try:
@@ -443,14 +453,16 @@ async def get_high_risk_identities(
                         result.principal_arn, str(scan_id) if scan_id else None
                     )
                     analyses.append(analysis)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to analyze identity {result.principal_arn}: {e}")
+                    skipped_identities.append(str(result.principal_arn))
 
         return {
             "identities": analyses,
             "total": total,
             "page": page,
             "page_size": page_size,
+            "skipped_identities": len(skipped_identities),
         }
 
     except ImportError as e:
@@ -520,6 +532,7 @@ async def get_cross_account_identities(
 
         # Analyze each identity
         analyses = []
+        skipped_identities = []
         for result, cross_account_count in results:
             if result.principal_arn:
                 try:
@@ -528,14 +541,16 @@ async def get_cross_account_identities(
                     )
                     analysis["cross_account_mapping_count"] = cross_account_count
                     analyses.append(analysis)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to analyze identity {result.principal_arn}: {e}")
+                    skipped_identities.append(str(result.principal_arn))
 
         return {
             "identities": analyses,
             "total": total,
             "page": page,
             "page_size": page_size,
+            "skipped_identities": len(skipped_identities),
         }
 
     except ImportError as e:

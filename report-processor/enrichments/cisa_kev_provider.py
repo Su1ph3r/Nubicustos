@@ -20,7 +20,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -53,8 +53,13 @@ def _load_kev_catalog() -> dict[str, Any] | None:
             with open(CACHE_FILE, "r") as f:
                 cache_data = json.load(f)
 
-            cache_time = datetime.fromisoformat(cache_data.get("cached_at", ""))
-            if datetime.utcnow() - cache_time < timedelta(hours=CACHE_TTL_HOURS):
+            cached_at = cache_data.get("cached_at")
+            if not cached_at:
+                raise ValueError("No cached_at timestamp")
+            cache_time = datetime.fromisoformat(cached_at)
+            if cache_time.tzinfo is None:
+                cache_time = cache_time.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) - cache_time < timedelta(hours=CACHE_TTL_HOURS):
                 logger.debug("Using cached CISA KEV catalog")
                 return cache_data.get("catalog")
         except (json.JSONDecodeError, ValueError, OSError) as e:
@@ -71,7 +76,7 @@ def _load_kev_catalog() -> dict[str, Any] | None:
 
         # Cache the result
         cache_data = {
-            "cached_at": datetime.utcnow().isoformat(),
+            "cached_at": datetime.now(timezone.utc).isoformat(),
             "catalog": catalog,
         }
         with open(CACHE_FILE, "w") as f:
@@ -204,7 +209,7 @@ def enrich_with_cisa_kev(finding: dict[str, Any]) -> dict[str, Any] | None:
         "has_ransomware_association": has_ransomware_association,
         "risk_score_delta": highest_score_delta,
         "catalog_date": catalog.get("catalogVersion", ""),
-        "enrichment_timestamp": datetime.utcnow().isoformat(),
+        "enrichment_timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
     # Apply risk score adjustment to finding

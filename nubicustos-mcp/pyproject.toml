@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nubicustos-mcp"
-version = "1.0.0"
+version = "1.0.5"
 description = "MCP server for Nubicustos cloud security auditing platform"
 readme = "README.md"
 license = "MIT"

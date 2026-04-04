@@ -11,7 +11,11 @@ def main():
         content = f.read()
 
     # Remove JS variable assignment
-    json_str = content.split("=", 1)[1].strip()
+    parts = content.split("=", 1)
+    if len(parts) < 2:
+        print("Error: ScoutSuite report file does not contain expected 'var = {...}' format")
+        return
+    json_str = parts[1].strip()
     data = json.loads(json_str)
 
     print(f"Account ID: {data.get('aws_account_id')}")

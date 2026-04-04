@@ -254,8 +254,12 @@ def _update_scan_status(
                 scan.scan_metadata = metadata
             db.commit()
     except Exception as e:
-        logger.error(f"Failed to update scan status: {e}")
-        db.rollback()
+        logger.error(f"Failed to update scan {scan_id} status to {status}: {e}", exc_info=True)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        raise
 
 
 def _sanitize_log_snippet(log_text: str) -> str:
@@ -514,7 +518,10 @@ async def run_iac_scan_orchestration(
     except Exception as e:
         logger.exception(f"IaC Scan {scan_id} orchestration failed: {e}")
         # Store sanitized error message (no internal paths or stack traces)
-        _update_scan_status(db, scan_id, "failed", error="Scan orchestration failed unexpectedly")
+        try:
+            _update_scan_status(db, scan_id, "failed", error="Scan orchestration failed unexpectedly")
+        except Exception as status_err:
+            logger.critical(f"IaC Scan {scan_id}: Failed to mark scan as failed: {status_err}")
     finally:
         db.close()
 

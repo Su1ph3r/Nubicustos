@@ -30,13 +30,19 @@ def register_system_tools(mcp: FastMCP) -> None:
         return await client.get_sync_status()
 
     @mcp.tool()
-    async def verify_credentials(provider: str) -> dict:
+    async def verify_credentials(
+        provider: str, credentials: dict | None = None
+    ) -> dict:
         """Verify cloud provider credentials are valid and have required permissions.
 
         Args:
             provider: Cloud provider to check (aws, azure, gcp, kubernetes)
+            credentials: Optional provider-specific credential fields (e.g.,
+                {"access_key_id": "...", "secret_access_key": "..."} for AWS)
 
         Returns:
             Credential status with tool readiness information
         """
-        return await client.verify_credentials(provider=provider)
+        return await client.verify_credentials(
+            provider=provider, credentials=credentials
+        )

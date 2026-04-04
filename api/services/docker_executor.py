@@ -409,7 +409,7 @@ TOOL_CONFIGS = {
         "environment": {
             "NEO4J_URI": "bolt://neo4j:7687",
             "NEO4J_USER": "neo4j",
-            "NEO4J_PASSWORD": "${NEO4J_PASSWORD:-cloudsecurity}",
+            "NEO4J_PASSWORD": os.environ.get("NEO4J_PASSWORD", ""),
             "AWS_SHARED_CREDENTIALS_FILE": "/root/.aws/credentials",
             "AWS_CONFIG_FILE": "/root/.aws/config",
             "AWS_PROFILE": DEFAULT_AWS_PROFILE,

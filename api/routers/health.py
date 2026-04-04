@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from config import get_settings
 from logging_config import get_logger, get_request_id
-from models.database import get_db
+from models.database import Asset, Finding, Scan, get_db
 from models.schemas import (
     DetailedHealthResponse,
     HealthResponse,
@@ -135,17 +135,13 @@ def check_database_tables(db: Session) -> ServiceStatus:
     """Check if required database tables exist and are accessible."""
     start_time = time.time()
     try:
-        # Check core tables - whitelist validated to prevent SQL injection
-        tables_to_check = ["scans", "findings", "assets"]
-        allowed_tables = frozenset(["scans", "findings", "assets"])
-        table_counts = {}
+        from sqlalchemy import func
 
-        for table in tables_to_check:
-            # Validate table name against whitelist
-            if table not in allowed_tables:
-                continue
-            result = db.execute(text(f"SELECT COUNT(*) FROM {table}"))
-            table_counts[table] = result.scalar()
+        table_counts = {
+            "scans": db.query(func.count(Scan.scan_id)).scalar() or 0,
+            "findings": db.query(func.count(Finding.id)).scalar() or 0,
+            "assets": db.query(func.count(Asset.id)).scalar() or 0,
+        }
 
         latency_ms = (time.time() - start_time) * 1000
 
@@ -165,6 +161,28 @@ def check_database_tables(db: Session) -> ServiceStatus:
             message=str(e)[:200],
             latency_ms=round(latency_ms, 2),
         )
+
+
+def _check_scheduler() -> dict:
+    """Check scheduler health."""
+    try:
+        from services.scheduler_service import get_scheduler
+        scheduler = get_scheduler()
+        if scheduler is None:
+            return {"status": "stopped", "job_count": 0}
+        jobs = scheduler.get_jobs()
+        return {"status": "running" if scheduler.running else "stopped", "job_count": len(jobs)}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+def _check_background_tasks() -> dict:
+    """Check background task health."""
+    try:
+        from services.task_registry import get_summary
+        return get_summary()
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 
 @router.get("", response_model=HealthResponse)
@@ -188,7 +206,7 @@ async def health_check(db: Session = Depends(get_db)):
     overall_status = "healthy" if db_status == "healthy" else "degraded"
 
     return HealthResponse(
-        status=overall_status, database=db_status, timestamp=datetime.now(UTC), version="1.0.0"
+        status=overall_status, database=db_status, timestamp=datetime.now(UTC), version="1.0.5"
     )
 
 
@@ -217,6 +235,22 @@ async def detailed_health_check(db: Session = Depends(get_db)):
     tables_status = check_database_tables(db)
     services.append(tables_status)
 
+    # Scheduler status
+    scheduler_info = _check_scheduler()
+    services.append(ServiceStatus(
+        name="scheduler",
+        status="healthy" if scheduler_info.get("status") == "running" else "degraded",
+        details=scheduler_info,
+    ))
+
+    # Background tasks
+    task_info = _check_background_tasks()
+    services.append(ServiceStatus(
+        name="background_tasks",
+        status="healthy" if task_info.get("failed_recent", 0) == 0 else "degraded",
+        details=task_info,
+    ))
+
     # Determine overall status
     unhealthy_count = sum(1 for s in services if s.status == "unhealthy")
     unavailable_count = sum(1 for s in services if s.status == "unavailable")
@@ -240,6 +274,13 @@ async def detailed_health_check(db: Session = Depends(get_db)):
         uptime_seconds=get_uptime_seconds(),
         request_id=request_id,
     )
+
+
+@router.get("/tasks")
+async def list_background_tasks():
+    """List tracked background tasks."""
+    from services.task_registry import get_active_tasks
+    return {"tasks": get_active_tasks()}
 
 
 @router.get("/live", response_model=LivenessResponse)
