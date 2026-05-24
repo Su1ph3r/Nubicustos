@@ -35,18 +35,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /app/wheels /wheels
 RUN pip install --no-cache-dir /wheels/* && rm -rf /wheels
 
-# Copy application files
-COPY process_reports.py .
-COPY merge_findings.py .
-COPY db_loader.py .
-COPY generate_summary.py .
-COPY send_notifications.py .
-COPY compare_scans.py .
-COPY analyze_report.py .
-COPY remediation_kb.py .
-COPY attack_path_edges.py .
-COPY attack_path_analyzer.py .
-COPY severity_scoring.py .
+# Copy application files (.dockerignore filters noise)
+COPY . .
 
 # Create directories
 RUN mkdir -p /reports /processed
