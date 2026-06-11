@@ -89,6 +89,23 @@ func warnUnknownServices(ctx context.Context, st *store.Store, scanID string, re
 	}
 }
 
+// severityOrder is the most-severe-first ordering for summary output.
+var severityOrder = []findings.Severity{
+	findings.SeverityCritical, findings.SeverityHigh, findings.SeverityMedium,
+	findings.SeverityLow, findings.SeverityInfo,
+}
+
+// countSeverity counts findings of a given severity.
+func countSeverity(fs []findings.Finding, sev findings.Severity) int {
+	n := 0
+	for _, f := range fs {
+		if f.Severity == sev {
+			n++
+		}
+	}
+	return n
+}
+
 // splitCSV splits a comma-separated flag value into trimmed, non-empty tokens.
 func splitCSV(s string) []string {
 	if strings.TrimSpace(s) == "" {

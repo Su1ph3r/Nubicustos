@@ -16,8 +16,9 @@ full design.
 > with captured evidence, and a terminal UI browses a scan. AWS, Azure, GCP, and
 > Kubernetes all have native checks (Azure storage/NSG/key vault across
 > subscriptions; GCP storage/firewall/IAM across projects; K8s pod-security and
-> RBAC across kubeconfig contexts). Plugins, policy-as-code, MCP, and the web UI
-> follow per the
+> RBAC across kubeconfig contexts). Optional plugins integrate well-known
+> external scanners (trivy, grype, checkov, terrascan, kube-bench) when present.
+> Policy-as-code, MCP, and the web UI follow per the
 > plan.
 
 ### Finding shapes
@@ -163,6 +164,31 @@ nubicustos tui
 nubicustos tui --scan <id>
 ```
 
+### Optional tool plugins
+
+`plugins` runs well-known read-only scanners **if they are installed** and
+normalizes their output into the findings model — specialized coverage without
+making any tool a hard dependency. An absent tool is skipped, never required.
+
+| Tool | Category |
+|------|----------|
+| trivy | dependency/filesystem vulnerabilities + misconfigurations |
+| grype | package vulnerabilities |
+| checkov | infrastructure-as-code |
+| terrascan | infrastructure-as-code |
+| kube-bench | CIS Kubernetes benchmark |
+
+```bash
+nubicustos plugins list                 # show tools and whether each is on PATH
+nubicustos plugins run trivy --target .  # run a tool; findings persist as a scan
+```
+
+Each run is persisted as a scan (provider `plugin:<tool>`), so its findings are
+queryable, exportable, and browsable in the TUI like native findings. The tool
+is invoked with a fixed argument template plus the target as a separate argv
+element (never a shell), so there is no command-injection path. (The offensive
+exploitation framework Pacu is intentionally not integrated.)
+
 ### Terminal UI
 
 `tui` launches a bubbletea/lipgloss interface over a stored scan — no cloud
@@ -254,6 +280,8 @@ The trust analyzer (§9.3) also emits standalone findings, surfaced through
 | `internal/checks/azure` | native Azure posture checks |
 | `internal/checks/gcp` | native GCP posture checks |
 | `internal/checks/k8s` | native Kubernetes posture checks |
+| `internal/portspec` | shared sensitive-port catalog + range parsing |
+| `internal/plugins` | optional external-tool runner + parsers (trivy/grype/checkov/terrascan/kube-bench) — plan §5 |
 | `internal/trust` | IAM trust & privilege analysis (assume/federation/privesc) — plan §9.3 |
 | `internal/reachability` | network reachability solver for FP reduction — plan §9.5 |
 | `internal/graph` | in-process attack-path graph (nodes, edges, scored paths) — plan §3.2 |
