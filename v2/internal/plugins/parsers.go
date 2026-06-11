@@ -188,6 +188,7 @@ func parseTerrascan(m Manifest, raw []byte) ([]findings.Finding, error) {
 				RuleName     string `json:"rule_name"`
 				Description  string `json:"description"`
 				Severity     string `json:"severity"`
+				Category     string `json:"category"`
 				ResourceName string `json:"resource_name"`
 				ResourceType string `json:"resource_type"`
 				File         string `json:"file"`
@@ -203,9 +204,20 @@ func parseTerrascan(m Manifest, raw []byte) ([]findings.Finding, error) {
 			checkID: v.RuleName, title: v.Description, severity: v.Severity,
 			resource: v.ResourceName, resType: v.ResourceType,
 			description: fmt.Sprintf("%s on %s (%s) in %s", v.Description, v.ResourceName, v.ResourceType, v.File),
+			// terrascan violations carry no per-finding remediation field; point
+			// the operator at the offending rule so the finding is still actionable.
+			remediation: terrascanRemediation(v.RuleName, v.Category, v.ResourceType),
 		})
 	}
 	return build(m, items), nil
+}
+
+func terrascanRemediation(rule, category, resType string) string {
+	hint := fmt.Sprintf("Resolve terrascan rule %s on %s", rule, resType)
+	if category != "" {
+		hint += " (category: " + category + ")"
+	}
+	return hint + "; see the terrascan policy reference for the fix."
 }
 
 // --- kube-bench -------------------------------------------------------------

@@ -18,7 +18,8 @@ full design.
 > subscriptions; GCP storage/firewall/IAM across projects; K8s pod-security and
 > RBAC across kubeconfig contexts). Optional plugins integrate well-known
 > external scanners (trivy, grype, checkov, terrascan, kube-bench) when present.
-> Policy-as-code, MCP, and the web UI follow per the
+> A CEL/YAML policy-as-code engine evaluates built-in and user rules at runtime.
+> MCP and the web UI follow per the
 > plan.
 
 ### Finding shapes
@@ -164,6 +165,37 @@ nubicustos tui
 nubicustos tui --scan <id>
 ```
 
+### Policy-as-code rules
+
+Posture checks can be authored declaratively as CEL/YAML rules and evaluated
+during a scan — built-in rules plus any user rules from `--rules-dir`, loaded at
+runtime so a finding can be encoded without recompiling. A rule declares a
+`resource_type` and a CEL `expression` over that type's documented attributes:
+
+```yaml
+- id: rule_aws_s3_public_acl_or_policy
+  title: S3 bucket is publicly accessible
+  severity: high
+  provider: aws
+  service: s3
+  resource_type: aws_s3_bucket
+  expression: '(resource.acl_public || resource.policy_public) && !resource.fully_blocked'
+  remediation: Enable Block Public Access and remove public grants.
+```
+
+```bash
+nubicustos rules list                      # built-in + --rules-dir rules
+nubicustos rules validate --rules-dir ./r  # compile + metadata-check user rules
+nubicustos rules test --rules-dir ./r      # fire rules against a built-in sample
+nubicustos scan --provider aws --rules-dir ./r
+```
+
+The Go-coded native checks remain the source of truth for complex/graph logic;
+rules cover simple config assertions and field-velocity additions. Supported
+resource types today: `aws_s3_bucket`, `aws_rds_instance`, `aws_iam_user`,
+`aws_security_group`, `azure_storage_account`, `azure_key_vault`,
+`gcp_storage_bucket`, `k8s_pod` (extended by surfacing more of the state model).
+
 ### Optional tool plugins
 
 `plugins` runs well-known read-only scanners **if they are installed** and
@@ -281,6 +313,8 @@ The trust analyzer (§9.3) also emits standalone findings, surfaced through
 | `internal/checks/gcp` | native GCP posture checks |
 | `internal/checks/k8s` | native Kubernetes posture checks |
 | `internal/portspec` | shared sensitive-port catalog + range parsing |
+| `internal/rules` | policy-as-code engine (CEL/YAML rules + state flattening) — plan §9.6 |
+| `internal/checks/rules` | rules-engine umbrella check |
 | `internal/plugins` | optional external-tool runner + parsers (trivy/grype/checkov/terrascan/kube-bench) — plan §5 |
 | `internal/trust` | IAM trust & privilege analysis (assume/federation/privesc) — plan §9.3 |
 | `internal/reachability` | network reachability solver for FP reduction — plan §9.5 |

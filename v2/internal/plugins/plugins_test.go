@@ -1,6 +1,8 @@
 package plugins
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/Su1ph3r/nubicustos/internal/findings"
@@ -87,10 +89,13 @@ func TestParseCheckovSingleAndArray(t *testing.T) {
 }
 
 func TestParseTerrascan(t *testing.T) {
-	raw := []byte(`{"results":{"violations":[{"rule_name":"AC_AWS_1","description":"public bucket","severity":"HIGH","resource_name":"b","resource_type":"aws_s3_bucket","file":"main.tf"}]}}`)
+	raw := []byte(`{"results":{"violations":[{"rule_name":"AC_AWS_1","description":"public bucket","severity":"HIGH","category":"S3","resource_name":"b","resource_type":"aws_s3_bucket","file":"main.tf"}]}}`)
 	fs, err := parseTerrascan(manifest(FormatTerrascan), raw)
 	if err != nil || len(fs) != 1 || fs[0].Severity != findings.SeverityHigh {
 		t.Fatalf("terrascan parse failed: %d / %v / %+v", len(fs), err, fs)
+	}
+	if fs[0].Remediation == "" {
+		t.Fatal("terrascan findings must carry a remediation hint")
 	}
 }
 
@@ -134,6 +139,29 @@ func TestNormalizeSeverity(t *testing.T) {
 		if got := normalizeSeverity(in); got != want {
 			t.Errorf("normalizeSeverity(%q) = %s, want %s", in, got, want)
 		}
+	}
+}
+
+func TestClassifyRun(t *testing.T) {
+	one := []findings.Finding{{ID: "x"}}
+	ctxErr := context.DeadlineExceeded
+	exit := errors.New("exit status 1")
+
+	// Normal "found issues": non-zero exit but findings present -> clean.
+	if err := classifyRun("trivy", nil, exit, one, ""); err != nil {
+		t.Fatalf("non-zero exit with findings should be clean, got %v", err)
+	}
+	// Genuinely clean: no error, no findings.
+	if err := classifyRun("trivy", nil, nil, nil, ""); err != nil {
+		t.Fatalf("clean exit with no findings should be clean, got %v", err)
+	}
+	// Crashed/failed: non-zero exit AND no findings -> error (not a false-clean).
+	if err := classifyRun("trivy", nil, exit, nil, "db download failed"); err == nil {
+		t.Fatal("exit error with no findings must be reported, not treated as clean")
+	}
+	// Timeout/cancel -> error regardless of output.
+	if err := classifyRun("trivy", ctxErr, nil, one, ""); err == nil {
+		t.Fatal("a context error must be reported")
 	}
 }
 

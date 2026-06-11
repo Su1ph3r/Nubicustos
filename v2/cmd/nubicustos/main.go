@@ -19,6 +19,7 @@ import (
 	_ "github.com/Su1ph3r/nubicustos/internal/checks/azure"
 	_ "github.com/Su1ph3r/nubicustos/internal/checks/gcp"
 	_ "github.com/Su1ph3r/nubicustos/internal/checks/k8s"
+	_ "github.com/Su1ph3r/nubicustos/internal/checks/rules"
 	_ "github.com/Su1ph3r/nubicustos/internal/providers/aws"
 	_ "github.com/Su1ph3r/nubicustos/internal/providers/azure"
 	_ "github.com/Su1ph3r/nubicustos/internal/providers/gcp"
@@ -52,6 +53,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newValidateCmd())
 	root.AddCommand(newTUICmd())
 	root.AddCommand(newPluginsCmd())
+	root.AddCommand(newRulesCmd())
 	return root
 }
 

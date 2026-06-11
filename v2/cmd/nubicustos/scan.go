@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Su1ph3r/nubicustos/internal/auth"
+	ruleschecks "github.com/Su1ph3r/nubicustos/internal/checks/rules"
 	"github.com/Su1ph3r/nubicustos/internal/engine"
 	"github.com/Su1ph3r/nubicustos/internal/export"
 	"github.com/Su1ph3r/nubicustos/internal/findings"
@@ -48,6 +49,7 @@ type scanFlags struct {
 	dbPath     string
 	exportPath string
 	validate   bool
+	rulesDir   string
 }
 
 func newScanCmd() *cobra.Command {
@@ -80,6 +82,7 @@ func newScanCmd() *cobra.Command {
 	pf.StringVar(&f.dbPath, "db", "nubicustos.db", "path to the SQLite results database")
 	pf.StringVar(&f.exportPath, "export", "", "write Cairn-format findings JSON to this path")
 	pf.BoolVar(&f.validate, "validate", false, "opt-in: actively (read-only) confirm findings and capture evidence")
+	pf.StringVar(&f.rulesDir, "rules-dir", "", "directory of user policy-as-code rules to evaluate alongside the built-ins")
 
 	return cmd
 }
@@ -190,6 +193,9 @@ func runScan(ctx context.Context, f *scanFlags) error {
 		return fmt.Errorf("unsupported provider %q", provider)
 	}
 
+	// Load any user-supplied policy-as-code rules for the rules engine to pick up.
+	ruleschecks.SetUserRulesDir(f.rulesDir)
+
 	started := time.Now().UTC()
 	result := engine.Run(sc)
 
@@ -266,6 +272,12 @@ func printSummary(r *engine.Result, scanID string) {
 	}
 	fmt.Printf("\nScan %s — %d findings, %d attack path(s) (%d collectors, %d checks)\n",
 		scanID, len(r.Findings), paths, r.Collectors, r.Checks)
+	// Surface collection/check failures on the stdout headline too — a result is
+	// not "clean" if part of the scan failed; an error count buried only on
+	// stderr can read as a green scan in captured output.
+	if n := len(r.Errors); n > 0 {
+		fmt.Printf("  ⚠ %d non-fatal error(s) — results may be incomplete (see stderr)\n", n)
+	}
 	for _, sev := range []findings.Severity{
 		findings.SeverityCritical, findings.SeverityHigh, findings.SeverityMedium, findings.SeverityLow, findings.SeverityInfo,
 	} {

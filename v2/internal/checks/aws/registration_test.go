@@ -12,6 +12,7 @@ import (
 	_ "github.com/Su1ph3r/nubicustos/internal/checks/azure"
 	_ "github.com/Su1ph3r/nubicustos/internal/checks/gcp"
 	_ "github.com/Su1ph3r/nubicustos/internal/checks/k8s"
+	_ "github.com/Su1ph3r/nubicustos/internal/checks/rules"
 	_ "github.com/Su1ph3r/nubicustos/internal/providers/aws"
 	_ "github.com/Su1ph3r/nubicustos/internal/providers/azure"
 	_ "github.com/Su1ph3r/nubicustos/internal/providers/gcp"
@@ -40,8 +41,9 @@ func TestAllChecksUnique(t *testing.T) {
 	// + SecretsManager(1) + ELB(3) + ACM(2) + IAM trust/privilege umbrella(1) = 33.
 	// Azure catalog: storage(3) + NSG(1) + key vault(3) = 7.
 	// GCP catalog: storage(3) + firewall(1) + IAM(2) = 6.
-	// K8s catalog: pods(4) + RBAC(2) = 6. Total = 52.
-	const wantChecks = 52
+	// K8s catalog: pods(4) + RBAC(2) = 6.
+	// Plus the policy-as-code rules umbrella check = 1. Total = 53.
+	const wantChecks = 53
 	if len(checks) != wantChecks {
 		t.Errorf("registered checks = %d, want %d", len(checks), wantChecks)
 	}

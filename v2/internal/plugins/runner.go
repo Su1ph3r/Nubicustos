@@ -44,7 +44,25 @@ func Run(ctx context.Context, m Manifest, target string) ([]findings.Finding, er
 		return nil, fmt.Errorf("%s: parsing output: %w (run: %v; stderr: %s)",
 			m.Name, parseErr, runErr, truncate(stderr.String(), 200))
 	}
+	if outcomeErr := classifyRun(m.Name, ctx.Err(), runErr, fs, stderr.String()); outcomeErr != nil {
+		return nil, outcomeErr
+	}
 	return fs, nil
+}
+
+// classifyRun decides whether a completed run is a clean result or a failure.
+// A non-zero exit WITH findings is the normal "found issues" case; a context
+// error, or a non-zero exit with NO parseable findings (DB download failed, bad
+// flags, crash), is a real failure that must not be reported as a clean scan.
+func classifyRun(name string, ctxErr, runErr error, fs []findings.Finding, stderr string) error {
+	if ctxErr != nil {
+		return fmt.Errorf("%s: %w (stderr: %s)", name, ctxErr, truncate(stderr, 200))
+	}
+	if runErr != nil && len(fs) == 0 {
+		return fmt.Errorf("%s: exited with error and produced no findings: %v (stderr: %s)",
+			name, runErr, truncate(stderr, 200))
+	}
+	return nil
 }
 
 // Parse dispatches raw tool output to the format-specific parser.
