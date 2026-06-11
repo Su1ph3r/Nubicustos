@@ -1,6 +1,7 @@
 package aws
 
 import (
+	"context"
 	"time"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
@@ -28,6 +29,7 @@ func (iamCollector) Collect(sc *engine.ScanContext, st *state.State) error {
 		return nil
 	}
 	client := iam.NewFromConfig(sc.AWS)
+	pc := &policyCache{client: client, ctx: sc.Ctx, docs: map[string]state.PolicyDocument{}}
 	var iamState state.IAMState
 
 	// Account summary: root MFA + root access keys.
@@ -60,17 +62,101 @@ func (iamCollector) Collect(sc *engine.ScanContext, st *state.State) error {
 			return err
 		}
 		for _, u := range page.Users {
-			iamState.Users = append(iamState.Users, collectUser(sc, client, awssdk.ToString(u.UserName)))
+			iamState.Users = append(iamState.Users, collectUser(sc, client, pc, awssdk.ToString(u.UserName)))
 		}
 	}
 
+	// Roles (with trust policies + permission policies for the attack-path graph).
+	roles, rolesErr := collectRoles(sc, client, pc)
+	iamState.Roles = roles
+
 	st.SetIAM(iamState)
-	return nil
+	// Surface a role-listing failure (it is non-fatal at the engine level, but
+	// must not be silent: an empty role set from a denied ListRoles would
+	// otherwise read as a clean, trust-finding-free account).
+	return rolesErr
 }
 
-// collectUser gathers one user's console/MFA/key/admin posture, tolerating
-// per-call failures.
-func collectUser(sc *engine.ScanContext, client *iam.Client, name string) state.IAMUser {
+// policyCache fetches and memoizes managed-policy documents by ARN within a
+// single scan, so a policy attached to many principals is fetched once.
+type policyCache struct {
+	client *iam.Client
+	ctx    context.Context
+	docs   map[string]state.PolicyDocument
+}
+
+// managed returns the default-version document for a managed policy ARN.
+func (pc *policyCache) managed(arn string) (state.PolicyDocument, bool) {
+	if d, ok := pc.docs[arn]; ok {
+		return d, true
+	}
+	gp, err := pc.client.GetPolicy(pc.ctx, &iam.GetPolicyInput{PolicyArn: &arn})
+	if err != nil || gp.Policy == nil || gp.Policy.DefaultVersionId == nil {
+		return state.PolicyDocument{}, false
+	}
+	gv, err := pc.client.GetPolicyVersion(pc.ctx, &iam.GetPolicyVersionInput{
+		PolicyArn: &arn, VersionId: gp.Policy.DefaultVersionId,
+	})
+	if err != nil || gv.PolicyVersion == nil {
+		return state.PolicyDocument{}, false
+	}
+	doc := parsePolicyDocument(awssdk.ToString(gv.PolicyVersion.Document))
+	pc.docs[arn] = doc
+	return doc, true
+}
+
+// collectRoles enumerates roles with their trust + permission policies. A
+// pagination failure returns the roles gathered so far plus the error, so the
+// caller can surface partial collection rather than presenting it as complete.
+func collectRoles(sc *engine.ScanContext, client *iam.Client, pc *policyCache) ([]state.IAMRole, error) {
+	var roles []state.IAMRole
+	pager := iam.NewListRolesPaginator(client, &iam.ListRolesInput{})
+	for pager.HasMorePages() {
+		page, err := pager.NextPage(sc.Ctx)
+		if err != nil {
+			return roles, err
+		}
+		for _, r := range page.Roles {
+			name := awssdk.ToString(r.RoleName)
+			role := state.IAMRole{
+				Name:        name,
+				ARN:         awssdk.ToString(r.Arn),
+				TrustPolicy: parsePolicyDocument(awssdk.ToString(r.AssumeRolePolicyDocument)),
+			}
+			role.AdminAttached, role.Policies = collectRolePolicies(sc, client, pc, name)
+			roles = append(roles, role)
+		}
+	}
+	return roles, nil
+}
+
+// collectRolePolicies gathers a role's attached + inline permission documents,
+// flagging whether AdministratorAccess is attached.
+func collectRolePolicies(sc *engine.ScanContext, client *iam.Client, pc *policyCache, role string) (adminAttached bool, docs []state.PolicyDocument) {
+	if att, err := client.ListAttachedRolePolicies(sc.Ctx, &iam.ListAttachedRolePoliciesInput{RoleName: &role}); err == nil {
+		for _, p := range att.AttachedPolicies {
+			arn := awssdk.ToString(p.PolicyArn)
+			if arn == adminPolicyARN {
+				adminAttached = true
+			}
+			if doc, ok := pc.managed(arn); ok {
+				docs = append(docs, doc)
+			}
+		}
+	}
+	if inl, err := client.ListRolePolicies(sc.Ctx, &iam.ListRolePoliciesInput{RoleName: &role}); err == nil {
+		for _, name := range inl.PolicyNames {
+			if gp, err := client.GetRolePolicy(sc.Ctx, &iam.GetRolePolicyInput{RoleName: &role, PolicyName: &name}); err == nil {
+				docs = append(docs, parsePolicyDocument(awssdk.ToString(gp.PolicyDocument)))
+			}
+		}
+	}
+	return adminAttached, docs
+}
+
+// collectUser gathers one user's console/MFA/key/admin posture and permission
+// policies, tolerating per-call failures.
+func collectUser(sc *engine.ScanContext, client *iam.Client, pc *policyCache, name string) state.IAMUser {
 	u := state.IAMUser{Name: name}
 
 	// Console access = a login profile exists.
@@ -97,12 +183,24 @@ func collectUser(sc *engine.ScanContext, client *iam.Client, name string) state.
 		}
 	}
 
-	// Directly-attached AdministratorAccess.
+	// Directly-attached managed policies: flag AdministratorAccess and gather the
+	// documents (for privilege-escalation analysis in the attack-path graph).
 	if att, err := client.ListAttachedUserPolicies(sc.Ctx, &iam.ListAttachedUserPoliciesInput{UserName: &name}); err == nil {
 		for _, p := range att.AttachedPolicies {
-			if awssdk.ToString(p.PolicyArn) == adminPolicyARN {
+			arn := awssdk.ToString(p.PolicyArn)
+			if arn == adminPolicyARN {
 				u.AdminAttached = true
-				break
+			}
+			if doc, ok := pc.managed(arn); ok {
+				u.Policies = append(u.Policies, doc)
+			}
+		}
+	}
+	// Inline user policies.
+	if inl, err := client.ListUserPolicies(sc.Ctx, &iam.ListUserPoliciesInput{UserName: &name}); err == nil {
+		for _, pname := range inl.PolicyNames {
+			if gp, err := client.GetUserPolicy(sc.Ctx, &iam.GetUserPolicyInput{UserName: &name, PolicyName: &pname}); err == nil {
+				u.Policies = append(u.Policies, parsePolicyDocument(awssdk.ToString(gp.PolicyDocument)))
 			}
 		}
 	}

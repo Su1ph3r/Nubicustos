@@ -9,8 +9,11 @@ full design.
 > native AWS posture engine: **32 checks across S3, IAM, EC2, VPC, RDS,
 > CloudTrail, KMS, Config, GuardDuty, Secrets Manager, ELB, and ACM**,
 > multi-region by default, persisted to SQLite, queryable offline, and
-> exportable as Cairn / SARIF / CSV / HTML. The attack-path graph, the TUI, and
-> the Tier-1 capabilities follow per the plan.
+> exportable as Cairn / SARIF / CSV / HTML. An in-process attack-path graph
+> derives scored internet-exposure, privilege-escalation, and assume-role/trust
+> paths with chained PoCs, gated by a local network-reachability solver to cut
+> false positives. The TUI and the remaining Tier-1 capabilities follow per the
+> plan.
 
 ### Finding shapes
 
@@ -91,9 +94,45 @@ nubicustos export sarif --out report.sarif    # SARIF 2.1.0 for code-scanning da
 nubicustos export csv   --out findings.csv    # flat spreadsheet rows
 nubicustos export html  --out report.html     # self-contained shareable report
 
-# Attack paths (graph engine lands in Phase 2)
+# Attack paths: internet-exposure chains and admin-privilege concentrations,
+# scored 0-100 with step-by-step, resource-specific PoCs
 nubicustos paths
+nubicustos paths --format json
 ```
+
+### Attack-path graph
+
+`scan` derives an in-process attack-path graph from the collected state (no
+Neo4j, no external graph tooling) and persists it alongside the findings.
+`paths` renders it. Each path is scored 0-100 (exploitability × impact, with an
+intrinsic severity floor for cases like root compromise) and carries a chained,
+resource-specific proof of concept. Edges modelled:
+
+- **Internet exposure** — public EC2 (with the IMDSv1 → instance-role-credential
+  hop as a 2-step chain that names the instance's role when resolved), world-open
+  security groups, public RDS, internet-facing plaintext load balancers, public
+  S3 buckets, and publicly shared EBS/AMI/RDS snapshots.
+- **Administrative privilege** — the account root holding active access keys, and
+  IAM principals that are administrator-equivalent (via the managed policy or a
+  custom/inline wildcard).
+- **Privilege escalation** (`can-escalate`) — principals granted privesc-prone
+  IAM/STS actions (e.g. `iam:PutUserPolicy`, `iam:PassRole`, `sts:AssumeRole`) on
+  `Resource: "*"`.
+- **Assume-role & trust** (`can-assume-role`) — intra-account assume edges, plus
+  scored paths for risky trust: a wildcard (`Principal: "*"`) trust, an external
+  AWS account, or an OIDC provider without a subject (`sub`/`aud`) condition.
+
+Internet-exposure paths are gated by a local **reachability solver** (§9.5):
+a public resource in a subnet with no internet-gateway route, or with no
+security group admitting inbound traffic, is annotated `not-reachable` and
+**downgraded** (not dropped) rather than presented as live exposure.
+
+### IAM trust & privilege findings
+
+The trust analyzer (§9.3) also emits standalone findings, surfaced through
+`findings`/`export`: `aws_iam_role_trust_wildcard_principal` (critical),
+`aws_iam_role_trust_external_account`, `aws_iam_oidc_trust_no_subject_condition`,
+`aws_iam_admin_via_policy`, and `aws_iam_privilege_escalation`.
 
 ## Layout
 
@@ -101,10 +140,13 @@ nubicustos paths
 |---------|------|
 | `cmd/nubicustos` | cobra CLI entrypoint |
 | `internal/auth` | up-front credential resolution + MFA (all AWS & Azure paths) — plan §8 |
-| `internal/engine` | registry + concurrent collect→check scanner |
+| `internal/engine` | registry + concurrent collect→check scanner + graph build |
 | `internal/state` | normalized collected cloud state |
 | `internal/providers/aws` | AWS collectors (read-only API gatherers) |
 | `internal/checks/aws` | native AWS posture checks |
+| `internal/trust` | IAM trust & privilege analysis (assume/federation/privesc) — plan §9.3 |
+| `internal/reachability` | network reachability solver for FP reduction — plan §9.5 |
+| `internal/graph` | in-process attack-path graph (nodes, edges, scored paths) — plan §3.2 |
 | `internal/findings` | normalized domain model |
 | `internal/store` | embedded SQLite persistence |
 | `internal/export` | Cairn / report serializers |

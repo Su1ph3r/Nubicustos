@@ -15,6 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/Su1ph3r/nubicustos/internal/findings"
+	"github.com/Su1ph3r/nubicustos/internal/graph"
 )
 
 //go:embed schema.sql
@@ -267,9 +268,91 @@ func (s *Store) DistinctServices(ctx context.Context, scanID string) ([]string, 
 	return out, rows.Err()
 }
 
-// CountAttackPaths returns how many attack paths are stored for a scan. The
-// graph engine that populates this table lands in Phase 2; until then it is
-// expected to be zero.
+// SaveGraph persists the attack-path graph for a scan: principal nodes, all
+// edges, and scored paths. It runs in a single transaction and is idempotent
+// per scan (it clears any prior graph rows for the scan first), so a re-scan
+// writing to the same id replaces rather than duplicates.
+func (s *Store) SaveGraph(ctx context.Context, scanID string, g *graph.Graph) error {
+	if g == nil {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+
+	for _, table := range []string{"principals", "edges", "attack_paths"} {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE scan_id = ?", scanID); err != nil {
+			return fmt.Errorf("clearing %s: %w", table, err)
+		}
+	}
+
+	for _, n := range g.Principals() {
+		raw, err := json.Marshal(n)
+		if err != nil {
+			return fmt.Errorf("marshal principal %s: %w", n.ID, err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT OR REPLACE INTO principals (scan_id, id, type, account, raw) VALUES (?,?,?,?,?)`,
+			scanID, n.ID, n.Type, "", string(raw)); err != nil {
+			return fmt.Errorf("insert principal %s: %w", n.ID, err)
+		}
+	}
+
+	for _, e := range g.Edges {
+		raw, err := json.Marshal(e)
+		if err != nil {
+			return fmt.Errorf("marshal edge %s->%s: %w", e.Src, e.Dst, err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO edges (scan_id, src, dst, kind, raw) VALUES (?,?,?,?,?)`,
+			scanID, e.Src, e.Dst, string(e.Kind), string(raw)); err != nil {
+			return fmt.Errorf("insert edge %s->%s: %w", e.Src, e.Dst, err)
+		}
+	}
+
+	for _, p := range g.Paths {
+		raw, err := json.Marshal(p)
+		if err != nil {
+			return fmt.Errorf("marshal path %s: %w", p.ID, err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT OR REPLACE INTO attack_paths (scan_id, id, score, raw) VALUES (?,?,?,?)`,
+			scanID, p.ID, p.Score, string(raw)); err != nil {
+			return fmt.Errorf("insert path %s: %w", p.ID, err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// LoadAttackPaths returns the scored attack paths for a scan, highest score
+// first, reconstructed losslessly from the stored raw JSON.
+func (s *Store) LoadAttackPaths(ctx context.Context, scanID string) ([]graph.Path, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT raw FROM attack_paths WHERE scan_id = ? ORDER BY score DESC, id ASC`, scanID)
+	if err != nil {
+		return nil, fmt.Errorf("loading attack paths: %w", err)
+	}
+	defer rows.Close()
+
+	var out []graph.Path
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, fmt.Errorf("scanning attack-path row: %w", err)
+		}
+		var p graph.Path
+		if err := json.Unmarshal([]byte(raw), &p); err != nil {
+			return nil, fmt.Errorf("unmarshaling attack path: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// CountAttackPaths returns how many attack paths are stored for a scan.
 func (s *Store) CountAttackPaths(ctx context.Context, scanID string) (int, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM attack_paths WHERE scan_id = ?`, scanID).Scan(&n)

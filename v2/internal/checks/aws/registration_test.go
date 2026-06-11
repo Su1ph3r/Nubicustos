@@ -30,8 +30,9 @@ func TestAllChecksUnique(t *testing.T) {
 
 	// Phase 1 catalog: S3(1) + IAM(6) + EC2(5) + RDS(4) + CloudTrail(3)
 	// + KMS(1) + Config(1) + GuardDuty(1) + VPC(1) + exposure(3)
-	// + SecretsManager(1) + ELB(3) + ACM(2) = 32.
-	const wantChecks = 32
+	// + SecretsManager(1) + ELB(3) + ACM(2) = 32, plus the Phase-2 IAM
+	// trust/privilege analysis umbrella check = 33.
+	const wantChecks = 33
 	if len(checks) != wantChecks {
 		t.Errorf("registered checks = %d, want %d", len(checks), wantChecks)
 	}

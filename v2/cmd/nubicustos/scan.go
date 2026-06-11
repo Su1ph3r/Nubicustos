@@ -141,6 +141,9 @@ func runScan(ctx context.Context, f *scanFlags) error {
 	if err := st.SaveFindings(ctx, scanID, result.Findings, finished); err != nil {
 		return err
 	}
+	if err := st.SaveGraph(ctx, scanID, result.Graph); err != nil {
+		return err
+	}
 
 	// Optional Cairn export.
 	if f.exportPath != "" {
@@ -179,7 +182,12 @@ func printSummary(r *engine.Result, scanID string) {
 	for _, f := range r.Findings {
 		counts[f.Severity]++
 	}
-	fmt.Printf("\nScan %s — %d findings (%d collectors, %d checks)\n", scanID, len(r.Findings), r.Collectors, r.Checks)
+	paths := 0
+	if r.Graph != nil {
+		paths = len(r.Graph.Paths)
+	}
+	fmt.Printf("\nScan %s — %d findings, %d attack path(s) (%d collectors, %d checks)\n",
+		scanID, len(r.Findings), paths, r.Collectors, r.Checks)
 	for _, sev := range []findings.Severity{
 		findings.SeverityCritical, findings.SeverityHigh, findings.SeverityMedium, findings.SeverityLow, findings.SeverityInfo,
 	} {

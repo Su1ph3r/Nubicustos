@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Su1ph3r/nubicustos/internal/findings"
+	"github.com/Su1ph3r/nubicustos/internal/graph"
 )
 
 // seedStore creates a store with two scans; the newer one (s2) holds three
@@ -190,5 +191,80 @@ func TestCountAttackPathsZero(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("expected 0 attack paths, got %d", n)
+	}
+}
+
+func sampleGraph() *graph.Graph {
+	g := &graph.Graph{}
+	g.Nodes = []graph.Node{
+		{ID: graph.InternetNodeID, Kind: graph.NodeInternet, Label: "Internet"},
+		{ID: "resource:aws_db_instance:db1", Kind: graph.NodeResource, Label: "db1", Type: "aws_db_instance"},
+		{ID: "principal:user/alice", Kind: graph.NodePrincipal, Label: "alice", Type: "aws_iam_user"},
+	}
+	g.Edges = []graph.Edge{
+		{Src: graph.InternetNodeID, Dst: "resource:aws_db_instance:db1", Kind: graph.EdgeExposedToInternet, PoC: "nc -vz ..."},
+		{Src: "principal:user/alice", Dst: "principal:user/alice", Kind: graph.EdgeHoldsAdmin, PoC: "aws iam ..."},
+	}
+	g.Paths = []graph.Path{
+		{ID: "p-low", Title: "low", Score: 30, Severity: findings.SeverityLow},
+		{ID: "p-high", Title: "high", Score: 75, Severity: findings.SeverityHigh,
+			Edges: []graph.Edge{{Src: graph.InternetNodeID, Dst: "resource:aws_db_instance:db1", Kind: graph.EdgeExposedToInternet}}},
+	}
+	return g
+}
+
+func TestSaveAndLoadGraph(t *testing.T) {
+	st, ctx := seedStore(t)
+	if err := st.SaveGraph(ctx, "s2", sampleGraph()); err != nil {
+		t.Fatalf("SaveGraph: %v", err)
+	}
+
+	n, err := st.CountAttackPaths(ctx, "s2")
+	if err != nil {
+		t.Fatalf("CountAttackPaths: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("expected 2 paths, got %d", n)
+	}
+
+	paths, err := st.LoadAttackPaths(ctx, "s2")
+	if err != nil {
+		t.Fatalf("LoadAttackPaths: %v", err)
+	}
+	if len(paths) != 2 {
+		t.Fatalf("expected 2 paths loaded, got %d", len(paths))
+	}
+	// Highest score first.
+	if paths[0].ID != "p-high" || paths[1].ID != "p-low" {
+		t.Fatalf("expected score-desc order [p-high p-low], got [%s %s]", paths[0].ID, paths[1].ID)
+	}
+	// Lossless round-trip of nested edges.
+	if len(paths[0].Edges) != 1 || paths[0].Edges[0].Kind != graph.EdgeExposedToInternet {
+		t.Fatalf("path edges did not round-trip: %+v", paths[0].Edges)
+	}
+}
+
+func TestSaveGraphIsIdempotent(t *testing.T) {
+	st, ctx := seedStore(t)
+	if err := st.SaveGraph(ctx, "s2", sampleGraph()); err != nil {
+		t.Fatalf("first SaveGraph: %v", err)
+	}
+	// Re-saving the same scan must replace, not duplicate (edges have no PK).
+	if err := st.SaveGraph(ctx, "s2", sampleGraph()); err != nil {
+		t.Fatalf("second SaveGraph: %v", err)
+	}
+	n, err := st.CountAttackPaths(ctx, "s2")
+	if err != nil {
+		t.Fatalf("CountAttackPaths: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("expected 2 paths after re-save (no duplication), got %d", n)
+	}
+}
+
+func TestSaveGraphNilNoop(t *testing.T) {
+	st, ctx := seedStore(t)
+	if err := st.SaveGraph(ctx, "s2", nil); err != nil {
+		t.Fatalf("SaveGraph(nil) should be a no-op, got %v", err)
 	}
 }

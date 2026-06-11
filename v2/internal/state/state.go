@@ -49,6 +49,34 @@ type IAMUser struct {
 	MFAEnabled    bool
 	AdminAttached bool // AdministratorAccess managed policy attached directly
 	AccessKeys    []AccessKey
+	Policies      []PolicyDocument // attached + inline permission policies (for privesc analysis)
+}
+
+// PolicyStatement is a normalized IAM policy statement. The same shape carries
+// both permission policies (Actions/Resources) and trust policies (the Principal
+// fields), so one parser and one analyzer cover both.
+type PolicyStatement struct {
+	Effect        string   // Allow | Deny
+	Actions       []string // may include "*" or service wildcards like "iam:*"
+	Resources     []string // may include "*"
+	AWSPrincipals []string // trust policy: account/role/user ARNs, or "*"
+	Federated     []string // trust policy: OIDC/SAML provider ARNs
+	Services      []string // trust policy: service principals (e.g. ec2.amazonaws.com)
+	ConditionKeys []string // flattened condition keys present (e.g. "oidc:sub")
+}
+
+// PolicyDocument is a parsed IAM policy (permission or trust).
+type PolicyDocument struct {
+	Statements []PolicyStatement
+}
+
+// IAMRole is the collected posture of an IAM role, including who may assume it.
+type IAMRole struct {
+	Name          string
+	ARN           string
+	TrustPolicy   PolicyDocument   // AssumeRolePolicyDocument: who may assume this role
+	AdminAttached bool             // AdministratorAccess attached directly
+	Policies      []PolicyDocument // attached + inline permission policies (for privesc analysis)
 }
 
 // PasswordPolicy captures the account password policy (Present=false if none).
@@ -69,6 +97,7 @@ type IAMState struct {
 	RootAccessKeys bool
 	PasswordPolicy PasswordPolicy
 	Users          []IAMUser
+	Roles          []IAMRole
 }
 
 // --- EC2 (regional) ---------------------------------------------------------
@@ -90,12 +119,49 @@ type SecurityGroup struct {
 	Ingress []IngressRule
 }
 
+// WorldOpen reports whether the group has any ingress rule open to the whole
+// internet (0.0.0.0/0 or ::/0). Shared by the checks, the attack-path graph,
+// and the reachability solver so the predicate has one definition.
+func (g SecurityGroup) WorldOpen() bool {
+	for _, r := range g.Ingress {
+		if r.OpenV4 || r.OpenV6 {
+			return true
+		}
+	}
+	return false
+}
+
 // EC2Instance is the collected posture of an instance.
 type EC2Instance struct {
-	ID             string
-	Region         string
-	PublicIP       string
-	IMDSv2Required bool
+	ID                 string
+	Region             string
+	PublicIP           string
+	IMDSv2Required     bool
+	VPCID              string
+	SubnetID           string
+	SecurityGroupIDs   []string
+	InstanceProfileARN string // attached instance profile (carries the IAM role)
+	RoleName           string // resolved role name behind the instance profile, if known
+}
+
+// Subnet is the collected network placement of a subnet, used by the
+// reachability solver to decide whether a resource is internet-reachable.
+type Subnet struct {
+	ID                  string
+	Region              string
+	VPCID               string
+	RouteTableID        string // associated route table id (resolved; main if none explicit)
+	MapPublicIPOnLaunch bool
+}
+
+// RouteTable records whether a route table provides a default route to an
+// internet gateway (the topological condition for internet reachability).
+type RouteTable struct {
+	ID       string
+	Region   string
+	VPCID    string
+	Main     bool
+	IGWRoute bool // has a 0.0.0.0/0 or ::/0 route targeting an internet gateway
 }
 
 // EBSVolume is the collected encryption posture of a volume.
@@ -222,6 +288,8 @@ type AWS struct {
 	SecurityGroups         []SecurityGroup
 	Instances              []EC2Instance
 	Volumes                []EBSVolume
+	Subnets                []Subnet
+	RouteTables            []RouteTable
 	EBSEncryptionByDefault map[string]bool // region -> enabled
 
 	RDSInstances []RDSInstance
@@ -297,6 +365,20 @@ func (s *State) AddVolume(v EBSVolume) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.AWS.Volumes = append(s.AWS.Volumes, v)
+}
+
+// AddSubnet appends a collected subnet under lock.
+func (s *State) AddSubnet(sub Subnet) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.AWS.Subnets = append(s.AWS.Subnets, sub)
+}
+
+// AddRouteTable appends a collected route table under lock.
+func (s *State) AddRouteTable(rt RouteTable) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.AWS.RouteTables = append(s.AWS.RouteTables, rt)
 }
 
 // SetEBSDefaultEncryption records the per-region EBS default-encryption flag.

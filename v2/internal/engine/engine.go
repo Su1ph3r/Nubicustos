@@ -16,6 +16,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 
 	"github.com/Su1ph3r/nubicustos/internal/findings"
+	"github.com/Su1ph3r/nubicustos/internal/graph"
+	"github.com/Su1ph3r/nubicustos/internal/reachability"
 	"github.com/Su1ph3r/nubicustos/internal/state"
 )
 
@@ -82,7 +84,8 @@ func Checks() []Check {
 // Result is the outcome of a scan.
 type Result struct {
 	Findings   []findings.Finding
-	Errors     []error // non-fatal per-collector/check errors (partial-failure tolerant)
+	Graph      *graph.Graph // attack-path graph derived from the collected state
+	Errors     []error      // non-fatal per-collector/check errors (partial-failure tolerant)
 	Collectors int
 	Checks     int
 }
@@ -140,6 +143,13 @@ func Run(sc *ScanContext) *Result {
 		}
 		return res.Findings[i].ID < res.Findings[j].ID
 	})
+
+	// Phase 3: solve network reachability, annotate exposure findings with it
+	// (§9.5 false-positive reduction), then derive the attack-path graph from the
+	// fully collected state with reachability applied.
+	rch := reachability.Solve(st.AWS)
+	reachability.Annotate(res.Findings, st.AWS, rch)
+	res.Graph = graph.Build(st, rch)
 	return res
 }
 
