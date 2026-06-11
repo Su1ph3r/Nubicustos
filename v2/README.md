@@ -13,10 +13,11 @@ full design.
 > derives scored internet-exposure, privilege-escalation, and assume-role/trust
 > paths with chained PoCs, gated by a local network-reachability solver to cut
 > false positives. An opt-in, read-only active-validation pass confirms findings
-> with captured evidence, and a terminal UI browses a scan. Azure and GCP add
-> native checks (Azure storage/NSG/key vault across subscriptions; GCP
-> storage/firewall/IAM across projects). K8s, plugins, policy-as-code, MCP, and
-> the web UI follow per the
+> with captured evidence, and a terminal UI browses a scan. AWS, Azure, GCP, and
+> Kubernetes all have native checks (Azure storage/NSG/key vault across
+> subscriptions; GCP storage/firewall/IAM across projects; K8s pod-security and
+> RBAC across kubeconfig contexts). Plugins, policy-as-code, MCP, and the web UI
+> follow per the
 > plan.
 
 ### Finding shapes
@@ -76,6 +77,22 @@ Credentials (or `--project <id>`):
 # GCP — scan all active projects (uses ADC; or pick one with --project)
 nubicustos scan --provider gcp
 nubicustos scan --provider gcp --project my-project-id
+```
+
+### Check catalog (Kubernetes)
+
+Native Kubernetes checks run across the kubeconfig contexts requested with
+`--context` (default: the current context):
+
+| Area | Checks |
+|------|--------|
+| Workload | privileged container, shares a host namespace (hostNetwork/PID/IPC), privilege escalation not disabled, may run as root |
+| RBAC | cluster-admin bound to a broad subject (anonymous / all-authenticated / all-service-accounts), role grants verb `*` on resource `*` |
+
+```bash
+# Kubernetes — scan the current context (or named contexts)
+nubicustos scan --provider k8s
+nubicustos scan --provider k8s --context prod-cluster --context staging
 ```
 
 `*` = aggregate finding (single finding with an `affected` list).
@@ -232,9 +249,11 @@ The trust analyzer (§9.3) also emits standalone findings, surfaced through
 | `internal/providers/aws` | AWS collectors (read-only API gatherers) |
 | `internal/providers/azure` | Azure collectors (storage, NSG, key vault, subscription discovery) |
 | `internal/providers/gcp` | GCP collectors (Cloud Storage, firewall, IAM, project discovery) |
+| `internal/providers/k8s` | Kubernetes collectors (pods, RBAC across kubeconfig contexts) |
 | `internal/checks/aws` | native AWS posture checks |
 | `internal/checks/azure` | native Azure posture checks |
 | `internal/checks/gcp` | native GCP posture checks |
+| `internal/checks/k8s` | native Kubernetes posture checks |
 | `internal/trust` | IAM trust & privilege analysis (assume/federation/privesc) — plan §9.3 |
 | `internal/reachability` | network reachability solver for FP reduction — plan §9.5 |
 | `internal/graph` | in-process attack-path graph (nodes, edges, scored paths) — plan §3.2 |

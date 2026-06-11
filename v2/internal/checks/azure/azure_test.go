@@ -1,6 +1,7 @@
 package azure
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Su1ph3r/nubicustos/internal/engine"
@@ -60,13 +61,13 @@ func TestStorageHTTPSAndNetworkChecks(t *testing.T) {
 func TestNSGOpenIngressSensitivePort(t *testing.T) {
 	st := stateWith(&state.Azure{NSGs: []state.NetworkSecurityGroup{
 		{Name: "web", Subscription: "s1", Rules: []state.NSGRule{
-			{Name: "ssh", Direction: "Inbound", Access: "Allow", Protocol: "Tcp", DestPorts: "22", Source: "Internet"},
+			{Name: "ssh", Direction: "Inbound", Access: "Allow", Protocol: "Tcp", DestPorts: []string{"22"}, Sources: []string{"Internet"}},
 		}},
 		{Name: "internal", Subscription: "s1", Rules: []state.NSGRule{
-			{Name: "ssh", Direction: "Inbound", Access: "Allow", Protocol: "Tcp", DestPorts: "22", Source: "10.0.0.0/8"},
+			{Name: "ssh", Direction: "Inbound", Access: "Allow", Protocol: "Tcp", DestPorts: []string{"22"}, Sources: []string{"10.0.0.0/8"}},
 		}},
 		{Name: "outbound-only", Subscription: "s1", Rules: []state.NSGRule{
-			{Name: "x", Direction: "Outbound", Access: "Allow", Protocol: "*", DestPorts: "*", Source: "*"},
+			{Name: "x", Direction: "Outbound", Access: "Allow", Protocol: "*", DestPorts: []string{"*"}, Sources: []string{"*"}},
 		}},
 	}})
 	fs := evalCheck(t, nsgOpenIngress{}, st)
@@ -78,7 +79,7 @@ func TestNSGOpenIngressSensitivePort(t *testing.T) {
 func TestNSGAllPortsWildcardSource(t *testing.T) {
 	st := stateWith(&state.Azure{NSGs: []state.NetworkSecurityGroup{
 		{Name: "any", Subscription: "s1", Rules: []state.NSGRule{
-			{Name: "all", Direction: "Inbound", Access: "Allow", Protocol: "*", DestPorts: "*", Source: "*"},
+			{Name: "all", Direction: "Inbound", Access: "Allow", Protocol: "*", DestPorts: []string{"*"}, Sources: []string{"*"}},
 		}},
 	}})
 	fs := evalCheck(t, nsgOpenIngress{}, st)
@@ -90,7 +91,7 @@ func TestNSGAllPortsWildcardSource(t *testing.T) {
 func TestNSGRangeCoversPort(t *testing.T) {
 	st := stateWith(&state.Azure{NSGs: []state.NetworkSecurityGroup{
 		{Name: "range", Subscription: "s1", Rules: []state.NSGRule{
-			{Name: "r", Direction: "Inbound", Access: "Allow", Protocol: "Tcp", DestPorts: "3380-3400", Source: "Internet"},
+			{Name: "r", Direction: "Inbound", Access: "Allow", Protocol: "Tcp", DestPorts: []string{"3380-3400"}, Sources: []string{"Internet"}},
 		}},
 	}})
 	fs := evalCheck(t, nsgOpenIngress{}, st)
@@ -121,6 +122,44 @@ func TestKeyVaultChecks(t *testing.T) {
 	}
 }
 
+func TestNSGInternetSourceNotFirstInList(t *testing.T) {
+	// The internet-equivalent source is not the first entry — it must still be found.
+	st := stateWith(&state.Azure{NSGs: []state.NetworkSecurityGroup{
+		{Name: "multi", Subscription: "s1", Rules: []state.NSGRule{
+			{Name: "ssh", Direction: "Inbound", Access: "Allow", Protocol: "Tcp",
+				DestPorts: []string{"22"}, Sources: []string{"10.0.0.0/8", "0.0.0.0/0"}},
+		}},
+	}})
+	if fs := evalCheck(t, nsgOpenIngress{}, st); len(fs) != 1 {
+		t.Fatalf("internet source later in the list must still be flagged, got %d", len(fs))
+	}
+}
+
+func TestNSGMultiPortListIncludesSensitive(t *testing.T) {
+	// A rule listing several ports must flag every sensitive one, not just the first.
+	st := stateWith(&state.Azure{NSGs: []state.NetworkSecurityGroup{
+		{Name: "multi", Subscription: "s1", Rules: []state.NSGRule{
+			{Name: "many", Direction: "Inbound", Access: "Allow", Protocol: "Tcp",
+				DestPorts: []string{"22", "3389", "1433"}, Sources: []string{"Internet"}},
+		}},
+	}})
+	fs := evalCheck(t, nsgOpenIngress{}, st)
+	if len(fs) != 1 || !strings.Contains(fs[0].Description, "RDP") || !strings.Contains(fs[0].Description, "MSSQL") {
+		t.Fatalf("multi-port rule should flag RDP and MSSQL, got %+v", fs)
+	}
+}
+
+func TestNSGZeroLengthCIDRIsInternet(t *testing.T) {
+	r := state.NSGRule{Direction: "Inbound", Access: "Allow", Sources: []string{"10.0.0.0/0"}}
+	if !r.OpenToInternet() {
+		t.Fatal("a /0 CIDR in any form is internet-equivalent")
+	}
+	r2 := state.NSGRule{Direction: "Inbound", Access: "Allow", Sources: []string{"internet"}}
+	if !r2.OpenToInternet() {
+		t.Fatal("the Internet tag should match case-insensitively")
+	}
+}
+
 func TestNilAzureStateNoPanic(t *testing.T) {
 	st := state.New()
 	st.Azure = nil
@@ -136,12 +175,12 @@ func TestOpenToInternetHelper(t *testing.T) {
 		rule state.NSGRule
 		want bool
 	}{
-		{state.NSGRule{Direction: "Inbound", Access: "Allow", Source: "*"}, true},
-		{state.NSGRule{Direction: "Inbound", Access: "Allow", Source: "Internet"}, true},
-		{state.NSGRule{Direction: "Inbound", Access: "Allow", Source: "0.0.0.0/0"}, true},
-		{state.NSGRule{Direction: "Inbound", Access: "Deny", Source: "*"}, false},
-		{state.NSGRule{Direction: "Outbound", Access: "Allow", Source: "*"}, false},
-		{state.NSGRule{Direction: "Inbound", Access: "Allow", Source: "10.0.0.0/8"}, false},
+		{state.NSGRule{Direction: "Inbound", Access: "Allow", Sources: []string{"*"}}, true},
+		{state.NSGRule{Direction: "Inbound", Access: "Allow", Sources: []string{"Internet"}}, true},
+		{state.NSGRule{Direction: "Inbound", Access: "Allow", Sources: []string{"0.0.0.0/0"}}, true},
+		{state.NSGRule{Direction: "Inbound", Access: "Deny", Sources: []string{"*"}}, false},
+		{state.NSGRule{Direction: "Outbound", Access: "Allow", Sources: []string{"*"}}, false},
+		{state.NSGRule{Direction: "Inbound", Access: "Allow", Sources: []string{"10.0.0.0/8"}}, false},
 	}
 	for i, c := range cases {
 		if got := c.rule.OpenToInternet(); got != c.want {

@@ -3,22 +3,16 @@ package gcp
 import (
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Su1ph3r/nubicustos/internal/engine"
 	"github.com/Su1ph3r/nubicustos/internal/findings"
+	"github.com/Su1ph3r/nubicustos/internal/portspec"
 	"github.com/Su1ph3r/nubicustos/internal/state"
 )
 
 func init() { engine.RegisterCheck(firewallOpenIngress{}) }
-
-// sensitivePorts maps high-risk ports to a label, matching the AWS/Azure sets.
-var sensitivePorts = map[int]string{
-	22: "SSH", 23: "Telnet", 21: "FTP", 3389: "RDP", 3306: "MySQL",
-	5432: "PostgreSQL", 6379: "Redis", 27017: "MongoDB", 1433: "MSSQL", 9200: "Elasticsearch",
-}
 
 type firewallOpenIngress struct{}
 
@@ -64,15 +58,26 @@ func exposedSensitive(fw state.FirewallRule) []string {
 	for _, spec := range fw.Allowed {
 		proto, ports, hasPorts := strings.Cut(spec, ":")
 		if !hasPorts {
-			// "all" or a bare protocol with no port restriction = every port.
-			if proto == "all" || proto == "tcp" || proto == "udp" {
+			// A bare protocol with no port restriction opens every port. Only
+			// "all" and "tcp" reach the TCP services in the sensitive catalog;
+			// a bare "udp" does not expose SSH/RDP/etc., so it is not flagged here.
+			if proto == "all" || proto == "tcp" {
 				set["all ports"] = struct{}{}
 			}
 			continue
 		}
+		// Ports only matter for TCP (and "all"); UDP-scoped ports don't reach the
+		// TCP sensitive services.
+		if !(proto == "tcp" || proto == "all") {
+			continue
+		}
 		for _, pr := range strings.Split(ports, ",") {
-			for port, label := range sensitivePorts {
-				if portInRange(port, pr) {
+			if portspec.IsAllPorts(pr) {
+				set["all ports"] = struct{}{}
+				continue
+			}
+			for port, label := range portspec.Sensitive {
+				if portspec.Covers(port, pr) {
 					set[fmt.Sprintf("%s (%d)", label, port)] = struct{}{}
 				}
 			}
@@ -93,19 +98,4 @@ func openToInternet(ranges []string) bool {
 		}
 	}
 	return false
-}
-
-// portInRange reports whether port is covered by a GCP port spec ("22" or "20-30").
-func portInRange(port int, spec string) bool {
-	spec = strings.TrimSpace(spec)
-	if spec == "" {
-		return false
-	}
-	if lo, hi, ok := strings.Cut(spec, "-"); ok {
-		l, err1 := strconv.Atoi(strings.TrimSpace(lo))
-		h, err2 := strconv.Atoi(strings.TrimSpace(hi))
-		return err1 == nil && err2 == nil && port >= l && port <= h
-	}
-	p, err := strconv.Atoi(spec)
-	return err == nil && p == port
 }

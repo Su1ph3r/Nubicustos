@@ -11,9 +11,11 @@ import (
 	_ "github.com/Su1ph3r/nubicustos/internal/checks/aws"
 	_ "github.com/Su1ph3r/nubicustos/internal/checks/azure"
 	_ "github.com/Su1ph3r/nubicustos/internal/checks/gcp"
+	_ "github.com/Su1ph3r/nubicustos/internal/checks/k8s"
 	_ "github.com/Su1ph3r/nubicustos/internal/providers/aws"
 	_ "github.com/Su1ph3r/nubicustos/internal/providers/azure"
 	_ "github.com/Su1ph3r/nubicustos/internal/providers/gcp"
+	_ "github.com/Su1ph3r/nubicustos/internal/providers/k8s"
 )
 
 // TestAllChecksUnique guards against duplicate check IDs (a copy-paste hazard as
@@ -37,16 +39,18 @@ func TestAllChecksUnique(t *testing.T) {
 	// + KMS(1) + Config(1) + GuardDuty(1) + VPC(1) + exposure(3)
 	// + SecretsManager(1) + ELB(3) + ACM(2) + IAM trust/privilege umbrella(1) = 33.
 	// Azure catalog: storage(3) + NSG(1) + key vault(3) = 7.
-	// GCP catalog: storage(3) + firewall(1) + IAM(2) = 6. Total = 46.
-	const wantChecks = 46
+	// GCP catalog: storage(3) + firewall(1) + IAM(2) = 6.
+	// K8s catalog: pods(4) + RBAC(2) = 6. Total = 52.
+	const wantChecks = 52
 	if len(checks) != wantChecks {
 		t.Errorf("registered checks = %d, want %d", len(checks), wantChecks)
 	}
 
 	// Collectors: AWS s3, iam, ec2, rds, cloudtrail, kms, config, guardduty,
 	// vpc, snapshots, secretsmanager, elbv2, acm = 13; Azure storage, nsg,
-	// keyvault = 3; GCP storage, firewall, iam = 3. Total = 19.
-	const wantCollectors = 19
+	// keyvault = 3; GCP storage, firewall, iam = 3; K8s pods, rbac = 2.
+	// Total = 21.
+	const wantCollectors = 21
 	if got := len(engine.Collectors()); got != wantCollectors {
 		t.Errorf("registered collectors = %d, want %d", got, wantCollectors)
 	}

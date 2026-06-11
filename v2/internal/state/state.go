@@ -7,6 +7,7 @@
 package state
 
 import (
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -331,19 +332,36 @@ type NSGRule struct {
 	Access    string // Allow | Deny
 	Protocol  string // Tcp | Udp | * ...
 	Priority  int
-	DestPorts string // destination port or range (e.g. "22", "0-65535", "*")
-	Source    string // source prefix: "*", "Internet", "0.0.0.0/0", a CIDR
+	DestPorts []string // destination ports/ranges (e.g. "22", "0-65535", "*")
+	Sources   []string // source prefixes: "*", "Internet", "0.0.0.0/0", CIDRs
 }
 
 // OpenToInternet reports whether the rule allows inbound traffic from the whole
-// internet (source "*", "Internet", or a 0.0.0.0/0 ::/0 prefix on an Allow rule).
+// internet — any source that is "*", the Internet service tag, "any", or a
+// zero-length-prefix CIDR in either family — on an Allow rule.
 func (r NSGRule) OpenToInternet() bool {
 	if !strings.EqualFold(r.Direction, "Inbound") || !strings.EqualFold(r.Access, "Allow") {
 		return false
 	}
-	switch r.Source {
-	case "*", "Internet", "0.0.0.0/0", "::/0":
+	for _, s := range r.Sources {
+		if sourceIsInternet(s) {
+			return true
+		}
+	}
+	return false
+}
+
+// sourceIsInternet classifies an NSG source prefix as internet-equivalent. It
+// matches the "*"/"Internet"/"any" tags (case-insensitively) and any CIDR whose
+// prefix length is zero (e.g. 0.0.0.0/0, ::/0, or any "<addr>/0").
+func sourceIsInternet(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "*" || strings.EqualFold(s, "Internet") || strings.EqualFold(s, "any") {
 		return true
+	}
+	if _, ipnet, err := net.ParseCIDR(s); err == nil {
+		ones, _ := ipnet.Mask.Size()
+		return ones == 0
 	}
 	return false
 }
@@ -412,12 +430,66 @@ type GCP struct {
 	IAMBindings []GCPIAMBinding
 }
 
+// --- Kubernetes -------------------------------------------------------------
+
+// K8sContainer is the collected security posture of one container in a pod.
+type K8sContainer struct {
+	Name                     string
+	Privileged               bool
+	AllowPrivilegeEscalation bool // effective value (defaults true when unset, unless privileged)
+	RunAsNonRoot             bool // effective value (container overrides pod)
+}
+
+// K8sPod is the collected security posture of a pod across one context.
+type K8sPod struct {
+	Name        string
+	Namespace   string
+	Context     string
+	HostNetwork bool
+	HostPID     bool
+	HostIPC     bool
+	Containers  []K8sContainer
+}
+
+// HostNamespaces reports whether the pod shares any host namespace.
+func (p K8sPod) HostNamespaces() bool {
+	return p.HostNetwork || p.HostPID || p.HostIPC
+}
+
+// K8sRole is a (Cluster)Role and whether its rules use dangerous wildcards.
+type K8sRole struct {
+	Name             string
+	Namespace        string // empty for ClusterRole
+	Context          string
+	Kind             string // ClusterRole | Role
+	WildcardVerb     bool   // a rule grants verb "*"
+	WildcardResource bool   // a rule grants resource "*"
+}
+
+// RBACBinding is a (Cluster)RoleBinding: which role is bound to which subjects.
+type RBACBinding struct {
+	Name      string
+	Namespace string // empty for ClusterRoleBinding
+	Context   string
+	Kind      string   // ClusterRoleBinding | RoleBinding
+	RoleRef   string   // the referenced role name (e.g. cluster-admin)
+	Subjects  []string // "Kind/name" e.g. "Group/system:authenticated"
+}
+
+// K8s is the collected Kubernetes-side state across one or more contexts.
+type K8s struct {
+	Pods     []K8sPod
+	Roles    []K8sRole
+	Bindings []RBACBinding
+}
+
 // State is the full collected state for a scan across providers.
 type State struct {
 	mu    sync.Mutex
 	AWS   *AWS
 	Azure *Azure
 	GCP   *GCP
+	K8s   *K8s
 }
 
 // New returns an initialized, empty State.
@@ -430,7 +502,29 @@ func New() *State {
 		},
 		Azure: &Azure{},
 		GCP:   &GCP{},
+		K8s:   &K8s{},
 	}
+}
+
+// AddK8sPod appends a collected pod under lock.
+func (s *State) AddK8sPod(p K8sPod) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.K8s.Pods = append(s.K8s.Pods, p)
+}
+
+// AddK8sRole appends a collected (Cluster)Role under lock.
+func (s *State) AddK8sRole(r K8sRole) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.K8s.Roles = append(s.K8s.Roles, r)
+}
+
+// AddRBACBinding appends a collected (Cluster)RoleBinding under lock.
+func (s *State) AddRBACBinding(b RBACBinding) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.K8s.Bindings = append(s.K8s.Bindings, b)
 }
 
 // AddGCSBucket appends a collected Cloud Storage bucket under lock.

@@ -16,6 +16,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"golang.org/x/oauth2/google"
+	"k8s.io/client-go/rest"
 
 	"github.com/Su1ph3r/nubicustos/internal/findings"
 	"github.com/Su1ph3r/nubicustos/internal/graph"
@@ -39,6 +40,20 @@ type ScanContext struct {
 
 	// GCP holds the resolved ADC credentials and projects when Provider == "gcp".
 	GCP GCPSession
+
+	// K8s holds the resolved per-context REST configs when Provider == "k8s".
+	K8s K8sSession
+}
+
+// K8sSession carries the validated kubeconfig contexts in scope for the scan.
+type K8sSession struct {
+	Clusters []K8sCluster
+}
+
+// K8sCluster pairs a kubeconfig context name with its REST config.
+type K8sCluster struct {
+	Context string
+	Config  *rest.Config
 }
 
 // AzureSession carries the validated Azure credential and the subscriptions in

@@ -42,6 +42,9 @@ type scanFlags struct {
 	// GCP
 	projects []string
 
+	// Kubernetes
+	contexts []string
+
 	dbPath     string
 	exportPath string
 	validate   bool
@@ -57,7 +60,7 @@ func newScanCmd() *cobra.Command {
 		},
 	}
 	pf := cmd.Flags()
-	pf.StringVar(&f.provider, "provider", "", "cloud provider: aws | azure | gcp (required)")
+	pf.StringVar(&f.provider, "provider", "", "cloud provider: aws | azure | gcp | k8s (required)")
 	pf.StringVar(&f.profile, "profile", "", "AWS named profile")
 	pf.StringSliceVar(&f.regions, "region", nil, "region(s) to scan (repeatable)")
 	pf.StringVar(&f.mfaSerial, "mfa-serial", "", "AWS MFA device ARN (for static-keys + MFA-condition profiles)")
@@ -72,6 +75,7 @@ func newScanCmd() *cobra.Command {
 	pf.StringVar(&f.clientSecret, "client-secret", "", "Azure client secret (service-principal)")
 	pf.StringSliceVar(&f.subscriptions, "subscription", nil, "Azure subscription id(s) to scan (repeatable; default: all enabled)")
 	pf.StringSliceVar(&f.projects, "project", nil, "GCP project id(s) to scan (repeatable; default: all active)")
+	pf.StringSliceVar(&f.contexts, "context", nil, "Kubernetes context(s) to scan (repeatable; default: current context)")
 
 	pf.StringVar(&f.dbPath, "db", "nubicustos.db", "path to the SQLite results database")
 	pf.StringVar(&f.exportPath, "export", "", "write Cairn-format findings JSON to this path")
@@ -83,7 +87,7 @@ func newScanCmd() *cobra.Command {
 func runScan(ctx context.Context, f *scanFlags) error {
 	provider := strings.ToLower(f.provider)
 	if provider == "" {
-		return fmt.Errorf("--provider is required (aws | azure)")
+		return fmt.Errorf("--provider is required (aws | azure | gcp | k8s)")
 	}
 
 	prompter := auth.NewCLIPrompter(f.mfaToken, !f.nonInteractive)
@@ -165,6 +169,22 @@ func runScan(ctx context.Context, f *scanFlags) error {
 		sc.Account = strings.Join(projects, ",")
 		account = sc.Account
 		fmt.Fprintf(os.Stderr, "authenticated to GCP; scanning %d project(s)\n", len(projects))
+
+	case "k8s":
+		clusters, err := auth.ResolveK8s(f.contexts)
+		if err != nil {
+			return err
+		}
+		ctxNames := make([]string, len(clusters))
+		engineClusters := make([]engine.K8sCluster, len(clusters))
+		for i, c := range clusters {
+			ctxNames[i] = c.Context
+			engineClusters[i] = engine.K8sCluster{Context: c.Context, Config: c.Config}
+		}
+		sc.K8s = engine.K8sSession{Clusters: engineClusters}
+		sc.Account = strings.Join(ctxNames, ",")
+		account = sc.Account
+		fmt.Fprintf(os.Stderr, "authenticated to Kubernetes; scanning %d context(s)\n", len(clusters))
 
 	default:
 		return fmt.Errorf("unsupported provider %q", provider)

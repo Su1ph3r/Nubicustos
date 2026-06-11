@@ -8,24 +8,13 @@ import (
 
 	"github.com/Su1ph3r/nubicustos/internal/engine"
 	"github.com/Su1ph3r/nubicustos/internal/findings"
+	"github.com/Su1ph3r/nubicustos/internal/portspec"
 	"github.com/Su1ph3r/nubicustos/internal/state"
 )
 
-// sensitivePorts maps high-risk ports to a human label. Exposure of any of
-// these to the internet is treated as High severity.
-var sensitivePorts = map[int]string{
-	22:    "SSH",
-	23:    "Telnet",
-	21:    "FTP",
-	3389:  "RDP",
-	3306:  "MySQL",
-	5432:  "PostgreSQL",
-	6379:  "Redis",
-	27017: "MongoDB",
-	9200:  "Elasticsearch",
-	1433:  "MSSQL",
-	11211: "Memcached",
-}
+// sensitivePorts is the shared sensitive-port catalog. Exposure of any of these
+// to the internet is treated as High severity.
+var sensitivePorts = portspec.Sensitive
 
 func init() {
 	engine.RegisterCheck(ec2OpenIngress{})

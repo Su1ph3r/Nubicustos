@@ -1,6 +1,9 @@
 package azure
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/keyvault/armkeyvault"
 
 	"github.com/Su1ph3r/nubicustos/internal/engine"
@@ -19,15 +22,18 @@ func (keyVaultCollector) Collect(sc *engine.ScanContext, st *state.State) error 
 	if sc.Provider != "azure" || sc.Azure.Credential == nil {
 		return nil
 	}
+	var errs []error
 	for _, sub := range sc.Azure.Subscriptions {
 		client, err := armkeyvault.NewVaultsClient(sub, sc.Azure.Credential, nil)
 		if err != nil {
+			errs = append(errs, fmt.Errorf("azure keyvault: building client for subscription %s: %w", sub, err))
 			continue
 		}
 		pager := client.NewListBySubscriptionPager(nil)
 		for pager.More() {
 			page, err := pager.NextPage(sc.Ctx)
 			if err != nil {
+				errs = append(errs, fmt.Errorf("azure keyvault: listing vaults in subscription %s: %w", sub, err))
 				break
 			}
 			for _, v := range page.Value {
@@ -51,5 +57,5 @@ func (keyVaultCollector) Collect(sc *engine.ScanContext, st *state.State) error 
 			}
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }

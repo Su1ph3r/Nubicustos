@@ -1,6 +1,9 @@
 package azure
 
 import (
+	"errors"
+	"fmt"
+
 	armnetwork "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
 
 	"github.com/Su1ph3r/nubicustos/internal/engine"
@@ -19,15 +22,18 @@ func (nsgCollector) Collect(sc *engine.ScanContext, st *state.State) error {
 	if sc.Provider != "azure" || sc.Azure.Credential == nil {
 		return nil
 	}
+	var errs []error
 	for _, sub := range sc.Azure.Subscriptions {
 		client, err := armnetwork.NewSecurityGroupsClient(sub, sc.Azure.Credential, nil)
 		if err != nil {
+			errs = append(errs, fmt.Errorf("azure nsg: building client for subscription %s: %w", sub, err))
 			continue
 		}
 		pager := client.NewListAllPager(nil)
 		for pager.More() {
 			page, err := pager.NextPage(sc.Ctx)
 			if err != nil {
+				errs = append(errs, fmt.Errorf("azure nsg: listing security groups in subscription %s: %w", sub, err))
 				break
 			}
 			for _, g := range page.Value {
@@ -49,7 +55,7 @@ func (nsgCollector) Collect(sc *engine.ScanContext, st *state.State) error {
 			}
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // normalizeRule flattens an Azure security rule into the state model, resolving
@@ -70,23 +76,23 @@ func normalizeRule(r *armnetwork.SecurityRule) state.NSGRule {
 		out.Protocol = string(*p.Protocol)
 	}
 	out.Priority = int32Val(p.Priority)
-	out.DestPorts = firstNonEmpty(str(p.DestinationPortRange), joinPtrs(p.DestinationPortRanges))
-	out.Source = firstNonEmpty(str(p.SourceAddressPrefix), joinPtrs(p.SourceAddressPrefixes))
+	out.DestPorts = collect(str(p.DestinationPortRange), p.DestinationPortRanges)
+	out.Sources = collect(str(p.SourceAddressPrefix), p.SourceAddressPrefixes)
 	return out
 }
 
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
+// collect merges the single-value form and the list form of an NSG field into
+// one slice — Azure populates exactly one of the two — preserving every entry so
+// no port or source prefix is dropped.
+func collect(single string, list []*string) []string {
+	var out []string
+	if single != "" {
+		out = append(out, single)
 	}
-	return b
-}
-
-func joinPtrs(ps []*string) string {
-	for _, p := range ps {
+	for _, p := range list {
 		if s := str(p); s != "" {
-			return s // first prefix is enough to classify internet exposure
+			out = append(out, s)
 		}
 	}
-	return ""
+	return out
 }

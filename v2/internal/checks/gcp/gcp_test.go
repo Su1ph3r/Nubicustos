@@ -88,6 +88,27 @@ func TestFirewallPortRange(t *testing.T) {
 	}
 }
 
+func TestFirewallBareUDPNotAllPorts(t *testing.T) {
+	// A bare udp allow-all does not reach the TCP sensitive services, so it must
+	// not be reported as exposing "all ports".
+	st := stateWith(&state.GCP{Firewalls: []state.FirewallRule{
+		{Name: "udp", Project: "p1", Direction: "INGRESS", Allowed: []string{"udp"}, SourceRanges: []string{"0.0.0.0/0"}},
+	}})
+	if fs := evalCheck(t, firewallOpenIngress{}, st); len(fs) != 0 {
+		t.Fatalf("bare udp allow-all should not be flagged as sensitive-port exposure, got %d", len(fs))
+	}
+}
+
+func TestFirewallUDPPortNotFlagged(t *testing.T) {
+	// A UDP port spec covering 22 does not expose TCP SSH.
+	st := stateWith(&state.GCP{Firewalls: []state.FirewallRule{
+		{Name: "udp22", Project: "p1", Direction: "INGRESS", Allowed: []string{"udp:22"}, SourceRanges: []string{"0.0.0.0/0"}},
+	}})
+	if fs := evalCheck(t, firewallOpenIngress{}, st); len(fs) != 0 {
+		t.Fatalf("udp:22 should not flag TCP SSH, got %d", len(fs))
+	}
+}
+
 func TestIAMPublicMember(t *testing.T) {
 	st := stateWith(&state.GCP{IAMBindings: []state.GCPIAMBinding{
 		{Project: "p1", Role: "roles/viewer", Members: []string{"allUsers"}},

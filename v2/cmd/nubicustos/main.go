@@ -11,10 +11,18 @@ import (
 
 	"github.com/spf13/cobra"
 
-	// Register checks (collectors register via the provider imports in scan.go).
+	// Register every provider's collectors and checks via their init() functions.
+	// Registration must not depend on a package being referenced elsewhere (e.g.
+	// scan.go calling one symbol per provider) — that is how the k8s collectors
+	// were silently absent. Import all of them here, explicitly.
 	_ "github.com/Su1ph3r/nubicustos/internal/checks/aws"
 	_ "github.com/Su1ph3r/nubicustos/internal/checks/azure"
 	_ "github.com/Su1ph3r/nubicustos/internal/checks/gcp"
+	_ "github.com/Su1ph3r/nubicustos/internal/checks/k8s"
+	_ "github.com/Su1ph3r/nubicustos/internal/providers/aws"
+	_ "github.com/Su1ph3r/nubicustos/internal/providers/azure"
+	_ "github.com/Su1ph3r/nubicustos/internal/providers/gcp"
+	_ "github.com/Su1ph3r/nubicustos/internal/providers/k8s"
 )
 
 const version = "2.0.0-dev"

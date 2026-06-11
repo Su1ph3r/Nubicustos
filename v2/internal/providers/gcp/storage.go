@@ -1,6 +1,9 @@
 package gcp
 
 import (
+	"errors"
+	"fmt"
+
 	storage "google.golang.org/api/storage/v1"
 
 	"google.golang.org/api/option"
@@ -26,8 +29,9 @@ func (storageCollector) Collect(sc *engine.ScanContext, st *state.State) error {
 	if err != nil {
 		return err
 	}
+	var errs []error
 	for _, project := range sc.GCP.Projects {
-		_ = svc.Buckets.List(project).Pages(sc.Ctx, func(page *storage.Buckets) error {
+		listErr := svc.Buckets.List(project).Pages(sc.Ctx, func(page *storage.Buckets) error {
 			for _, b := range page.Items {
 				bk := state.GCSBucket{Name: b.Name, Project: project, Location: b.Location}
 				if ic := b.IamConfiguration; ic != nil {
@@ -36,27 +40,38 @@ func (storageCollector) Collect(sc *engine.ScanContext, st *state.State) error {
 					}
 					bk.PublicAccessPrevention = ic.PublicAccessPrevention
 				}
-				bk.PublicIAM = bucketPublic(sc, svc, b.Name)
+				public, err := bucketPublic(sc, svc, b.Name)
+				if err != nil {
+					// Could not determine public status (e.g. getIamPolicy denied):
+					// surface it rather than silently reporting the bucket as private.
+					errs = append(errs, err)
+				}
+				bk.PublicIAM = public
 				st.AddGCSBucket(bk)
 			}
 			return nil
 		})
+		if listErr != nil {
+			errs = append(errs, fmt.Errorf("gcp storage: listing buckets in project %s: %w", project, listErr))
+		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // bucketPublic reports whether a bucket's IAM policy grants a public principal.
-func bucketPublic(sc *engine.ScanContext, svc *storage.Service, bucket string) bool {
+// It returns an error (rather than a false negative) when the policy cannot be
+// read, so a denied getIamPolicy is not misreported as "not public".
+func bucketPublic(sc *engine.ScanContext, svc *storage.Service, bucket string) (bool, error) {
 	policy, err := svc.Buckets.GetIamPolicy(bucket).Context(sc.Ctx).Do()
 	if err != nil {
-		return false
+		return false, fmt.Errorf("gcp storage: getIamPolicy for bucket %s: %w", bucket, err)
 	}
 	for _, b := range policy.Bindings {
 		for _, m := range b.Members {
 			if isPublicMember(m) {
-				return true
+				return true, nil
 			}
 		}
 	}
-	return false
+	return false, nil
 }

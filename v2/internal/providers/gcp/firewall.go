@@ -1,6 +1,7 @@
 package gcp
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -27,8 +28,9 @@ func (firewallCollector) Collect(sc *engine.ScanContext, st *state.State) error 
 	if err != nil {
 		return err
 	}
+	var errs []error
 	for _, project := range sc.GCP.Projects {
-		_ = svc.Firewalls.List(project).Pages(sc.Ctx, func(page *compute.FirewallList) error {
+		listErr := svc.Firewalls.List(project).Pages(sc.Ctx, func(page *compute.FirewallList) error {
 			for _, fw := range page.Items {
 				r := state.FirewallRule{
 					Name:         fw.Name,
@@ -45,8 +47,11 @@ func (firewallCollector) Collect(sc *engine.ScanContext, st *state.State) error 
 			}
 			return nil
 		})
+		if listErr != nil {
+			errs = append(errs, fmt.Errorf("gcp firewall: listing rules in project %s: %w", project, listErr))
+		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // allowedSpec renders a firewall allow entry as "proto:port,port" or just the

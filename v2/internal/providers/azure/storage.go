@@ -1,6 +1,9 @@
 package azure
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
 
 	"github.com/Su1ph3r/nubicustos/internal/engine"
@@ -20,15 +23,18 @@ func (storageCollector) Collect(sc *engine.ScanContext, st *state.State) error {
 	if sc.Provider != "azure" || sc.Azure.Credential == nil {
 		return nil
 	}
+	var errs []error
 	for _, sub := range sc.Azure.Subscriptions {
 		client, err := armstorage.NewAccountsClient(sub, sc.Azure.Credential, nil)
 		if err != nil {
+			errs = append(errs, fmt.Errorf("azure storage: building client for subscription %s: %w", sub, err))
 			continue
 		}
 		pager := client.NewListPager(nil)
 		for pager.More() {
 			page, err := pager.NextPage(sc.Ctx)
 			if err != nil {
+				errs = append(errs, fmt.Errorf("azure storage: listing accounts in subscription %s: %w", sub, err))
 				break
 			}
 			for _, acct := range page.Value {
@@ -55,5 +61,5 @@ func (storageCollector) Collect(sc *engine.ScanContext, st *state.State) error {
 			}
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }

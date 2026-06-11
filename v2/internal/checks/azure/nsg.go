@@ -3,22 +3,16 @@ package azure
 import (
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Su1ph3r/nubicustos/internal/engine"
 	"github.com/Su1ph3r/nubicustos/internal/findings"
+	"github.com/Su1ph3r/nubicustos/internal/portspec"
 	"github.com/Su1ph3r/nubicustos/internal/state"
 )
 
 func init() { engine.RegisterCheck(nsgOpenIngress{}) }
-
-// sensitivePorts maps high-risk ports exposed inbound to the internet to a label.
-var sensitivePorts = map[int]string{
-	22: "SSH", 23: "Telnet", 21: "FTP", 3389: "RDP", 3306: "MySQL",
-	5432: "PostgreSQL", 6379: "Redis", 27017: "MongoDB", 1433: "MSSQL", 9200: "Elasticsearch",
-}
 
 type nsgOpenIngress struct{}
 
@@ -56,20 +50,23 @@ func (c nsgOpenIngress) Evaluate(_ *engine.ScanContext, st *state.State) ([]find
 }
 
 // exposedSensitive returns the labels for sensitive ports an NSG exposes to the
-// internet via an inbound Allow rule.
+// internet via an inbound Allow rule. Each rule may carry several destination
+// port specs (single values and ranges); every one is evaluated.
 func exposedSensitive(nsg state.NetworkSecurityGroup) []string {
 	set := map[string]struct{}{}
 	for _, r := range nsg.Rules {
 		if !r.OpenToInternet() {
 			continue
 		}
-		if r.DestPorts == "*" || r.DestPorts == "0-65535" {
-			set["all ports"] = struct{}{}
-			continue
-		}
-		for port, label := range sensitivePorts {
-			if portInRange(port, r.DestPorts) {
-				set[fmt.Sprintf("%s (%d)", label, port)] = struct{}{}
+		for _, spec := range r.DestPorts {
+			if portspec.IsAllPorts(spec) {
+				set["all ports"] = struct{}{}
+				continue
+			}
+			for port, label := range portspec.Sensitive {
+				if portspec.Covers(port, spec) {
+					set[fmt.Sprintf("%s (%d)", label, port)] = struct{}{}
+				}
 			}
 		}
 	}
@@ -79,20 +76,4 @@ func exposedSensitive(nsg state.NetworkSecurityGroup) []string {
 	}
 	sort.Strings(labels)
 	return labels
-}
-
-// portInRange reports whether port is covered by an Azure port spec ("22" or
-// "20-30"). Comma-separated lists arrive as separate rules/specs in practice;
-// the single-value and range forms are handled here.
-func portInRange(port int, spec string) bool {
-	if spec == "" {
-		return false
-	}
-	if lo, hi, ok := strings.Cut(spec, "-"); ok {
-		l, err1 := strconv.Atoi(strings.TrimSpace(lo))
-		h, err2 := strconv.Atoi(strings.TrimSpace(hi))
-		return err1 == nil && err2 == nil && port >= l && port <= h
-	}
-	p, err := strconv.Atoi(strings.TrimSpace(spec))
-	return err == nil && p == port
 }

@@ -1,6 +1,9 @@
 package gcp
 
 import (
+	"errors"
+	"fmt"
+
 	cloudresourcemanager "google.golang.org/api/cloudresourcemanager/v1"
 	"google.golang.org/api/option"
 
@@ -24,10 +27,14 @@ func (iamCollector) Collect(sc *engine.ScanContext, st *state.State) error {
 	if err != nil {
 		return err
 	}
+	var errs []error
 	for _, project := range sc.GCP.Projects {
 		policy, err := svc.Projects.GetIamPolicy(project, &cloudresourcemanager.GetIamPolicyRequest{}).Context(sc.Ctx).Do()
 		if err != nil {
-			continue // tolerate a denied project
+			// Tolerate a denied project, but surface it — an unread IAM policy must
+			// not read as a project with no public/primitive bindings.
+			errs = append(errs, fmt.Errorf("gcp iam: getIamPolicy for project %s: %w", project, err))
+			continue
 		}
 		for _, b := range policy.Bindings {
 			st.AddGCPIAMBinding(state.GCPIAMBinding{
@@ -37,5 +44,5 @@ func (iamCollector) Collect(sc *engine.ScanContext, st *state.State) error {
 			})
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
