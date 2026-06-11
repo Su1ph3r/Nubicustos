@@ -19,7 +19,7 @@ full design.
 > RBAC across kubeconfig contexts). Optional plugins integrate well-known
 > external scanners (trivy, grype, checkov, terrascan, kube-bench) when present.
 > A CEL/YAML policy-as-code engine evaluates built-in and user rules at runtime.
-> MCP and the web UI follow per the
+> A read-only MCP server exposes results to an LLM. The web UI follows per the
 > plan.
 
 ### Finding shapes
@@ -163,6 +163,20 @@ nubicustos validate                          # re-validate the latest stored sca
 # Terminal UI: browse a stored scan (dashboard, findings+detail, attack paths)
 nubicustos tui
 nubicustos tui --scan <id>
+```
+
+### MCP server (LLM integration)
+
+`mcp` runs a Model Context Protocol server over stdio, exposing **read-only**
+tools so an LLM can explore stored results: `list_scans`, `scan_summary`,
+`list_findings` (severity/service filters), `get_finding`, and
+`list_attack_paths`. It performs no cloud calls and never triggers a scan — it
+reads the local results database — so connecting an MCP client cannot launch a
+cloud scan with live credentials.
+
+```bash
+nubicustos mcp                 # serve over stdio (point your MCP client at this)
+nubicustos mcp --db prod.db
 ```
 
 ### Policy-as-code rules
@@ -313,6 +327,7 @@ The trust analyzer (§9.3) also emits standalone findings, surfaced through
 | `internal/checks/gcp` | native GCP posture checks |
 | `internal/checks/k8s` | native Kubernetes posture checks |
 | `internal/portspec` | shared sensitive-port catalog + range parsing |
+| `internal/mcp` | read-only MCP server (LLM integration over stdio) — plan §3.7 |
 | `internal/rules` | policy-as-code engine (CEL/YAML rules + state flattening) — plan §9.6 |
 | `internal/checks/rules` | rules-engine umbrella check |
 | `internal/plugins` | optional external-tool runner + parsers (trivy/grype/checkov/terrascan/kube-bench) — plan §5 |

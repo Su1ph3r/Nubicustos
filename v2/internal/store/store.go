@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -82,6 +83,49 @@ type FindingFilter struct {
 	Severities []findings.Severity
 	Services   []string
 	Statuses   []findings.Status
+}
+
+// ParseSeverities validates a comma-separated severity list, returning nil for
+// an empty input (no filter). It lives here so the CLI and the MCP server share
+// one validated parser feeding FindingFilter.
+func ParseSeverities(csv string) ([]findings.Severity, error) {
+	if strings.TrimSpace(csv) == "" {
+		return nil, nil
+	}
+	valid := map[string]findings.Severity{
+		"critical": findings.SeverityCritical,
+		"high":     findings.SeverityHigh,
+		"medium":   findings.SeverityMedium,
+		"low":      findings.SeverityLow,
+		"info":     findings.SeverityInfo,
+	}
+	var out []findings.Severity
+	for _, raw := range strings.Split(csv, ",") {
+		s := strings.ToLower(strings.TrimSpace(raw))
+		if s == "" {
+			continue
+		}
+		sev, ok := valid[s]
+		if !ok {
+			return nil, fmt.Errorf("invalid severity %q (want: critical, high, medium, low, info)", raw)
+		}
+		out = append(out, sev)
+	}
+	return out, nil
+}
+
+// SplitCSV splits a comma-separated value into trimmed, non-empty tokens.
+func SplitCSV(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	var out []string
+	for _, raw := range strings.Split(s, ",") {
+		if t := strings.TrimSpace(raw); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // LatestScanID returns the id of the most recently started scan, or an error

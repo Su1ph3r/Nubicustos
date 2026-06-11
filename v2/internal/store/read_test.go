@@ -268,3 +268,25 @@ func TestSaveGraphNilNoop(t *testing.T) {
 		t.Fatalf("SaveGraph(nil) should be a no-op, got %v", err)
 	}
 }
+
+func TestParseSeverities(t *testing.T) {
+	if s, err := ParseSeverities(""); err != nil || s != nil {
+		t.Fatalf("empty = no filter, got %v / %v", s, err)
+	}
+	if s, err := ParseSeverities("critical,high"); err != nil || len(s) != 2 {
+		t.Fatalf("valid list failed: %v / %v", s, err)
+	}
+	if _, err := ParseSeverities("bogus"); err == nil {
+		t.Fatal("invalid severity must error")
+	}
+}
+
+func TestSplitCSV(t *testing.T) {
+	if SplitCSV("  ") != nil {
+		t.Fatal("blank input is nil")
+	}
+	got := SplitCSV("iam, s3 ,,ec2")
+	if len(got) != 3 || got[0] != "iam" || got[1] != "s3" || got[2] != "ec2" {
+		t.Fatalf("unexpected split: %v", got)
+	}
+}

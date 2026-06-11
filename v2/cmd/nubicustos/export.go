@@ -55,7 +55,7 @@ func runExport(ctx context.Context, format string, f *exportFlags) error {
 		return fmt.Errorf("unknown export format %q (want: cairn | sarif | csv | html)", format)
 	}
 
-	severities, err := parseSeverities(f.severity)
+	severities, err := store.ParseSeverities(f.severity)
 	if err != nil {
 		return err
 	}
@@ -74,7 +74,7 @@ func runExport(ctx context.Context, format string, f *exportFlags) error {
 	if err != nil {
 		return err
 	}
-	services := splitCSV(f.service)
+	services := store.SplitCSV(f.service)
 	fs, err := st.LoadFindings(ctx, scanID, store.FindingFilter{
 		Severities: severities,
 		Services:   services,

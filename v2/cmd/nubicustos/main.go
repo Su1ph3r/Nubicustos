@@ -54,6 +54,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newTUICmd())
 	root.AddCommand(newPluginsCmd())
 	root.AddCommand(newRulesCmd())
+	root.AddCommand(newMCPCmd())
 	return root
 }
 

@@ -43,7 +43,7 @@ func newFindingsCmd() *cobra.Command {
 }
 
 func runFindings(ctx context.Context, f *findingsFlags) error {
-	severities, err := parseSeverities(f.severity)
+	severities, err := store.ParseSeverities(f.severity)
 	if err != nil {
 		return err
 	}
@@ -63,7 +63,7 @@ func runFindings(ctx context.Context, f *findingsFlags) error {
 		return err
 	}
 
-	services := splitCSV(f.service)
+	services := store.SplitCSV(f.service)
 	fs, err := st.LoadFindings(ctx, scanID, store.FindingFilter{
 		Severities: severities,
 		Services:   services,

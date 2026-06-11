@@ -35,33 +35,6 @@ func resolveScanID(ctx context.Context, st *store.Store, requested string) (stri
 	return id, nil
 }
 
-// parseSeverities validates and normalizes a comma-separated severity list.
-func parseSeverities(csv string) ([]findings.Severity, error) {
-	if strings.TrimSpace(csv) == "" {
-		return nil, nil
-	}
-	valid := map[string]findings.Severity{
-		"critical": findings.SeverityCritical,
-		"high":     findings.SeverityHigh,
-		"medium":   findings.SeverityMedium,
-		"low":      findings.SeverityLow,
-		"info":     findings.SeverityInfo,
-	}
-	var out []findings.Severity
-	for _, raw := range strings.Split(csv, ",") {
-		s := strings.ToLower(strings.TrimSpace(raw))
-		if s == "" {
-			continue
-		}
-		sev, ok := valid[s]
-		if !ok {
-			return nil, fmt.Errorf("invalid severity %q (want: critical, high, medium, low, info)", raw)
-		}
-		out = append(out, sev)
-	}
-	return out, nil
-}
-
 // warnUnknownServices prints a stderr warning for each requested --service
 // value that produced no findings in the scan, so a typo (e.g. "ima" for "iam")
 // is distinguishable from a genuinely empty result. It is best-effort: the
@@ -104,18 +77,4 @@ func countSeverity(fs []findings.Finding, sev findings.Severity) int {
 		}
 	}
 	return n
-}
-
-// splitCSV splits a comma-separated flag value into trimmed, non-empty tokens.
-func splitCSV(s string) []string {
-	if strings.TrimSpace(s) == "" {
-		return nil
-	}
-	var out []string
-	for _, raw := range strings.Split(s, ",") {
-		if t := strings.TrimSpace(raw); t != "" {
-			out = append(out, t)
-		}
-	}
-	return out
 }
