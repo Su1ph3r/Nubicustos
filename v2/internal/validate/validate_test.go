@@ -20,7 +20,7 @@ type fakeValidator struct {
 
 func (f *fakeValidator) CheckID() string     { return f.id }
 func (f *fakeValidator) BlastRadius() string { return f.blast }
-func (f *fakeValidator) Validate(_ context.Context, _ findings.Finding) (*findings.Evidence, error) {
+func (f *fakeValidator) Validate(_ context.Context, _ Env, _ findings.Finding) (*findings.Evidence, error) {
 	f.calls++
 	return f.ev, f.err
 }

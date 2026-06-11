@@ -38,7 +38,7 @@ func (*rdsPublicReachable) BlastRadius() string { return BlastRadiusNone }
 // connection is already proven open.
 const bannerReadTimeout = 750 * time.Millisecond
 
-func (v *rdsPublicReachable) Validate(ctx context.Context, f findings.Finding) (*findings.Evidence, error) {
+func (v *rdsPublicReachable) Validate(ctx context.Context, _ Env, f findings.Finding) (*findings.Evidence, error) {
 	addr := f.Resource.Endpoint
 	if addr == "" {
 		return nil, nil // no endpoint collected — nothing to probe

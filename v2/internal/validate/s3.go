@@ -30,7 +30,7 @@ func (*s3PublicRead) BlastRadius() string { return BlastRadiusNone }
 // secret-safe (a listing is not secret, but truncation is the safe default).
 const maxEvidenceBody = 512
 
-func (v *s3PublicRead) Validate(ctx context.Context, f findings.Finding) (*findings.Evidence, error) {
+func (v *s3PublicRead) Validate(ctx context.Context, _ Env, f findings.Finding) (*findings.Evidence, error) {
 	bucket := f.Resource.ID
 	if bucket == "" {
 		return nil, nil

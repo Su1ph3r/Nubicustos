@@ -297,20 +297,29 @@ it is bound by a strict safety contract:
 - Evidence records the **vantage** (`external` = no credentials, the operator's
   network; `authenticated` = scan credentials exercised as a low-privilege check).
 
-Implemented validators (all external vantage):
+Implemented validators:
 
-- **Public S3 bucket** — anonymous (unsigned) `ListObjectsV2`; a 200 confirms
-  unauthenticated listing, a 403 leaves the finding unconfirmed (object-level
-  public read may still apply), a network failure is blocked.
-- **Publicly accessible RDS** — a TCP connect to the instance's collected
-  endpoint with a passive banner read (no bytes sent, no auth attempt). A
-  successful connect confirms the port is genuinely reachable from outside —
-  distinguishing a live exposure from an instance merely flagged
+- **Public S3 bucket** (external vantage) — anonymous (unsigned) `ListObjectsV2`;
+  a 200 confirms unauthenticated listing, a 403 leaves the finding unconfirmed
+  (object-level public read may still apply), a network failure is blocked.
+- **Publicly accessible RDS** (external vantage) — a TCP connect to the
+  instance's collected endpoint with a passive banner read (no bytes sent, no
+  auth attempt). A successful connect confirms the port is genuinely reachable
+  from outside — distinguishing a live exposure from an instance merely flagged
   `PubliclyAccessible` while a security group still blocks it; a refused
   connection is unconfirmed, a timeout is blocked.
+- **Public EBS snapshot** (authenticated vantage) — re-reads each snapshot's
+  `createVolumePermission` with the scan credentials and confirms an explicit
+  grant to the `all` group — the exact mechanism that makes a snapshot
+  world-restorable, re-checked at validation time so a since-remediated snapshot
+  reads as unconfirmed; a denied/throttled read is blocked.
 
-The framework registers validators by check id; loose-OIDC AssumeRole tests,
-public-snapshot describes, and dangling-DNS checks are the next to slot in.
+Authenticated-vantage validators need the live scan session, so they run only
+inline with `--validate`; the standalone `validate` command, which re-reads a
+stored scan offline, runs the external-vantage validators only (the rest skip
+themselves rather than fail). The framework registers validators by check id;
+loose-OIDC AssumeRole tests, public AMI / RDS-snapshot describes, and
+dangling-DNS checks are the next to slot in.
 
 ### Attack-path graph
 

@@ -36,7 +36,7 @@ func s3Finding(bucket string) findings.Finding {
 
 func TestS3ValidatorConfirmedOn200(t *testing.T) {
 	v := s3WithResponse(http.StatusOK, "<ListBucketResult><Contents><Key>secret.txt</Key></Contents></ListBucketResult>")
-	ev, err := v.Validate(context.Background(), s3Finding("public-bucket"))
+	ev, err := v.Validate(context.Background(), Env{}, s3Finding("public-bucket"))
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestS3ValidatorConfirmedOn200(t *testing.T) {
 
 func TestS3ValidatorUnconfirmedOn403(t *testing.T) {
 	v := s3WithResponse(http.StatusForbidden, "<Error><Code>AccessDenied</Code></Error>")
-	ev, err := v.Validate(context.Background(), s3Finding("maybe-bucket"))
+	ev, err := v.Validate(context.Background(), Env{}, s3Finding("maybe-bucket"))
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestS3ValidatorBlockedOnNetworkError(t *testing.T) {
 	v := &s3PublicRead{client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("dial tcp: timeout")
 	})}}
-	ev, err := v.Validate(context.Background(), s3Finding("unreachable"))
+	ev, err := v.Validate(context.Background(), Env{}, s3Finding("unreachable"))
 	if err != nil {
 		t.Fatalf("network error should be captured as evidence, not returned: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestS3ValidatorBlockedOnNetworkError(t *testing.T) {
 
 func TestS3ValidatorEmptyBucketNoOp(t *testing.T) {
 	v := s3WithResponse(http.StatusOK, "")
-	ev, err := v.Validate(context.Background(), s3Finding(""))
+	ev, err := v.Validate(context.Background(), Env{}, s3Finding(""))
 	if err != nil || ev != nil {
 		t.Fatalf("empty bucket id should be a no-op, got ev=%+v err=%v", ev, err)
 	}
@@ -86,7 +86,7 @@ func TestS3ValidatorEmptyBucketNoOp(t *testing.T) {
 func TestS3ValidatorBodyTruncated(t *testing.T) {
 	big := strings.Repeat("A", 5000)
 	v := s3WithResponse(http.StatusOK, big)
-	ev, _ := v.Validate(context.Background(), s3Finding("b"))
+	ev, _ := v.Validate(context.Background(), Env{}, s3Finding("b"))
 	if ev == nil {
 		t.Fatal("expected evidence")
 	}

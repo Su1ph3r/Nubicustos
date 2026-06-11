@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/spf13/cobra"
 
 	"github.com/Su1ph3r/nubicustos/internal/auth"
@@ -202,7 +203,14 @@ func runScan(ctx context.Context, f *scanFlags) error {
 	// Opt-in active validation (read-only): confirm findings and attach evidence
 	// before persistence so it is stored and exported. Off unless --validate.
 	if f.validate {
-		rep := validate.Run(ctx, result.Findings, validate.Options{})
+		var venv validate.Env
+		if provider == "aws" {
+			cfg := sc.AWS // authenticated, MFA-satisfied scan session
+			venv.EC2SnapshotAttr = func(region string) validate.EC2SnapshotAttrAPI {
+				return ec2.NewFromConfig(cfg, func(o *ec2.Options) { o.Region = region })
+			}
+		}
+		rep := validate.Run(ctx, result.Findings, validate.Options{Env: venv})
 		fmt.Fprintf(os.Stderr, "validation: %d confirmed of %d attempted\n", rep.Confirmed, rep.Attempted)
 		for _, e := range rep.Errors {
 			fmt.Fprintf(os.Stderr, "  validation error: %v\n", e)

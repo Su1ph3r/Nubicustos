@@ -49,7 +49,7 @@ func TestRDSReachableConfirmedWithBanner(t *testing.T) {
 	defer cleanup()
 
 	v := &rdsPublicReachable{}
-	ev, err := v.Validate(context.Background(), rdsFinding(addr))
+	ev, err := v.Validate(context.Background(), Env{}, rdsFinding(addr))
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestRDSReachableConfirmedNoBanner(t *testing.T) {
 	defer cleanup()
 
 	v := &rdsPublicReachable{}
-	ev, err := v.Validate(context.Background(), rdsFinding(addr))
+	ev, err := v.Validate(context.Background(), Env{}, rdsFinding(addr))
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestRDSReachableUnconfirmedOnRefused(t *testing.T) {
 	v := &rdsPublicReachable{dial: func(context.Context, string, string) (net.Conn, error) {
 		return nil, errors.New("connect: connection refused")
 	}}
-	ev, err := v.Validate(context.Background(), rdsFinding("db.example.com:5432"))
+	ev, err := v.Validate(context.Background(), Env{}, rdsFinding("db.example.com:5432"))
 	if err != nil {
 		t.Fatalf("dial error must be captured as evidence, not returned: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestRDSReachableBlockedOnTimeout(t *testing.T) {
 	v := &rdsPublicReachable{dial: func(context.Context, string, string) (net.Conn, error) {
 		return nil, timeoutErr{}
 	}}
-	ev, err := v.Validate(context.Background(), rdsFinding("db.example.com:5432"))
+	ev, err := v.Validate(context.Background(), Env{}, rdsFinding("db.example.com:5432"))
 	if err != nil {
 		t.Fatalf("timeout must be captured as evidence: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestRDSReachableContextDeadlineBlocked(t *testing.T) {
 	v := &rdsPublicReachable{dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return nil, context.DeadlineExceeded
 	}}
-	ev, _ := v.Validate(context.Background(), rdsFinding("db.example.com:5432"))
+	ev, _ := v.Validate(context.Background(), Env{}, rdsFinding("db.example.com:5432"))
 	if ev == nil || ev.Verdict != VerdictBlocked {
 		t.Fatalf("context deadline should be blocked, got %+v", ev)
 	}
@@ -133,7 +133,7 @@ func TestRDSReachableContextDeadlineBlocked(t *testing.T) {
 
 func TestRDSReachableNoEndpointNoOp(t *testing.T) {
 	v := &rdsPublicReachable{}
-	ev, err := v.Validate(context.Background(), rdsFinding(""))
+	ev, err := v.Validate(context.Background(), Env{}, rdsFinding(""))
 	if err != nil || ev != nil {
 		t.Fatalf("a finding without an endpoint should be a no-op, got ev=%+v err=%v", ev, err)
 	}
@@ -144,7 +144,7 @@ func TestRDSReachableMalformedEndpointNoOp(t *testing.T) {
 		t.Fatal("dial must not be attempted for a malformed endpoint")
 		return nil, nil
 	}}
-	ev, err := v.Validate(context.Background(), rdsFinding("no-port-here"))
+	ev, err := v.Validate(context.Background(), Env{}, rdsFinding("no-port-here"))
 	if err != nil || ev != nil {
 		t.Fatalf("a host without a port should be a no-op, got ev=%+v err=%v", ev, err)
 	}

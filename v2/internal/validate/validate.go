@@ -36,8 +36,25 @@ type Validator interface {
 	// executes validators that return BlastRadiusNone.
 	BlastRadius() string
 	// Validate attempts read-only confirmation of f and returns evidence, or nil
-	// if the finding offers nothing to confirm. ctx carries the per-action timeout.
-	Validate(ctx context.Context, f findings.Finding) (*findings.Evidence, error)
+	// if the finding offers nothing to confirm. ctx carries the per-action
+	// timeout. env supplies optional authenticated capabilities (nil-safe): an
+	// external-vantage validator ignores it; an authenticated-vantage validator
+	// returns (nil, nil) when the capability it needs is absent (e.g. the offline
+	// validate subcommand has no live session).
+	Validate(ctx context.Context, env Env, f findings.Finding) (*findings.Evidence, error)
+}
+
+// Env supplies the authenticated, read-only capabilities an authenticated-
+// vantage validator needs — the scan credentials exercised as a low-privilege
+// check, as opposed to the credential-free external vantage. It is zero-value-
+// safe: every capability is optional, and a validator skips itself when its
+// required capability is unset. The inline scan (--validate) populates Env from
+// the live session; the standalone `validate` subcommand, which only re-reads a
+// stored scan, leaves it zero so only the external-vantage validators run.
+type Env struct {
+	// EC2SnapshotAttr, when set, returns a read-only EC2 snapshot-attribute
+	// describer bound to region, built from the authenticated scan session.
+	EC2SnapshotAttr func(region string) EC2SnapshotAttrAPI
 }
 
 var (
@@ -61,6 +78,7 @@ func Register(v Validator) {
 type Options struct {
 	Timeout   time.Duration // per-action timeout (default 5s)
 	RateLimit time.Duration // minimum interval between validation actions (default 200ms)
+	Env       Env           // authenticated capabilities; zero value = external-vantage validators only
 	clock     func() time.Time
 	sleep     func(time.Duration)
 }
@@ -127,7 +145,7 @@ func Run(ctx context.Context, fs []findings.Finding, opts Options) Report {
 		last = opts.clock()
 
 		actx, cancel := context.WithTimeout(ctx, opts.Timeout)
-		ev, err := v.Validate(actx, fs[i])
+		ev, err := v.Validate(actx, opts.Env, fs[i])
 		cancel()
 
 		rep.Attempted++
