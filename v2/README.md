@@ -13,7 +13,8 @@ full design.
 > derives scored internet-exposure, privilege-escalation, and assume-role/trust
 > paths with chained PoCs, gated by a local network-reachability solver to cut
 > false positives. An opt-in, read-only active-validation pass confirms findings
-> with captured evidence. The TUI and the remaining Tier-1 capabilities follow per the
+> with captured evidence, and a terminal UI browses a scan. Multi-cloud, plugins,
+> policy-as-code, MCP, and the web UI follow per the
 > plan.
 
 ### Finding shapes
@@ -103,7 +104,26 @@ nubicustos paths --format json
 # Active validation (opt-in, read-only): confirm findings and capture evidence
 nubicustos scan --provider aws --validate   # validate inline with the scan
 nubicustos validate                          # re-validate the latest stored scan
+
+# Terminal UI: browse a stored scan (dashboard, findings+detail, attack paths)
+nubicustos tui
+nubicustos tui --scan <id>
 ```
+
+### Terminal UI
+
+`tui` launches a bubbletea/lipgloss interface over a stored scan — no cloud
+calls, it reads the database. Three views (`1`/`2`/`3` or `tab` to switch):
+
+- **Dashboard** — severity counts and the top attack paths by score.
+- **Findings** — a severity-sorted table; `enter` opens a detail pane with the
+  rationale, impact, remediation, resource-specific PoC, and any captured
+  validation evidence.
+- **Attack Paths** — the scored path list; selecting one shows its step-by-step
+  chained PoC.
+
+Severity is color-coded throughout (critical/high/medium/low/info). The UI is a
+viewer for a completed scan; a live scan-progress launcher is a planned follow-on.
 
 ### Active validation (opt-in, read-only)
 
@@ -179,6 +199,7 @@ The trust analyzer (§9.3) also emits standalone findings, surfaced through
 | `internal/reachability` | network reachability solver for FP reduction — plan §9.5 |
 | `internal/graph` | in-process attack-path graph (nodes, edges, scored paths) — plan §3.2 |
 | `internal/validate` | opt-in read-only active validation + evidence capture — plan §9.1 |
+| `internal/tui` | terminal UI (bubbletea/lipgloss) — dashboard, findings, paths — plan §3.5 |
 | `internal/findings` | normalized domain model |
 | `internal/store` | embedded SQLite persistence |
 | `internal/export` | Cairn / report serializers |

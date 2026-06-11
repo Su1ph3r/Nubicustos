@@ -40,6 +40,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newExportCmd())
 	root.AddCommand(newPathsCmd())
 	root.AddCommand(newValidateCmd())
+	root.AddCommand(newTUICmd())
 	return root
 }
 
