@@ -12,7 +12,8 @@ full design.
 > exportable as Cairn / SARIF / CSV / HTML. An in-process attack-path graph
 > derives scored internet-exposure, privilege-escalation, and assume-role/trust
 > paths with chained PoCs, gated by a local network-reachability solver to cut
-> false positives. The TUI and the remaining Tier-1 capabilities follow per the
+> false positives. An opt-in, read-only active-validation pass confirms findings
+> with captured evidence. The TUI and the remaining Tier-1 capabilities follow per the
 > plan.
 
 ### Finding shapes
@@ -98,7 +99,37 @@ nubicustos export html  --out report.html     # self-contained shareable report
 # scored 0-100 with step-by-step, resource-specific PoCs
 nubicustos paths
 nubicustos paths --format json
+
+# Active validation (opt-in, read-only): confirm findings and capture evidence
+nubicustos scan --provider aws --validate   # validate inline with the scan
+nubicustos validate                          # re-validate the latest stored scan
 ```
+
+### Active validation (opt-in, read-only)
+
+`--validate` (and the `validate` command) run a confirmation pass that proves a
+finding is real and attaches captured evidence (the request issued, the response,
+the vantage, and a `confirmed`/`unconfirmed`/`blocked` verdict) — turning a
+config assertion into a runtime-proven report item that flows into the export.
+
+This is the only part of the tool that reaches out to the scanned resources, so
+it is bound by a strict safety contract:
+
+- **Opt-in** — nothing here runs during a plain scan; it requires `--validate`
+  or the `validate` command.
+- **Read-only** — validators confirm the open door, never walk through it: no
+  writes, modifications, deletes, or denial of service.
+- **Blast radius none** — every validator declares its blast radius, and the
+  runner refuses to execute any validator that does not declare `none`
+  (rejected at registration — fail closed).
+- **Rate-limited**, with a per-action timeout.
+- Evidence records the **vantage** (`external` = no credentials, the operator's
+  network; `authenticated` = scan credentials exercised as a low-privilege check).
+
+Implemented validator: anonymous (unsigned) S3 listing for public-bucket
+findings (external vantage). The framework registers validators by check id;
+TCP-port banner grabs, loose-OIDC AssumeRole tests, public-snapshot describes,
+and dangling-DNS checks are the next validators to slot in.
 
 ### Attack-path graph
 
@@ -147,6 +178,7 @@ The trust analyzer (§9.3) also emits standalone findings, surfaced through
 | `internal/trust` | IAM trust & privilege analysis (assume/federation/privesc) — plan §9.3 |
 | `internal/reachability` | network reachability solver for FP reduction — plan §9.5 |
 | `internal/graph` | in-process attack-path graph (nodes, edges, scored paths) — plan §3.2 |
+| `internal/validate` | opt-in read-only active validation + evidence capture — plan §9.1 |
 | `internal/findings` | normalized domain model |
 | `internal/store` | embedded SQLite persistence |
 | `internal/export` | Cairn / report serializers |

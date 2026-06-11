@@ -17,6 +17,7 @@ import (
 	"github.com/Su1ph3r/nubicustos/internal/findings"
 	awsprovider "github.com/Su1ph3r/nubicustos/internal/providers/aws"
 	"github.com/Su1ph3r/nubicustos/internal/store"
+	"github.com/Su1ph3r/nubicustos/internal/validate"
 )
 
 type scanFlags struct {
@@ -37,6 +38,7 @@ type scanFlags struct {
 
 	dbPath     string
 	exportPath string
+	validate   bool
 }
 
 func newScanCmd() *cobra.Command {
@@ -65,6 +67,7 @@ func newScanCmd() *cobra.Command {
 
 	pf.StringVar(&f.dbPath, "db", "nubicustos.db", "path to the SQLite results database")
 	pf.StringVar(&f.exportPath, "export", "", "write Cairn-format findings JSON to this path")
+	pf.BoolVar(&f.validate, "validate", false, "opt-in: actively (read-only) confirm findings and capture evidence")
 
 	return cmd
 }
@@ -125,6 +128,17 @@ func runScan(ctx context.Context, f *scanFlags) error {
 
 	started := time.Now().UTC()
 	result := engine.Run(sc)
+
+	// Opt-in active validation (read-only): confirm findings and attach evidence
+	// before persistence so it is stored and exported. Off unless --validate.
+	if f.validate {
+		rep := validate.Run(ctx, result.Findings, validate.Options{})
+		fmt.Fprintf(os.Stderr, "validation: %d confirmed of %d attempted\n", rep.Confirmed, rep.Attempted)
+		for _, e := range rep.Errors {
+			fmt.Fprintf(os.Stderr, "  validation error: %v\n", e)
+		}
+	}
+
 	finished := time.Now().UTC()
 
 	// Persist.
