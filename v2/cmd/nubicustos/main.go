@@ -26,7 +26,9 @@ import (
 	_ "github.com/Su1ph3r/nubicustos/internal/providers/k8s"
 )
 
-const version = "2.0.0-dev"
+// version is the build version, injected at release time via
+// -ldflags "-X main.version=<tag>" (goreleaser). Defaults to "dev" for local builds.
+var version = "dev"
 
 func main() {
 	if err := newRootCmd().Execute(); err != nil {

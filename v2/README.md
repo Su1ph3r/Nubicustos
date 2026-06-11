@@ -5,22 +5,21 @@ external scanners, no Postgres/Neo4j — that scans cloud accounts and exports
 runtime-proven findings. See [`../REFACTOR-PLAN.md`](../REFACTOR-PLAN.md) for the
 full design.
 
-> Status: **Phase 0 + 1a + Phase 1 (AWS core) complete.** Auth/MFA layer plus a
-> native AWS posture engine: **32 checks across S3, IAM, EC2, VPC, RDS,
-> CloudTrail, KMS, Config, GuardDuty, Secrets Manager, ELB, and ACM**,
-> multi-region by default, persisted to SQLite, queryable offline, and
-> exportable as Cairn / SARIF / CSV / HTML. An in-process attack-path graph
-> derives scored internet-exposure, privilege-escalation, and assume-role/trust
-> paths with chained PoCs, gated by a local network-reachability solver to cut
-> false positives. An opt-in, read-only active-validation pass confirms findings
-> with captured evidence, and a terminal UI browses a scan. AWS, Azure, GCP, and
-> Kubernetes all have native checks (Azure storage/NSG/key vault across
-> subscriptions; GCP storage/firewall/IAM across projects; K8s pod-security and
-> RBAC across kubeconfig contexts). Optional plugins integrate well-known
-> external scanners (trivy, grype, checkov, terrascan, kube-bench) when present.
-> A CEL/YAML policy-as-code engine evaluates built-in and user rules at runtime.
-> A read-only MCP server exposes results to an LLM. The web UI follows per the
-> plan.
+> Status: **native multi-cloud posture engine.** Up-front auth/MFA across AWS
+> (SSO/AssumeRole+MFA/GetSessionToken/default chain), Azure (CLI/browser/device-
+> code/SP/MI), GCP (ADC), and Kubernetes (kubeconfig contexts). Native checks for
+> AWS (S3/IAM/EC2/VPC/RDS/CloudTrail/KMS/Config/GuardDuty/Secrets Manager/ELB/ACM),
+> Azure (storage/NSG/key vault), GCP (storage/firewall/IAM), and Kubernetes
+> (pod-security/RBAC), persisted to SQLite, queryable offline, and exportable as
+> Cairn / SARIF / CSV / HTML. An in-process attack-path graph derives scored
+> internet-exposure, privilege-escalation, and assume-role/trust paths with
+> chained PoCs, gated by a local network-reachability solver. An opt-in,
+> read-only active-validation pass confirms findings with evidence; a terminal UI
+> browses a scan; optional plugins integrate trivy/grype/checkov/terrascan/
+> kube-bench when present; a CEL/YAML policy-as-code engine evaluates built-in and
+> user rules at runtime; and a read-only MCP server exposes results to an LLM.
+> Distributed as a single static cross-platform binary. The optional embedded web
+> UI is the remaining planned item.
 
 ### Finding shapes
 
@@ -105,6 +104,33 @@ nubicustos scan --provider k8s --context prod-cluster --context staging
 cd v2
 go build -o nubicustos ./cmd/nubicustos
 ```
+
+The build is CGO-free (the SQLite driver is pure Go), so it cross-compiles to
+any `GOOS`/`GOARCH` with no toolchain setup. The version is injected at release
+time: `go build -ldflags "-X main.version=v2.0.0" ./cmd/nubicustos`.
+
+## Distribution
+
+Releases are cut with goreleaser (`.goreleaser.yaml`) on a `v2.*` tag via the
+`release-v2` workflow: static binaries for **linux / macOS / windows × amd64 /
+arm64**, plus SHA-256 checksums and an SBOM per archive.
+
+Distribution to customers is via the sanctioned internal channels — **Azure
+Artifacts** and **per-customer-deployment-hosted install** — not public package
+managers; goreleaser is configured with no Homebrew/Scoop/apt/yum publishers.
+
+Docker is an **optional thin wrapper** around the single binary (`Dockerfile`,
+distroless static base), not the primary run model:
+
+```bash
+docker build -t nubicustos --build-arg VERSION=v2.0.0 .
+docker run --rm -v ~/.aws:/home/nonroot/.aws nubicustos scan --provider aws
+```
+
+> **Cutover:** this single binary replaces the v1 Docker + PostgreSQL + Neo4j
+> compose stack. Archiving/retiring that v1 stack (the repository root) is the
+> final cutover step and is handled at the repository level once v2 reaches
+> parity in production — it is intentionally not part of this branch.
 
 ## Use
 
