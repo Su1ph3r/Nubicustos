@@ -2,6 +2,8 @@ package aws
 
 import (
 	"fmt"
+	"net"
+	"strconv"
 	"time"
 
 	"github.com/Su1ph3r/nubicustos/internal/engine"
@@ -129,6 +131,9 @@ func evalRDS(st *state.State, spec findings.CheckSpec, test func(state.RDSInstan
 			continue
 		}
 		res := rdsResource(st.AWS.Account, db.Region, db.ID)
+		if db.Endpoint != "" && db.Port > 0 {
+			res.Endpoint = net.JoinHostPort(db.Endpoint, strconv.Itoa(db.Port))
+		}
 		out = append(out, findings.New(spec, res, desc, poc, now))
 	}
 	return out, nil

@@ -297,10 +297,20 @@ it is bound by a strict safety contract:
 - Evidence records the **vantage** (`external` = no credentials, the operator's
   network; `authenticated` = scan credentials exercised as a low-privilege check).
 
-Implemented validator: anonymous (unsigned) S3 listing for public-bucket
-findings (external vantage). The framework registers validators by check id;
-TCP-port banner grabs, loose-OIDC AssumeRole tests, public-snapshot describes,
-and dangling-DNS checks are the next validators to slot in.
+Implemented validators (all external vantage):
+
+- **Public S3 bucket** — anonymous (unsigned) `ListObjectsV2`; a 200 confirms
+  unauthenticated listing, a 403 leaves the finding unconfirmed (object-level
+  public read may still apply), a network failure is blocked.
+- **Publicly accessible RDS** — a TCP connect to the instance's collected
+  endpoint with a passive banner read (no bytes sent, no auth attempt). A
+  successful connect confirms the port is genuinely reachable from outside —
+  distinguishing a live exposure from an instance merely flagged
+  `PubliclyAccessible` while a security group still blocks it; a refused
+  connection is unconfirmed, a timeout is blocked.
+
+The framework registers validators by check id; loose-OIDC AssumeRole tests,
+public-snapshot describes, and dangling-DNS checks are the next to slot in.
 
 ### Attack-path graph
 

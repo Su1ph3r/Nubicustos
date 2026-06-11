@@ -100,6 +100,11 @@ type Resource struct {
 	Region   string            `json:"region,omitempty"`
 	ARN      string            `json:"arn,omitempty"`
 	Tags     map[string]string `json:"tags,omitempty"`
+	// Endpoint is the network address the resource is reachable at, as a
+	// dial-ready "host:port", when it has one (e.g. an RDS instance's DNS
+	// endpoint). Empty for resources with no network endpoint. The active-
+	// validation pass uses it to target a reachability probe (plan §9.1).
+	Endpoint string `json:"endpoint,omitempty"`
 }
 
 // Affected is one item covered by an aggregate finding — a region, a security

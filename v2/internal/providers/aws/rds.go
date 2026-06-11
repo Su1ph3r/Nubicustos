@@ -29,6 +29,12 @@ func (rdsCollector) Collect(sc *engine.ScanContext, st *state.State) error {
 				break
 			}
 			for _, db := range page.DBInstances {
+				var endpoint string
+				var port int
+				if db.Endpoint != nil {
+					endpoint = awssdk.ToString(db.Endpoint.Address)
+					port = int(awssdk.ToInt32(db.Endpoint.Port))
+				}
 				st.AddRDSInstance(state.RDSInstance{
 					ID:                 awssdk.ToString(db.DBInstanceIdentifier),
 					Region:             region,
@@ -37,6 +43,8 @@ func (rdsCollector) Collect(sc *engine.ScanContext, st *state.State) error {
 					Encrypted:          awssdk.ToBool(db.StorageEncrypted),
 					BackupRetention:    int(awssdk.ToInt32(db.BackupRetentionPeriod)),
 					DeletionProtection: awssdk.ToBool(db.DeletionProtection),
+					Endpoint:           endpoint,
+					Port:               port,
 				})
 			}
 		}

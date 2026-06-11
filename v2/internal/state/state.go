@@ -184,6 +184,8 @@ type RDSInstance struct {
 	Encrypted          bool
 	BackupRetention    int
 	DeletionProtection bool
+	Endpoint           string // DNS address the engine listens on (empty if not yet available)
+	Port               int    // engine port (0 if unknown)
 }
 
 // --- CloudTrail (regional, account-derived) ---------------------------------
