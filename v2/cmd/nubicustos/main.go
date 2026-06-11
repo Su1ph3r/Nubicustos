@@ -14,6 +14,7 @@ import (
 	// Register checks (collectors register via the provider imports in scan.go).
 	_ "github.com/Su1ph3r/nubicustos/internal/checks/aws"
 	_ "github.com/Su1ph3r/nubicustos/internal/checks/azure"
+	_ "github.com/Su1ph3r/nubicustos/internal/checks/gcp"
 )
 
 const version = "2.0.0-dev"

@@ -375,11 +375,49 @@ type Azure struct {
 	KeyVaults       []KeyVault
 }
 
+// --- GCP --------------------------------------------------------------------
+
+// GCSBucket is the collected posture of a Cloud Storage bucket.
+type GCSBucket struct {
+	Name                     string
+	Project                  string
+	Location                 string
+	PublicIAM                bool   // IAM policy grants allUsers / allAuthenticatedUsers
+	UniformBucketLevelAccess bool   // uniform (vs legacy ACL) access enabled
+	PublicAccessPrevention   string // "enforced" | "inherited"
+}
+
+// FirewallRule is the collected posture of a VPC firewall rule.
+type FirewallRule struct {
+	Name         string
+	Project      string
+	Network      string
+	Direction    string // INGRESS | EGRESS
+	Disabled     bool
+	Allowed      []string // "tcp:22", "udp:53", "all"
+	SourceRanges []string // e.g. "0.0.0.0/0"
+}
+
+// GCPIAMBinding is one role binding from a project's IAM policy.
+type GCPIAMBinding struct {
+	Project string
+	Role    string   // e.g. roles/owner
+	Members []string // e.g. allUsers, allAuthenticatedUsers, user:..., serviceAccount:...
+}
+
+// GCP is the collected GCP-side state for one or more projects.
+type GCP struct {
+	Buckets     []GCSBucket
+	Firewalls   []FirewallRule
+	IAMBindings []GCPIAMBinding
+}
+
 // State is the full collected state for a scan across providers.
 type State struct {
 	mu    sync.Mutex
 	AWS   *AWS
 	Azure *Azure
+	GCP   *GCP
 }
 
 // New returns an initialized, empty State.
@@ -391,7 +429,29 @@ func New() *State {
 			GuardDutyEnabledByRegion: map[string]bool{},
 		},
 		Azure: &Azure{},
+		GCP:   &GCP{},
 	}
+}
+
+// AddGCSBucket appends a collected Cloud Storage bucket under lock.
+func (s *State) AddGCSBucket(b GCSBucket) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.GCP.Buckets = append(s.GCP.Buckets, b)
+}
+
+// AddFirewallRule appends a collected VPC firewall rule under lock.
+func (s *State) AddFirewallRule(r FirewallRule) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.GCP.Firewalls = append(s.GCP.Firewalls, r)
+}
+
+// AddGCPIAMBinding appends a collected project IAM binding under lock.
+func (s *State) AddGCPIAMBinding(b GCPIAMBinding) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.GCP.IAMBindings = append(s.GCP.IAMBindings, b)
 }
 
 // AddStorageAccount appends a collected Azure storage account under lock.

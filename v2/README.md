@@ -13,10 +13,10 @@ full design.
 > derives scored internet-exposure, privilege-escalation, and assume-role/trust
 > paths with chained PoCs, gated by a local network-reachability solver to cut
 > false positives. An opt-in, read-only active-validation pass confirms findings
-> with captured evidence, and a terminal UI browses a scan. Azure support adds
-> native checks for storage, network security groups, and key vault across
-> discovered subscriptions. GCP, K8s, plugins, policy-as-code, MCP, and the web
-> UI follow per the
+> with captured evidence, and a terminal UI browses a scan. Azure and GCP add
+> native checks (Azure storage/NSG/key vault across subscriptions; GCP
+> storage/firewall/IAM across projects). K8s, plugins, policy-as-code, MCP, and
+> the web UI follow per the
 > plan.
 
 ### Finding shapes
@@ -59,6 +59,23 @@ Native Azure checks run across the subscriptions discovered from the credential
 # Azure — scan all enabled subscriptions (or pick one with --subscription)
 nubicustos scan --provider azure
 nubicustos scan --provider azure --subscription 00000000-0000-0000-0000-000000000000
+```
+
+### Check catalog (GCP)
+
+Native GCP checks run across the projects discovered from Application Default
+Credentials (or `--project <id>`):
+
+| Service | Checks |
+|---------|--------|
+| Cloud Storage | public IAM (allUsers/allAuthenticatedUsers), uniform bucket-level access disabled, public access prevention not enforced |
+| Compute | firewall ingress exposes sensitive ports to `0.0.0.0/0` |
+| IAM | project binding grants a role to all users, broad primitive role (owner/editor) in use |
+
+```bash
+# GCP — scan all active projects (uses ADC; or pick one with --project)
+nubicustos scan --provider gcp
+nubicustos scan --provider gcp --project my-project-id
 ```
 
 `*` = aggregate finding (single finding with an `affected` list).
@@ -214,8 +231,10 @@ The trust analyzer (§9.3) also emits standalone findings, surfaced through
 | `internal/state` | normalized collected cloud state |
 | `internal/providers/aws` | AWS collectors (read-only API gatherers) |
 | `internal/providers/azure` | Azure collectors (storage, NSG, key vault, subscription discovery) |
+| `internal/providers/gcp` | GCP collectors (Cloud Storage, firewall, IAM, project discovery) |
 | `internal/checks/aws` | native AWS posture checks |
 | `internal/checks/azure` | native Azure posture checks |
+| `internal/checks/gcp` | native GCP posture checks |
 | `internal/trust` | IAM trust & privilege analysis (assume/federation/privesc) — plan §9.3 |
 | `internal/reachability` | network reachability solver for FP reduction — plan §9.5 |
 | `internal/graph` | in-process attack-path graph (nodes, edges, scored paths) — plan §3.2 |

@@ -17,6 +17,7 @@ import (
 	"github.com/Su1ph3r/nubicustos/internal/findings"
 	awsprovider "github.com/Su1ph3r/nubicustos/internal/providers/aws"
 	azureprovider "github.com/Su1ph3r/nubicustos/internal/providers/azure"
+	gcpprovider "github.com/Su1ph3r/nubicustos/internal/providers/gcp"
 	"github.com/Su1ph3r/nubicustos/internal/store"
 	"github.com/Su1ph3r/nubicustos/internal/validate"
 )
@@ -38,6 +39,9 @@ type scanFlags struct {
 	clientSecret  string
 	subscriptions []string
 
+	// GCP
+	projects []string
+
 	dbPath     string
 	exportPath string
 	validate   bool
@@ -53,7 +57,7 @@ func newScanCmd() *cobra.Command {
 		},
 	}
 	pf := cmd.Flags()
-	pf.StringVar(&f.provider, "provider", "", "cloud provider: aws | azure (required)")
+	pf.StringVar(&f.provider, "provider", "", "cloud provider: aws | azure | gcp (required)")
 	pf.StringVar(&f.profile, "profile", "", "AWS named profile")
 	pf.StringSliceVar(&f.regions, "region", nil, "region(s) to scan (repeatable)")
 	pf.StringVar(&f.mfaSerial, "mfa-serial", "", "AWS MFA device ARN (for static-keys + MFA-condition profiles)")
@@ -67,6 +71,7 @@ func newScanCmd() *cobra.Command {
 	pf.StringVar(&f.clientID, "client-id", "", "Azure client id (service-principal)")
 	pf.StringVar(&f.clientSecret, "client-secret", "", "Azure client secret (service-principal)")
 	pf.StringSliceVar(&f.subscriptions, "subscription", nil, "Azure subscription id(s) to scan (repeatable; default: all enabled)")
+	pf.StringSliceVar(&f.projects, "project", nil, "GCP project id(s) to scan (repeatable; default: all active)")
 
 	pf.StringVar(&f.dbPath, "db", "nubicustos.db", "path to the SQLite results database")
 	pf.StringVar(&f.exportPath, "export", "", "write Cairn-format findings JSON to this path")
@@ -140,6 +145,26 @@ func runScan(ctx context.Context, f *scanFlags) error {
 		sc.Account = strings.Join(subs, ",")
 		account = sc.Account
 		fmt.Fprintf(os.Stderr, "authenticated to Azure; scanning %d subscription(s)\n", len(subs))
+
+	case "gcp":
+		creds, err := auth.ResolveGCP(ctx)
+		if err != nil {
+			return err
+		}
+		projects := f.projects
+		if len(projects) == 0 {
+			projects, err = gcpprovider.EnabledProjects(ctx, creds)
+			if err != nil {
+				return fmt.Errorf("enumerating projects: %w", err)
+			}
+		}
+		if len(projects) == 0 {
+			return fmt.Errorf("no active GCP projects visible to this identity (use --project to specify one)")
+		}
+		sc.GCP = engine.GCPSession{Credentials: creds, Projects: projects}
+		sc.Account = strings.Join(projects, ",")
+		account = sc.Account
+		fmt.Fprintf(os.Stderr, "authenticated to GCP; scanning %d project(s)\n", len(projects))
 
 	default:
 		return fmt.Errorf("unsupported provider %q", provider)

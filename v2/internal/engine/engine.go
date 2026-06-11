@@ -15,6 +15,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"golang.org/x/oauth2/google"
 
 	"github.com/Su1ph3r/nubicustos/internal/findings"
 	"github.com/Su1ph3r/nubicustos/internal/graph"
@@ -35,6 +36,9 @@ type ScanContext struct {
 
 	// Azure holds the resolved credential and subscriptions when Provider == "azure".
 	Azure AzureSession
+
+	// GCP holds the resolved ADC credentials and projects when Provider == "gcp".
+	GCP GCPSession
 }
 
 // AzureSession carries the validated Azure credential and the subscriptions in
@@ -42,6 +46,13 @@ type ScanContext struct {
 type AzureSession struct {
 	Credential    azcore.TokenCredential
 	Subscriptions []string
+}
+
+// GCPSession carries the validated Application Default Credentials and the
+// projects in scope for the scan.
+type GCPSession struct {
+	Credentials *google.Credentials
+	Projects    []string
 }
 
 // Collector reads cloud configuration into State. Implementations must no-op
