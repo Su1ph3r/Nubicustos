@@ -11,8 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	// Register AWS checks (collectors register via the providers/aws import in scan.go).
+	// Register checks (collectors register via the provider imports in scan.go).
 	_ "github.com/Su1ph3r/nubicustos/internal/checks/aws"
+	_ "github.com/Su1ph3r/nubicustos/internal/checks/azure"
 )
 
 const version = "2.0.0-dev"

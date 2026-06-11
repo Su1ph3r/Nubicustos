@@ -7,6 +7,7 @@
 package state
 
 import (
+	"strings"
 	"sync"
 	"time"
 )
@@ -309,19 +310,109 @@ type AWS struct {
 	Certificates  []Certificate
 }
 
+// --- Azure ------------------------------------------------------------------
+
+// StorageAccount is the collected posture of an Azure storage account.
+type StorageAccount struct {
+	Name                  string
+	ResourceGroup         string
+	Subscription          string
+	Location              string
+	AllowBlobPublicAccess bool   // account permits anonymous blob/container access
+	HTTPSOnly             bool   // EnableHTTPSTrafficOnly
+	MinTLSVersion         string // e.g. "TLS1_2"
+	NetworkDefaultAllow   bool   // network rule set default action == Allow (open to all networks)
+}
+
+// NSGRule is a single inbound/outbound security rule on a network security group.
+type NSGRule struct {
+	Name      string
+	Direction string // Inbound | Outbound
+	Access    string // Allow | Deny
+	Protocol  string // Tcp | Udp | * ...
+	Priority  int
+	DestPorts string // destination port or range (e.g. "22", "0-65535", "*")
+	Source    string // source prefix: "*", "Internet", "0.0.0.0/0", a CIDR
+}
+
+// OpenToInternet reports whether the rule allows inbound traffic from the whole
+// internet (source "*", "Internet", or a 0.0.0.0/0 ::/0 prefix on an Allow rule).
+func (r NSGRule) OpenToInternet() bool {
+	if !strings.EqualFold(r.Direction, "Inbound") || !strings.EqualFold(r.Access, "Allow") {
+		return false
+	}
+	switch r.Source {
+	case "*", "Internet", "0.0.0.0/0", "::/0":
+		return true
+	}
+	return false
+}
+
+// NetworkSecurityGroup is the collected rule posture of an Azure NSG.
+type NetworkSecurityGroup struct {
+	Name          string
+	ResourceGroup string
+	Subscription  string
+	Location      string
+	Rules         []NSGRule
+}
+
+// KeyVault is the collected posture of an Azure key vault.
+type KeyVault struct {
+	Name                string
+	ResourceGroup       string
+	Subscription        string
+	Location            string
+	SoftDeleteEnabled   bool
+	PurgeProtection     bool
+	NetworkDefaultAllow bool // network ACL default action == Allow
+}
+
+// Azure is the collected Azure-side state for one or more subscriptions.
+type Azure struct {
+	StorageAccounts []StorageAccount
+	NSGs            []NetworkSecurityGroup
+	KeyVaults       []KeyVault
+}
+
 // State is the full collected state for a scan across providers.
 type State struct {
-	mu  sync.Mutex
-	AWS *AWS
+	mu    sync.Mutex
+	AWS   *AWS
+	Azure *Azure
 }
 
 // New returns an initialized, empty State.
 func New() *State {
-	return &State{AWS: &AWS{
-		EBSEncryptionByDefault:   map[string]bool{},
-		ConfigByRegion:           map[string]ConfigStatus{},
-		GuardDutyEnabledByRegion: map[string]bool{},
-	}}
+	return &State{
+		AWS: &AWS{
+			EBSEncryptionByDefault:   map[string]bool{},
+			ConfigByRegion:           map[string]ConfigStatus{},
+			GuardDutyEnabledByRegion: map[string]bool{},
+		},
+		Azure: &Azure{},
+	}
+}
+
+// AddStorageAccount appends a collected Azure storage account under lock.
+func (s *State) AddStorageAccount(a StorageAccount) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Azure.StorageAccounts = append(s.Azure.StorageAccounts, a)
+}
+
+// AddNSG appends a collected network security group under lock.
+func (s *State) AddNSG(g NetworkSecurityGroup) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Azure.NSGs = append(s.Azure.NSGs, g)
+}
+
+// AddKeyVault appends a collected key vault under lock.
+func (s *State) AddKeyVault(v KeyVault) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Azure.KeyVaults = append(s.Azure.KeyVaults, v)
 }
 
 // SetAWSAccount records the account id the AWS state belongs to.

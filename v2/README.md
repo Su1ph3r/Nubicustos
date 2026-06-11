@@ -13,8 +13,10 @@ full design.
 > derives scored internet-exposure, privilege-escalation, and assume-role/trust
 > paths with chained PoCs, gated by a local network-reachability solver to cut
 > false positives. An opt-in, read-only active-validation pass confirms findings
-> with captured evidence, and a terminal UI browses a scan. Multi-cloud, plugins,
-> policy-as-code, MCP, and the web UI follow per the
+> with captured evidence, and a terminal UI browses a scan. Azure support adds
+> native checks for storage, network security groups, and key vault across
+> discovered subscriptions. GCP, K8s, plugins, policy-as-code, MCP, and the web
+> UI follow per the
 > plan.
 
 ### Finding shapes
@@ -41,6 +43,23 @@ Two shapes, chosen per check:
 | Secrets Manager | rotation disabled* |
 | ELB | internet-facing HTTP listener, weak TLS policy, access logs disabled |
 | ACM | certificate expired, certificate expiring (<30d) |
+
+### Check catalog (Azure)
+
+Native Azure checks run across the subscriptions discovered from the credential
+(or `--subscription <id>`):
+
+| Service | Checks |
+|---------|--------|
+| Storage | anonymous blob public access, HTTPS-only not enforced, network rules default to Allow |
+| Network | NSG exposes sensitive ports to the internet (inbound Allow from `*`/`Internet`/`0.0.0.0/0`) |
+| Key Vault | soft-delete disabled, purge protection disabled, network rules default to Allow |
+
+```bash
+# Azure — scan all enabled subscriptions (or pick one with --subscription)
+nubicustos scan --provider azure
+nubicustos scan --provider azure --subscription 00000000-0000-0000-0000-000000000000
+```
 
 `*` = aggregate finding (single finding with an `affected` list).
 
@@ -194,7 +213,9 @@ The trust analyzer (§9.3) also emits standalone findings, surfaced through
 | `internal/engine` | registry + concurrent collect→check scanner + graph build |
 | `internal/state` | normalized collected cloud state |
 | `internal/providers/aws` | AWS collectors (read-only API gatherers) |
+| `internal/providers/azure` | Azure collectors (storage, NSG, key vault, subscription discovery) |
 | `internal/checks/aws` | native AWS posture checks |
+| `internal/checks/azure` | native Azure posture checks |
 | `internal/trust` | IAM trust & privilege analysis (assume/federation/privesc) — plan §9.3 |
 | `internal/reachability` | network reachability solver for FP reduction — plan §9.5 |
 | `internal/graph` | in-process attack-path graph (nodes, edges, scored paths) — plan §3.2 |

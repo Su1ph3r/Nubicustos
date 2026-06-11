@@ -16,6 +16,7 @@ import (
 	"github.com/Su1ph3r/nubicustos/internal/export"
 	"github.com/Su1ph3r/nubicustos/internal/findings"
 	awsprovider "github.com/Su1ph3r/nubicustos/internal/providers/aws"
+	azureprovider "github.com/Su1ph3r/nubicustos/internal/providers/azure"
 	"github.com/Su1ph3r/nubicustos/internal/store"
 	"github.com/Su1ph3r/nubicustos/internal/validate"
 )
@@ -31,10 +32,11 @@ type scanFlags struct {
 	nonInteractive bool
 
 	// Azure
-	authMethod   string
-	tenantID     string
-	clientID     string
-	clientSecret string
+	authMethod    string
+	tenantID      string
+	clientID      string
+	clientSecret  string
+	subscriptions []string
 
 	dbPath     string
 	exportPath string
@@ -64,6 +66,7 @@ func newScanCmd() *cobra.Command {
 	pf.StringVar(&f.tenantID, "tenant", "", "Azure tenant id (service-principal)")
 	pf.StringVar(&f.clientID, "client-id", "", "Azure client id (service-principal)")
 	pf.StringVar(&f.clientSecret, "client-secret", "", "Azure client secret (service-principal)")
+	pf.StringSliceVar(&f.subscriptions, "subscription", nil, "Azure subscription id(s) to scan (repeatable; default: all enabled)")
 
 	pf.StringVar(&f.dbPath, "db", "nubicustos.db", "path to the SQLite results database")
 	pf.StringVar(&f.exportPath, "export", "", "write Cairn-format findings JSON to this path")
@@ -112,15 +115,31 @@ func runScan(ctx context.Context, f *scanFlags) error {
 		fmt.Fprintf(os.Stderr, "scanning %d region(s)\n", len(sc.Regions))
 
 	case "azure":
-		if _, err := auth.ResolveAzure(ctx, auth.AzureOptions{
+		cred, err := auth.ResolveAzure(ctx, auth.AzureOptions{
 			Method:       auth.AzureMethod(f.authMethod),
 			TenantID:     f.tenantID,
 			ClientID:     f.clientID,
 			ClientSecret: f.clientSecret,
-		}, prompter); err != nil {
+		}, prompter)
+		if err != nil {
 			return err
 		}
-		fmt.Fprintln(os.Stderr, "authenticated to Azure (native Azure checks land in a later phase)")
+
+		// Discover the subscriptions in scope (§9.4), or honor an explicit list.
+		subs := f.subscriptions
+		if len(subs) == 0 {
+			subs, err = azureprovider.EnabledSubscriptions(ctx, cred)
+			if err != nil {
+				return fmt.Errorf("enumerating subscriptions: %w", err)
+			}
+		}
+		if len(subs) == 0 {
+			return fmt.Errorf("no enabled Azure subscriptions visible to this identity (use --subscription to specify one)")
+		}
+		sc.Azure = engine.AzureSession{Credential: cred, Subscriptions: subs}
+		sc.Account = strings.Join(subs, ",")
+		account = sc.Account
+		fmt.Fprintf(os.Stderr, "authenticated to Azure; scanning %d subscription(s)\n", len(subs))
 
 	default:
 		return fmt.Errorf("unsupported provider %q", provider)

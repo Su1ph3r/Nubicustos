@@ -5,10 +5,13 @@ import (
 
 	"github.com/Su1ph3r/nubicustos/internal/engine"
 
-	// Importing these packages triggers init-time registration of the AWS
-	// collectors and checks into the engine registry.
+	// Importing these packages triggers init-time registration of the
+	// collectors and checks into the engine registry. This is the full-catalog
+	// guard, so it imports every provider's checks and collectors.
 	_ "github.com/Su1ph3r/nubicustos/internal/checks/aws"
+	_ "github.com/Su1ph3r/nubicustos/internal/checks/azure"
 	_ "github.com/Su1ph3r/nubicustos/internal/providers/aws"
+	_ "github.com/Su1ph3r/nubicustos/internal/providers/azure"
 )
 
 // TestAllChecksUnique guards against duplicate check IDs (a copy-paste hazard as
@@ -28,18 +31,19 @@ func TestAllChecksUnique(t *testing.T) {
 		seen[id] = true
 	}
 
-	// Phase 1 catalog: S3(1) + IAM(6) + EC2(5) + RDS(4) + CloudTrail(3)
+	// AWS catalog: S3(1) + IAM(6) + EC2(5) + RDS(4) + CloudTrail(3)
 	// + KMS(1) + Config(1) + GuardDuty(1) + VPC(1) + exposure(3)
-	// + SecretsManager(1) + ELB(3) + ACM(2) = 32, plus the Phase-2 IAM
-	// trust/privilege analysis umbrella check = 33.
-	const wantChecks = 33
+	// + SecretsManager(1) + ELB(3) + ACM(2) + IAM trust/privilege umbrella(1) = 33.
+	// Azure catalog: storage(3) + NSG(1) + key vault(3) = 7. Total = 40.
+	const wantChecks = 40
 	if len(checks) != wantChecks {
 		t.Errorf("registered checks = %d, want %d", len(checks), wantChecks)
 	}
 
-	// Collectors: s3, iam, ec2, rds, cloudtrail, kms, config, guardduty,
-	// vpc, snapshots, secretsmanager, elbv2, acm = 13.
-	const wantCollectors = 13
+	// Collectors: AWS s3, iam, ec2, rds, cloudtrail, kms, config, guardduty,
+	// vpc, snapshots, secretsmanager, elbv2, acm = 13; Azure storage, nsg,
+	// keyvault = 3. Total = 16.
+	const wantCollectors = 16
 	if got := len(engine.Collectors()); got != wantCollectors {
 		t.Errorf("registered collectors = %d, want %d", got, wantCollectors)
 	}

@@ -13,6 +13,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/aws/aws-sdk-go-v2/aws"
 
 	"github.com/Su1ph3r/nubicustos/internal/findings"
@@ -31,6 +32,16 @@ type ScanContext struct {
 
 	// AWS holds the resolved, MFA-satisfied AWS config when Provider == "aws".
 	AWS aws.Config
+
+	// Azure holds the resolved credential and subscriptions when Provider == "azure".
+	Azure AzureSession
+}
+
+// AzureSession carries the validated Azure credential and the subscriptions in
+// scope for the scan.
+type AzureSession struct {
+	Credential    azcore.TokenCredential
+	Subscriptions []string
 }
 
 // Collector reads cloud configuration into State. Implementations must no-op
