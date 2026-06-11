@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/spf13/cobra"
 
 	"github.com/Su1ph3r/nubicustos/internal/auth"
@@ -208,6 +209,12 @@ func runScan(ctx context.Context, f *scanFlags) error {
 			cfg := sc.AWS // authenticated, MFA-satisfied scan session
 			venv.EC2SnapshotAttr = func(region string) validate.EC2SnapshotAttrAPI {
 				return ec2.NewFromConfig(cfg, func(o *ec2.Options) { o.Region = region })
+			}
+			venv.EC2ImageAttr = func(region string) validate.EC2ImageAttrAPI {
+				return ec2.NewFromConfig(cfg, func(o *ec2.Options) { o.Region = region })
+			}
+			venv.RDSSnapshotAttr = func(region string) validate.RDSSnapshotAttrAPI {
+				return rds.NewFromConfig(cfg, func(o *rds.Options) { o.Region = region })
 			}
 		}
 		rep := validate.Run(ctx, result.Findings, validate.Options{Env: venv})

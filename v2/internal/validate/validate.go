@@ -55,6 +55,12 @@ type Env struct {
 	// EC2SnapshotAttr, when set, returns a read-only EC2 snapshot-attribute
 	// describer bound to region, built from the authenticated scan session.
 	EC2SnapshotAttr func(region string) EC2SnapshotAttrAPI
+	// EC2ImageAttr, when set, returns a read-only EC2 image-attribute describer
+	// bound to region (for confirming public AMI launch permissions).
+	EC2ImageAttr func(region string) EC2ImageAttrAPI
+	// RDSSnapshotAttr, when set, returns a read-only RDS snapshot-attribute
+	// describer bound to region (for confirming public RDS snapshot restore grants).
+	RDSSnapshotAttr func(region string) RDSSnapshotAttrAPI
 }
 
 var (

@@ -313,13 +313,16 @@ Implemented validators:
   grant to the `all` group — the exact mechanism that makes a snapshot
   world-restorable, re-checked at validation time so a since-remediated snapshot
   reads as unconfirmed; a denied/throttled read is blocked.
+- **Public AMI** (authenticated vantage) — re-reads each image's
+  `launchPermission` and confirms a grant to the `all` group.
+- **Public RDS snapshot** (authenticated vantage) — re-reads each manual
+  snapshot's `restore` attribute and confirms it lists `all`.
 
 Authenticated-vantage validators need the live scan session, so they run only
 inline with `--validate`; the standalone `validate` command, which re-reads a
 stored scan offline, runs the external-vantage validators only (the rest skip
 themselves rather than fail). The framework registers validators by check id;
-loose-OIDC AssumeRole tests, public AMI / RDS-snapshot describes, and
-dangling-DNS checks are the next to slot in.
+loose-OIDC AssumeRole tests and dangling-DNS checks are the next to slot in.
 
 ### Attack-path graph
 
