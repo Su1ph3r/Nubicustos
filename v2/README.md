@@ -319,6 +319,10 @@ request. Four views (`1`/`2`/`3`/`4` or `tab` to switch):
   last-run history. Pick a target (`e` to edit), then `enter` runs the selected
   tool or `a` runs every installed one; the run executes in the background with
   a spinner, and on completion the views refresh to the new scan's findings.
+  Started with `tui --preflight` (plus a credential), this view also shows a
+  **cloud access** group — `p` runs the access preflight and annotates each
+  cloud-posture tool (Nubicustos / Prowler / ScoutSuite / CloudSploit) with its
+  `ready`/`partial`/`failed` readiness for the active credential.
 
 Severity is color-coded throughout (critical/high/medium/low/info).
 

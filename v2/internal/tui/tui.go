@@ -56,6 +56,7 @@ type Model struct {
 	// Tools view (optional, side-effecting via actions).
 	actions Actions
 	tools   []ToolStatus
+	cloud   []ToolReadiness // cloud-access tools (preflight); empty without a session
 	toolIdx int
 	target  textinput.Model
 	editing bool
@@ -84,6 +85,9 @@ func New(d Data, actions Actions) Model {
 	}
 	if actions != nil {
 		m.tools = actions.ListTools()
+		if actions.PreflightAvailable() {
+			m.cloud = actions.PreflightTools()
+		}
 	}
 	return m
 }
@@ -149,6 +153,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.actions != nil {
 			m.tools = m.actions.ListTools() // refresh last-run/finding counts
 		}
+		return m, nil
+
+	case preflightDoneMsg:
+		m.running = false
+		if msg.err != nil {
+			m.status = "preflight failed: " + msg.err.Error()
+			return m, nil
+		}
+		m.cloud = msg.readiness
+		m.status = "access checked"
 		return m, nil
 
 	case tea.KeyMsg:
@@ -278,6 +292,9 @@ func (m Model) footer() string {
 		keys = "↑/↓: select path · " + keys
 	case viewTools:
 		keys = "↑/↓: select · enter: run · a: run all · e: edit target · " + keys
+		if m.actions != nil && m.actions.PreflightAvailable() {
+			keys = "p: check access · " + keys
+		}
 	}
 	return theme.Muted.Render(keys)
 }
