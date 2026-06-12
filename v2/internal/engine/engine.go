@@ -20,6 +20,7 @@ import (
 
 	"github.com/Su1ph3r/nubicustos/internal/findings"
 	"github.com/Su1ph3r/nubicustos/internal/graph"
+	"github.com/Su1ph3r/nubicustos/internal/progress"
 	"github.com/Su1ph3r/nubicustos/internal/reachability"
 	"github.com/Su1ph3r/nubicustos/internal/state"
 )
@@ -43,6 +44,12 @@ type ScanContext struct {
 
 	// K8s holds the resolved per-context REST configs when Provider == "k8s".
 	K8s K8sSession
+
+	// Progress, if set, receives real per-phase progress as the scan runs
+	// (collectors and checks report per completed unit; reachability and graph
+	// report as indeterminate phases). Nil disables reporting. The reporter must
+	// be safe for concurrent calls — collectors and checks run in a worker pool.
+	Progress progress.Reporter
 }
 
 // K8sSession carries the validated kubeconfig contexts in scope for the scan.
@@ -147,23 +154,33 @@ func Run(sc *ScanContext) *Result {
 	cs := append([]Collector(nil), collectors...)
 	cks := append([]Check(nil), checks...)
 	regMu.Unlock()
+	return runScan(sc, cs, cks)
+}
 
+// runScan is the registry-independent core, taking explicit collector/check
+// lists so it is testable with fakes. It reports real progress through
+// sc.Progress: collect and check each emit one event per completed unit (true
+// done/total), and reachability + graph report as indeterminate phases.
+func runScan(sc *ScanContext, cs []Collector, cks []Check) *Result {
 	st := state.New()
 	st.SetAWSAccount(sc.Account)
 
 	res := &Result{Collectors: len(cs), Checks: len(cks)}
 	var mu sync.Mutex
 
-	// Phase 1: collectors fill state.
+	// Phase 1: collectors fill state. Report per completed collector.
+	collectProg := progress.NewCounter(sc.Progress, progress.PhaseCollect, len(cs))
 	runPool(cs, concurrency(), func(c Collector) {
 		if err := c.Collect(sc, st); err != nil {
 			mu.Lock()
 			res.Errors = append(res.Errors, err)
 			mu.Unlock()
 		}
+		collectProg.Done(c.Name())
 	})
 
-	// Phase 2: checks read state and emit findings.
+	// Phase 2: checks read state and emit findings. Report per completed check.
+	checkProg := progress.NewCounter(sc.Progress, progress.PhaseCheck, len(cks))
 	runPool(cks, concurrency(), func(ck Check) {
 		fs, err := ck.Evaluate(sc, st)
 		mu.Lock()
@@ -172,6 +189,7 @@ func Run(sc *ScanContext) *Result {
 		}
 		res.Findings = append(res.Findings, fs...)
 		mu.Unlock()
+		checkProg.Done(ck.Spec().ID)
 	})
 
 	sort.SliceStable(res.Findings, func(i, j int) bool {
@@ -183,9 +201,12 @@ func Run(sc *ScanContext) *Result {
 
 	// Phase 3: solve network reachability, annotate exposure findings with it
 	// (§9.5 false-positive reduction), then derive the attack-path graph from the
-	// fully collected state with reachability applied.
+	// fully collected state with reachability applied. These have no knowable
+	// per-unit total, so they report as indeterminate phases.
+	progress.ReportPhase(sc.Progress, progress.PhaseReachability, "")
 	rch := reachability.Solve(st.AWS)
 	reachability.Annotate(res.Findings, st.AWS, rch)
+	progress.ReportPhase(sc.Progress, progress.PhaseGraph, "")
 	res.Graph = graph.Build(st, rch)
 	return res
 }

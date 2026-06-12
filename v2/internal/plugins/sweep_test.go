@@ -38,27 +38,27 @@ func assertSkippedInOrder(t *testing.T, ms []Manifest, results []RunResult) {
 
 func TestRunAvailableSequentialSkipsAbsentInOrder(t *testing.T) {
 	ms := absentManifests()
-	assertSkippedInOrder(t, ms, runAvailable(context.Background(), ".", ms, 1))
+	assertSkippedInOrder(t, ms, runAvailable(context.Background(), ".", ms, 1, nil))
 }
 
 func TestRunAvailableConcurrentPreservesOrder(t *testing.T) {
 	// Even with a concurrency bound above the tool count, results stay in input
 	// order regardless of completion order.
 	ms := absentManifests()
-	assertSkippedInOrder(t, ms, runAvailable(context.Background(), ".", ms, 8))
+	assertSkippedInOrder(t, ms, runAvailable(context.Background(), ".", ms, 8, nil))
 }
 
 func TestRunAvailableClampsConcurrency(t *testing.T) {
 	// A non-positive concurrency is clamped to sequential, never a deadlock.
 	ms := absentManifests()
-	assertSkippedInOrder(t, ms, runAvailable(context.Background(), ".", ms, 0))
+	assertSkippedInOrder(t, ms, runAvailable(context.Background(), ".", ms, 0, nil))
 }
 
 func TestRunAvailableSurfacesCancellation(t *testing.T) {
 	ms := absentManifests()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel before the sweep starts
-	results := runAvailable(ctx, ".", ms, DefaultSweepConcurrency)
+	results := runAvailable(ctx, ".", ms, DefaultSweepConcurrency, nil)
 	// Cancellation must not silently drop tools: every manifest is still
 	// reported, each carrying the cancellation error and never marked as run.
 	if len(results) != len(ms) {
@@ -75,7 +75,7 @@ func TestRunAvailableSurfacesCancellation(t *testing.T) {
 }
 
 func TestRunAvailableEmptySet(t *testing.T) {
-	if results := runAvailable(context.Background(), ".", nil, DefaultSweepConcurrency); len(results) != 0 {
+	if results := runAvailable(context.Background(), ".", nil, DefaultSweepConcurrency, nil); len(results) != 0 {
 		t.Fatalf("an empty tool set yields no results, got %d", len(results))
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
@@ -19,6 +20,7 @@ import (
 	"github.com/Su1ph3r/nubicustos/internal/engine"
 	"github.com/Su1ph3r/nubicustos/internal/export"
 	"github.com/Su1ph3r/nubicustos/internal/findings"
+	"github.com/Su1ph3r/nubicustos/internal/progress"
 	awsprovider "github.com/Su1ph3r/nubicustos/internal/providers/aws"
 	azureprovider "github.com/Su1ph3r/nubicustos/internal/providers/azure"
 	gcpprovider "github.com/Su1ph3r/nubicustos/internal/providers/gcp"
@@ -200,11 +202,13 @@ func runScan(ctx context.Context, f *scanFlags) error {
 	ruleschecks.SetUserRulesDir(f.rulesDir)
 
 	started := time.Now().UTC()
+	sc.Progress = &cliProgress{} // honest per-phase progress to stderr (real totals)
 	result := engine.Run(sc)
 
 	// Opt-in active validation (read-only): confirm findings and attach evidence
 	// before persistence so it is stored and exported. Off unless --validate.
 	if f.validate {
+		progress.ReportPhase(sc.Progress, progress.PhaseValidate, "")
 		var venv validate.Env
 		if provider == "aws" {
 			venv = awsValidateEnv(sc.AWS) // authenticated, MFA-satisfied scan session
@@ -219,6 +223,7 @@ func runScan(ctx context.Context, f *scanFlags) error {
 	finished := time.Now().UTC()
 
 	// Persist.
+	progress.ReportPhase(sc.Progress, progress.PhasePersist, "")
 	st, err := store.Open(ctx, f.dbPath)
 	if err != nil {
 		return err
@@ -259,6 +264,50 @@ func firstRegion(regions []string) string {
 		return ""
 	}
 	return regions[0]
+}
+
+// cliProgress prints one concise line per scan phase to stderr with the real
+// unit total (never a timer-driven bar). It announces each phase once; the
+// live count-up is for the TUI/web consumers. Safe for concurrent calls.
+type cliProgress struct {
+	mu        sync.Mutex
+	announced map[progress.Phase]bool
+}
+
+func (p *cliProgress) Report(e progress.Event) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.announced == nil {
+		p.announced = map[progress.Phase]bool{}
+	}
+	if p.announced[e.Phase] {
+		return
+	}
+	p.announced[e.Phase] = true
+	if e.Total > 0 {
+		fmt.Fprintf(os.Stderr, "  %s (%d)\n", phaseLabel(e.Phase), e.Total)
+	} else {
+		fmt.Fprintf(os.Stderr, "  %s\n", phaseLabel(e.Phase))
+	}
+}
+
+func phaseLabel(p progress.Phase) string {
+	switch p {
+	case progress.PhaseCollect:
+		return "collecting cloud configuration"
+	case progress.PhaseCheck:
+		return "running posture checks"
+	case progress.PhaseReachability:
+		return "solving network reachability"
+	case progress.PhaseGraph:
+		return "building attack-path graph"
+	case progress.PhaseValidate:
+		return "active validation"
+	case progress.PhasePersist:
+		return "persisting results"
+	default:
+		return string(p)
+	}
 }
 
 // awsValidateEnv builds the authenticated-vantage capabilities the validation
