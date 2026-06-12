@@ -258,9 +258,11 @@ nubicustos plugins run --all --target .   # run every installed tool; skip + rep
 
 `list` shows each tool's install status alongside when it last ran and how many
 findings that run produced (read from the results database; it does not create
-one if absent). `run --all` sweeps every tool on PATH in one pass, persisting
-each tool's output as its own `plugin:<tool>` scan, and reports which ran, which
-were skipped (not installed), and which failed — no tool is silently dropped.
+one if absent). `run --all` sweeps every tool on PATH (bounded by `--concurrency`, default 4;
+`1` = sequential), persisting each tool's output as its own `plugin:<tool>` scan
+in `Builtin` order, and reports which ran, which were skipped (not installed),
+and which failed — no tool is silently dropped. The same sweep backs the TUI
+Tools view's "run all".
 
 Each run is persisted as a scan (provider `plugin:<tool>`), so its findings are
 queryable, exportable, and browsable in the TUI like native findings. The tool
@@ -270,8 +272,9 @@ exploitation framework Pacu is intentionally not integrated.)
 
 ### Terminal UI
 
-`tui` launches a bubbletea/lipgloss interface over a stored scan — no cloud
-calls, it reads the database. Three views (`1`/`2`/`3` or `tab` to switch):
+`tui` launches a bubbletea/lipgloss interface over a stored scan. Browsing
+performs no cloud calls; the Tools view runs external scanners locally on
+request. Four views (`1`/`2`/`3`/`4` or `tab` to switch):
 
 - **Dashboard** — severity counts and the top attack paths by score.
 - **Findings** — a severity-sorted table; `enter` opens a detail pane with the
@@ -279,9 +282,12 @@ calls, it reads the database. Three views (`1`/`2`/`3` or `tab` to switch):
   validation evidence.
 - **Attack Paths** — the scored path list; selecting one shows its step-by-step
   chained PoC.
+- **Tools** — the optional external scanners with their install status and
+  last-run history. Pick a target (`e` to edit), then `enter` runs the selected
+  tool or `a` runs every installed one; the run executes in the background with
+  a spinner, and on completion the views refresh to the new scan's findings.
 
-Severity is color-coded throughout (critical/high/medium/low/info). The UI is a
-viewer for a completed scan; a live scan-progress launcher is a planned follow-on.
+Severity is color-coded throughout (critical/high/medium/low/info).
 
 ### Active validation (opt-in, read-only)
 

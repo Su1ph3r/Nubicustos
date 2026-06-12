@@ -15,10 +15,8 @@ func absentManifests() []Manifest {
 	}
 }
 
-func TestRunAvailableSkipsAbsentToolsInOrder(t *testing.T) {
-	ms := absentManifests()
-	results := runAvailable(context.Background(), ".", ms)
-
+func assertSkippedInOrder(t *testing.T, ms []Manifest, results []RunResult) {
+	t.Helper()
 	if len(results) != len(ms) {
 		t.Fatalf("every tool must be reported (skips included): got %d, want %d", len(results), len(ms))
 	}
@@ -38,17 +36,34 @@ func TestRunAvailableSkipsAbsentToolsInOrder(t *testing.T) {
 	}
 }
 
+func TestRunAvailableSequentialSkipsAbsentInOrder(t *testing.T) {
+	ms := absentManifests()
+	assertSkippedInOrder(t, ms, runAvailable(context.Background(), ".", ms, 1))
+}
+
+func TestRunAvailableConcurrentPreservesOrder(t *testing.T) {
+	// Even with a concurrency bound above the tool count, results stay in input
+	// order regardless of completion order.
+	ms := absentManifests()
+	assertSkippedInOrder(t, ms, runAvailable(context.Background(), ".", ms, 8))
+}
+
+func TestRunAvailableClampsConcurrency(t *testing.T) {
+	// A non-positive concurrency is clamped to sequential, never a deadlock.
+	ms := absentManifests()
+	assertSkippedInOrder(t, ms, runAvailable(context.Background(), ".", ms, 0))
+}
+
 func TestRunAvailableStopsOnCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel before the sweep starts
-	results := runAvailable(ctx, ".", absentManifests())
-	if len(results) != 0 {
+	if results := runAvailable(ctx, ".", absentManifests(), DefaultSweepConcurrency); len(results) != 0 {
 		t.Fatalf("a cancelled context must stop the sweep before any tool, got %d results", len(results))
 	}
 }
 
 func TestRunAvailableEmptySet(t *testing.T) {
-	if results := runAvailable(context.Background(), ".", nil); len(results) != 0 {
+	if results := runAvailable(context.Background(), ".", nil, DefaultSweepConcurrency); len(results) != 0 {
 		t.Fatalf("an empty tool set yields no results, got %d", len(results))
 	}
 }

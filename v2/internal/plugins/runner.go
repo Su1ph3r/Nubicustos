@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Su1ph3r/nubicustos/internal/findings"
@@ -76,40 +77,69 @@ type RunResult struct {
 	FinishedAt time.Time // when this tool's run ended (zero if skipped)
 }
 
+// DefaultSweepConcurrency is the default number of tools RunAvailable runs at
+// once. Tools are subprocess- and I/O-heavy (DB downloads, filesystem walks),
+// so a small bound speeds a multi-tool sweep without thrashing the host.
+const DefaultSweepConcurrency = 4
+
 // RunAvailable runs every built-in tool that is installed on PATH against
-// target, sequentially, and returns one result per built-in tool. A tool that
-// is not installed is returned with Available=false and is not run — it is
-// never silently omitted, so the caller can report the skips. RunAvailable
-// persists nothing; the caller decides what to store. A cancelled ctx stops the
-// sweep before the next tool.
-func RunAvailable(ctx context.Context, target string) []RunResult {
-	return runAvailable(ctx, target, Builtin)
+// target, up to concurrency at a time, and returns one result per built-in tool
+// in Builtin order regardless of completion order. A tool that is not installed
+// is returned with Available=false and is not run — it is never silently
+// omitted, so the caller can report the skips. RunAvailable persists nothing;
+// the caller decides what to store. concurrency <= 0 means sequential (1); pass
+// DefaultSweepConcurrency for the standard bound. A cancelled ctx stops the
+// sweep (already-launched tools observe the cancellation through their own ctx).
+func RunAvailable(ctx context.Context, target string, concurrency int) []RunResult {
+	return runAvailable(ctx, target, Builtin, concurrency)
 }
 
 // runAvailable is the testable core of RunAvailable, parameterized by the tool
 // set so a test can supply manifests with known-absent binaries.
-func runAvailable(ctx context.Context, target string, manifests []Manifest) []RunResult {
-	out := make([]RunResult, 0, len(manifests))
-	for _, m := range manifests {
-		if ctx.Err() != nil {
-			break
-		}
-		if !Available(m) {
-			out = append(out, RunResult{Manifest: m, Available: false})
-			continue
-		}
-		start := time.Now().UTC()
-		fs, err := Run(ctx, m, target)
-		out = append(out, RunResult{
-			Manifest:   m,
-			Findings:   fs,
-			Err:        err,
-			Available:  true,
-			StartedAt:  start,
-			FinishedAt: time.Now().UTC(),
-		})
+func runAvailable(ctx context.Context, target string, manifests []Manifest, concurrency int) []RunResult {
+	if ctx.Err() != nil {
+		return nil
 	}
-	return out
+	if concurrency < 1 {
+		concurrency = 1
+	}
+
+	// Pre-size by index so results stay in Builtin order despite concurrent
+	// completion; each goroutine writes only its own element's run fields, while
+	// the launching loop sets Manifest/Available before the go statement — so no
+	// field is written by two goroutines.
+	results := make([]RunResult, len(manifests))
+	processed := 0
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+
+	for i := range manifests {
+		if ctx.Err() != nil {
+			break // stop launching new work; trailing tools are not reported
+		}
+		m := manifests[i]
+		results[i].Manifest = m
+		processed = i + 1
+		if !Available(m) {
+			continue // Available stays false; tool is skipped, not run
+		}
+		results[i].Available = true
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(idx int, mf Manifest) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			start := time.Now().UTC()
+			fs, err := Run(ctx, mf, target)
+			results[idx].Findings = fs
+			results[idx].Err = err
+			results[idx].StartedAt = start
+			results[idx].FinishedAt = time.Now().UTC()
+		}(i, m)
+	}
+
+	wg.Wait()
+	return results[:processed]
 }
 
 // Parse dispatches raw tool output to the format-specific parser.

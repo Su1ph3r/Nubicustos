@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -34,9 +36,12 @@ const (
 	viewDashboard viewKind = iota
 	viewFindings
 	viewPaths
+	viewTools
 )
 
-var viewNames = []string{"Dashboard", "Findings", "Attack Paths"}
+const viewCount = 4
+
+var viewNames = []string{"Dashboard", "Findings", "Attack Paths", "Tools"}
 
 // Model is the root bubbletea model.
 type Model struct {
@@ -47,11 +52,40 @@ type Model struct {
 	table      table.Model
 	showDetail bool
 	pathIdx    int
+
+	// Tools view (optional, side-effecting via actions).
+	actions Actions
+	tools   []ToolStatus
+	toolIdx int
+	target  textinput.Model
+	editing bool
+	running bool
+	spinner spinner.Model
+	status  string
 }
 
-// New builds the model from loaded scan data.
-func New(d Data) Model {
-	return Model{data: d, table: newFindingsTable(d.Findings)}
+// New builds the model from loaded scan data. actions enables the Tools view to
+// run external tools; pass nil for a purely read-only viewer.
+func New(d Data, actions Actions) Model {
+	ti := textinput.New()
+	ti.Prompt = "target ▸ "
+	ti.Placeholder = "path / image / directory"
+	ti.SetValue(".")
+
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+
+	m := Model{
+		data:    d,
+		table:   newFindingsTable(d.Findings),
+		actions: actions,
+		target:  ti,
+		spinner: sp,
+	}
+	if actions != nil {
+		m.tools = actions.ListTools()
+	}
+	return m
 }
 
 func newFindingsTable(fs []findings.Finding) table.Model {
@@ -91,7 +125,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.table.SetHeight(maxInt(5, msg.Height-10))
 		return m, nil
 
+	case spinner.TickMsg:
+		if !m.running {
+			return m, nil // stop ticking once the run finished
+		}
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+
+	case runDoneMsg:
+		m.running = false
+		if msg.err != nil {
+			m.status = "run failed: " + msg.err.Error()
+			return m, nil
+		}
+		m.status = msg.summary
+		if msg.dataErr != nil {
+			m.status += "  (reload failed: " + msg.dataErr.Error() + ")"
+		} else {
+			m.data = msg.data
+			m.table = newFindingsTable(msg.data.Findings)
+		}
+		if m.actions != nil {
+			m.tools = m.actions.ListTools() // refresh last-run/finding counts
+		}
+		return m, nil
+
 	case tea.KeyMsg:
+		// While a tool runs, swallow input except an explicit quit.
+		if m.running {
+			if msg.String() == "ctrl+c" {
+				return m, tea.Quit
+			}
+			return m, nil
+		}
+		// While editing the target field, keys go to the input (enter/esc exit).
+		if m.editing {
+			return m.updateTargetEdit(msg)
+		}
+
 		switch msg.String() {
 		case "q", "ctrl+c", "esc":
 			if msg.String() == "esc" && m.showDetail {
@@ -108,12 +180,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "3":
 			m.view, m.showDetail = viewPaths, false
 			return m, nil
+		case "4":
+			m.view, m.showDetail = viewTools, false
+			return m, nil
 		case "tab":
-			m.view = (m.view + 1) % 3
+			m.view = (m.view + 1) % viewCount
 			m.showDetail = false
 			return m, nil
 		case "shift+tab":
-			m.view = (m.view + 2) % 3
+			m.view = (m.view + viewCount - 1) % viewCount
 			m.showDetail = false
 			return m, nil
 		}
@@ -123,6 +198,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateFindings(msg)
 		case viewPaths:
 			return m.updatePaths(msg)
+		case viewTools:
+			return m.updateTools(msg)
 		}
 	}
 	return m, nil
@@ -167,6 +244,8 @@ func (m Model) View() string {
 		b.WriteString(m.findingsView())
 	case viewPaths:
 		b.WriteString(m.pathsView())
+	case viewTools:
+		b.WriteString(m.toolsView())
 	}
 	b.WriteString("\n\n")
 	b.WriteString(m.footer())
@@ -188,12 +267,17 @@ func (m Model) header() string {
 }
 
 func (m Model) footer() string {
-	keys := "1/2/3 or tab: switch · q: quit"
+	if m.editing {
+		return theme.Muted.Render("type a target · enter/esc: done")
+	}
+	keys := "1/2/3/4 or tab: switch · q: quit"
 	switch m.view {
 	case viewFindings:
 		keys = "↑/↓: move · enter: detail · esc: back · " + keys
 	case viewPaths:
 		keys = "↑/↓: select path · " + keys
+	case viewTools:
+		keys = "↑/↓: select · enter: run · a: run all · e: edit target · " + keys
 	}
 	return theme.Muted.Render(keys)
 }

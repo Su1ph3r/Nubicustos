@@ -81,6 +81,13 @@ func latestPluginScans(ctx context.Context, dbPath string) map[string]store.Scan
 		return out
 	}
 	defer st.Close()
+	return pluginScanHistory(ctx, st)
+}
+
+// pluginScanHistory returns the most recent plugin:<tool> scan per tool from an
+// already-open store, keyed by tool name.
+func pluginScanHistory(ctx context.Context, st *store.Store) map[string]store.ScanMeta {
+	out := map[string]store.ScanMeta{}
 	scans, err := st.ListScans(ctx, 0)
 	if err != nil {
 		return out
@@ -98,9 +105,10 @@ func latestPluginScans(ctx context.Context, dbPath string) map[string]store.Scan
 }
 
 type pluginsRunFlags struct {
-	target string
-	dbPath string
-	all    bool
+	target      string
+	dbPath      string
+	all         bool
+	concurrency int
 }
 
 func newPluginsRunCmd() *cobra.Command {
@@ -130,6 +138,7 @@ func newPluginsRunCmd() *cobra.Command {
 	pf.StringVar(&f.target, "target", ".", "scan target (path, image, or directory) — ignored by tools that scan the local node")
 	pf.StringVar(&f.dbPath, "db", "nubicustos.db", "path to the SQLite results database")
 	pf.BoolVar(&f.all, "all", false, "run every installed tool (those not on PATH are skipped and reported)")
+	pf.IntVar(&f.concurrency, "concurrency", plugins.DefaultSweepConcurrency, "max tools to run at once with --all (1 = sequential)")
 	return cmd
 }
 
@@ -173,7 +182,7 @@ func runPlugin(ctx context.Context, tool string, f *pluginsRunFlags) error {
 // findings as its own scan, and reports which ran, which were skipped (not
 // installed), and which failed — never silently dropping any tool.
 func runPluginAll(ctx context.Context, f *pluginsRunFlags) error {
-	results := plugins.RunAvailable(ctx, f.target)
+	results := plugins.RunAvailable(ctx, f.target, f.concurrency)
 
 	st, err := store.Open(ctx, f.dbPath)
 	if err != nil {

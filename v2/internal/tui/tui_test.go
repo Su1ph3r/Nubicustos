@@ -57,7 +57,7 @@ func key(s string) tea.KeyMsg {
 }
 
 func TestInitialViewIsDashboard(t *testing.T) {
-	m := New(sampleData())
+	m := New(sampleData(), nil)
 	out := m.View()
 	if !strings.Contains(out, "FINDINGS") || !strings.Contains(out, "ATTACK PATHS") {
 		t.Fatalf("dashboard should show finding/path summaries:\n%s", out)
@@ -69,7 +69,7 @@ func TestInitialViewIsDashboard(t *testing.T) {
 }
 
 func TestSwitchToFindingsByNumber(t *testing.T) {
-	m := send(New(sampleData()), key("2"))
+	m := send(New(sampleData(), nil), key("2"))
 	if m.view != viewFindings {
 		t.Fatalf("expected findings view, got %d", m.view)
 	}
@@ -79,24 +79,18 @@ func TestSwitchToFindingsByNumber(t *testing.T) {
 }
 
 func TestTabCyclesViews(t *testing.T) {
-	m := New(sampleData())
-	m = send(m, key("tab"))
-	if m.view != viewFindings {
-		t.Fatalf("tab 1 -> findings, got %d", m.view)
-	}
-	m = send(m, key("tab"))
-	if m.view != viewPaths {
-		t.Fatalf("tab 2 -> paths, got %d", m.view)
-	}
-	m = send(m, key("tab"))
-	if m.view != viewDashboard {
-		t.Fatalf("tab 3 -> wraps to dashboard, got %d", m.view)
+	m := New(sampleData(), nil)
+	for _, want := range []viewKind{viewFindings, viewPaths, viewTools, viewDashboard} {
+		m = send(m, key("tab"))
+		if m.view != want {
+			t.Fatalf("tab should advance to view %d, got %d", want, m.view)
+		}
 	}
 }
 
 func TestFindingsDetailToggle(t *testing.T) {
-	m := send(New(sampleData()), key("2")) // findings
-	m = send(m, key("enter"))              // open detail
+	m := send(New(sampleData(), nil), key("2")) // findings
+	m = send(m, key("enter"))                   // open detail
 	if !m.showDetail {
 		t.Fatal("enter should open the detail pane")
 	}
@@ -111,7 +105,7 @@ func TestFindingsDetailToggle(t *testing.T) {
 }
 
 func TestPathsViewRendersStepsAndMoves(t *testing.T) {
-	m := send(New(sampleData()), key("3")) // paths
+	m := send(New(sampleData(), nil), key("3")) // paths
 	out := m.View()
 	if !strings.Contains(out, "Internet-exposed RDS") || !strings.Contains(out, "exposed-to-internet") {
 		t.Fatalf("paths view should list the path and its steps:\n%s", out)
@@ -131,7 +125,7 @@ func TestQuitKeysReturnQuit(t *testing.T) {
 		} else {
 			msg = key(k)
 		}
-		_, cmd := New(sampleData()).Update(msg)
+		_, cmd := New(sampleData(), nil).Update(msg)
 		if cmd == nil {
 			t.Fatalf("%q should return a command", k)
 		}
@@ -142,7 +136,7 @@ func TestQuitKeysReturnQuit(t *testing.T) {
 }
 
 func TestEscClosesDetailBeforeQuitting(t *testing.T) {
-	m := send(New(sampleData()), key("2"))
+	m := send(New(sampleData(), nil), key("2"))
 	m = send(m, key("enter")) // detail open
 	_, cmd := m.Update(key("esc"))
 	if cmd != nil {
@@ -151,14 +145,14 @@ func TestEscClosesDetailBeforeQuitting(t *testing.T) {
 }
 
 func TestWindowSizeNoPanicAndSetsTableHeight(t *testing.T) {
-	m := send(New(sampleData()), tea.WindowSizeMsg{Width: 120, Height: 40})
+	m := send(New(sampleData(), nil), tea.WindowSizeMsg{Width: 120, Height: 40})
 	if m.width != 120 || m.height != 40 {
 		t.Fatalf("window size not recorded: %dx%d", m.width, m.height)
 	}
 }
 
 func TestEmptyDataDoesNotPanic(t *testing.T) {
-	m := New(Data{ScanID: "empty", Provider: "aws"})
+	m := New(Data{ScanID: "empty", Provider: "aws"}, nil)
 	_ = m.View()
 	m = send(m, key("2"))
 	if !strings.Contains(m.View(), "no findings") {
