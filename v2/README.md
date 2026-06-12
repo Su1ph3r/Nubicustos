@@ -328,11 +328,16 @@ summary, so a confirmed verdict from a partial run (some resources unreadable,
 or beyond the per-finding probe cap) is never mistaken for a complete all-clear;
 any unprobed remainder is reported, never silently dropped.
 
-Authenticated-vantage validators need the live scan session, so they run only
-inline with `--validate`; the standalone `validate` command, which re-reads a
-stored scan offline, runs the external-vantage validators only (the rest skip
-themselves rather than fail). The framework registers validators by check id;
-loose-OIDC AssumeRole tests and dangling-DNS checks are the next to slot in.
+Authenticated-vantage validators need a live session. Inline `--validate` uses
+the scan's own session. The standalone `validate` command resolves a read-only
+session on demand — only when the stored scan actually has authenticated-vantage
+findings (it takes the same `--profile` / `--region` / `--mfa-*` / `--sso-login`
+flags as `scan`); a scan with only external-vantage findings never prompts. If
+that session can't be resolved, the authenticated validators are skipped with an
+explicit notice (never silently), and the external-vantage validators still run.
+
+The framework registers validators by check id; loose-OIDC AssumeRole tests and
+dangling-DNS checks are the next to slot in.
 
 ### Attack-path graph
 

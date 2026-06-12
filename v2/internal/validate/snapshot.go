@@ -52,8 +52,9 @@ type RDSSnapshotAttrAPI interface {
 
 type ebsSnapshotPublic struct{}
 
-func (ebsSnapshotPublic) CheckID() string     { return "aws_ebs_snapshot_public" }
-func (ebsSnapshotPublic) BlastRadius() string { return BlastRadiusNone }
+func (ebsSnapshotPublic) CheckID() string           { return "aws_ebs_snapshot_public" }
+func (ebsSnapshotPublic) BlastRadius() string       { return BlastRadiusNone }
+func (ebsSnapshotPublic) Vantage() findings.Vantage { return findings.VantageAuthenticated }
 
 func (ebsSnapshotPublic) Validate(ctx context.Context, env Env, f findings.Finding) (*findings.Evidence, error) {
 	if env.EC2SnapshotAttr == nil {
@@ -86,8 +87,9 @@ func (ebsSnapshotPublic) Validate(ctx context.Context, env Env, f findings.Findi
 
 type amiPublic struct{}
 
-func (amiPublic) CheckID() string     { return "aws_ami_public" }
-func (amiPublic) BlastRadius() string { return BlastRadiusNone }
+func (amiPublic) CheckID() string           { return "aws_ami_public" }
+func (amiPublic) BlastRadius() string       { return BlastRadiusNone }
+func (amiPublic) Vantage() findings.Vantage { return findings.VantageAuthenticated }
 
 func (amiPublic) Validate(ctx context.Context, env Env, f findings.Finding) (*findings.Evidence, error) {
 	if env.EC2ImageAttr == nil {
@@ -120,8 +122,9 @@ func (amiPublic) Validate(ctx context.Context, env Env, f findings.Finding) (*fi
 
 type rdsSnapshotPublic struct{}
 
-func (rdsSnapshotPublic) CheckID() string     { return "aws_rds_snapshot_public" }
-func (rdsSnapshotPublic) BlastRadius() string { return BlastRadiusNone }
+func (rdsSnapshotPublic) CheckID() string           { return "aws_rds_snapshot_public" }
+func (rdsSnapshotPublic) BlastRadius() string       { return BlastRadiusNone }
+func (rdsSnapshotPublic) Vantage() findings.Vantage { return findings.VantageAuthenticated }
 
 func (rdsSnapshotPublic) Validate(ctx context.Context, env Env, f findings.Finding) (*findings.Evidence, error) {
 	if env.RDSSnapshotAttr == nil {

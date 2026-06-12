@@ -23,8 +23,9 @@ type s3PublicRead struct {
 	client *http.Client
 }
 
-func (*s3PublicRead) CheckID() string     { return "aws_s3_public_access" }
-func (*s3PublicRead) BlastRadius() string { return BlastRadiusNone }
+func (*s3PublicRead) CheckID() string           { return "aws_s3_public_access" }
+func (*s3PublicRead) BlastRadius() string       { return BlastRadiusNone }
+func (*s3PublicRead) Vantage() findings.Vantage { return findings.VantageExternal }
 
 // maxEvidenceBody bounds captured response bytes so evidence stays small and
 // secret-safe (a listing is not secret, but truncation is the safe default).

@@ -30,8 +30,9 @@ type rdsPublicReachable struct {
 	dial func(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
-func (*rdsPublicReachable) CheckID() string     { return "aws_rds_public" }
-func (*rdsPublicReachable) BlastRadius() string { return BlastRadiusNone }
+func (*rdsPublicReachable) CheckID() string           { return "aws_rds_public" }
+func (*rdsPublicReachable) BlastRadius() string       { return BlastRadiusNone }
+func (*rdsPublicReachable) Vantage() findings.Vantage { return findings.VantageExternal }
 
 // bannerReadTimeout bounds the passive banner read so silent (client-speaks-
 // first) engines don't hold the action for the full per-action timeout once the

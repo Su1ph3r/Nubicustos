@@ -35,6 +35,11 @@ type Validator interface {
 	// BlastRadius declares the impact of running this validator. The runner only
 	// executes validators that return BlastRadiusNone.
 	BlastRadius() string
+	// Vantage reports where this validator obtains its proof: VantageExternal
+	// (no credentials, operator network) or VantageAuthenticated (needs the scan
+	// session via Env). It lets a caller decide whether to resolve credentials
+	// before validating a stored scan.
+	Vantage() findings.Vantage
 	// Validate attempts read-only confirmation of f and returns evidence, or nil
 	// if the finding offers nothing to confirm. ctx carries the per-action
 	// timeout. env supplies optional authenticated capabilities (nil-safe): an
@@ -182,4 +187,21 @@ func registeredCount() int {
 	regMu.Lock()
 	defer regMu.Unlock()
 	return len(validators)
+}
+
+// AuthenticatedFindingCount reports how many of fs would be validated from the
+// authenticated vantage — i.e. have a registered validator that needs the scan
+// session (Env). The standalone validate command uses it to decide whether to
+// resolve credentials before running: zero means a purely external-vantage pass
+// that needs no session.
+func AuthenticatedFindingCount(fs []findings.Finding) int {
+	regMu.Lock()
+	defer regMu.Unlock()
+	n := 0
+	for i := range fs {
+		if v, ok := validators[fs[i].CheckID]; ok && v.Vantage() == findings.VantageAuthenticated {
+			n++
+		}
+	}
+	return n
 }

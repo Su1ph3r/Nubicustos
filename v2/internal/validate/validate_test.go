@@ -11,15 +11,17 @@ import (
 
 // fakeValidator is a test validator with a controllable verdict and blast radius.
 type fakeValidator struct {
-	id    string
-	blast string
-	ev    *findings.Evidence
-	err   error
-	calls int
+	id      string
+	blast   string
+	vantage findings.Vantage
+	ev      *findings.Evidence
+	err     error
+	calls   int
 }
 
-func (f *fakeValidator) CheckID() string     { return f.id }
-func (f *fakeValidator) BlastRadius() string { return f.blast }
+func (f *fakeValidator) CheckID() string           { return f.id }
+func (f *fakeValidator) BlastRadius() string       { return f.blast }
+func (f *fakeValidator) Vantage() findings.Vantage { return f.vantage }
 func (f *fakeValidator) Validate(_ context.Context, _ Env, _ findings.Finding) (*findings.Evidence, error) {
 	f.calls++
 	return f.ev, f.err
@@ -130,5 +132,38 @@ func TestRunIsOptInRequiresRegisteredAndMatching(t *testing.T) {
 	rep := Run(context.Background(), fs, noRateLimit())
 	if rep.Attempted != 0 {
 		t.Fatalf("only matching findings should be validated, got %+v", rep)
+	}
+}
+
+func TestAuthenticatedFindingCount(t *testing.T) {
+	fs := []findings.Finding{
+		{ID: "1", CheckID: "aws_s3_public_access"},      // external
+		{ID: "2", CheckID: "aws_rds_public"},            // external
+		{ID: "3", CheckID: "aws_ebs_snapshot_public"},   // authenticated
+		{ID: "4", CheckID: "aws_ami_public"},            // authenticated
+		{ID: "5", CheckID: "aws_rds_snapshot_public"},   // authenticated
+		{ID: "6", CheckID: "aws_iam_root_mfa_disabled"}, // no validator
+	}
+	if got := AuthenticatedFindingCount(fs); got != 3 {
+		t.Fatalf("expected 3 authenticated-vantage findings, got %d", got)
+	}
+	// An external-only set must report zero, so validate never resolves creds.
+	ext := []findings.Finding{{ID: "1", CheckID: "aws_s3_public_access"}, {ID: "2", CheckID: "aws_rds_public"}}
+	if got := AuthenticatedFindingCount(ext); got != 0 {
+		t.Fatalf("external-only set should need no session, got %d", got)
+	}
+}
+
+func TestRegisteredValidatorsDeclareAKnownVantage(t *testing.T) {
+	// Every registered validator must declare a real vantage so the CLI's
+	// authenticate-or-not decision is well defined.
+	regMu.Lock()
+	defer regMu.Unlock()
+	for id, v := range validators {
+		switch v.Vantage() {
+		case findings.VantageExternal, findings.VantageAuthenticated:
+		default:
+			t.Fatalf("validator %q declares an unknown vantage %q", id, v.Vantage())
+		}
 	}
 }
