@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/Su1ph3r/nubicustos/internal/findings"
 )
@@ -63,6 +64,52 @@ func classifyRun(name string, ctxErr, runErr error, fs []findings.Finding, stder
 			name, runErr, truncate(stderr, 200))
 	}
 	return nil
+}
+
+// RunResult is the outcome of one tool during a sweep (RunAvailable).
+type RunResult struct {
+	Manifest   Manifest
+	Findings   []findings.Finding
+	Err        error     // non-nil if the tool was available but its run/parse failed
+	Available  bool      // false → not installed; the tool was skipped, not run
+	StartedAt  time.Time // when this tool's run began (zero if skipped)
+	FinishedAt time.Time // when this tool's run ended (zero if skipped)
+}
+
+// RunAvailable runs every built-in tool that is installed on PATH against
+// target, sequentially, and returns one result per built-in tool. A tool that
+// is not installed is returned with Available=false and is not run — it is
+// never silently omitted, so the caller can report the skips. RunAvailable
+// persists nothing; the caller decides what to store. A cancelled ctx stops the
+// sweep before the next tool.
+func RunAvailable(ctx context.Context, target string) []RunResult {
+	return runAvailable(ctx, target, Builtin)
+}
+
+// runAvailable is the testable core of RunAvailable, parameterized by the tool
+// set so a test can supply manifests with known-absent binaries.
+func runAvailable(ctx context.Context, target string, manifests []Manifest) []RunResult {
+	out := make([]RunResult, 0, len(manifests))
+	for _, m := range manifests {
+		if ctx.Err() != nil {
+			break
+		}
+		if !Available(m) {
+			out = append(out, RunResult{Manifest: m, Available: false})
+			continue
+		}
+		start := time.Now().UTC()
+		fs, err := Run(ctx, m, target)
+		out = append(out, RunResult{
+			Manifest:   m,
+			Findings:   fs,
+			Err:        err,
+			Available:  true,
+			StartedAt:  start,
+			FinishedAt: time.Now().UTC(),
+		})
+	}
+	return out
 }
 
 // Parse dispatches raw tool output to the format-specific parser.

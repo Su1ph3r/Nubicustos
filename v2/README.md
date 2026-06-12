@@ -251,9 +251,16 @@ making any tool a hard dependency. An absent tool is skipped, never required.
 | kube-bench | CIS Kubernetes benchmark |
 
 ```bash
-nubicustos plugins list                 # show tools and whether each is on PATH
-nubicustos plugins run trivy --target .  # run a tool; findings persist as a scan
+nubicustos plugins list                  # tools, PATH status, and last-run + finding count
+nubicustos plugins run trivy --target .   # run one tool; findings persist as a scan
+nubicustos plugins run --all --target .   # run every installed tool; skip + report the rest
 ```
+
+`list` shows each tool's install status alongside when it last ran and how many
+findings that run produced (read from the results database; it does not create
+one if absent). `run --all` sweeps every tool on PATH in one pass, persisting
+each tool's output as its own `plugin:<tool>` scan, and reports which ran, which
+were skipped (not installed), and which failed — no tool is silently dropped.
 
 Each run is persisted as a scan (provider `plugin:<tool>`), so its findings are
 queryable, exportable, and browsable in the TUI like native findings. The tool
