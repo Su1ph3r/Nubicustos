@@ -19,9 +19,38 @@ func rdsFinding(endpoint string) findings.Finding {
 }
 
 // listenOnce starts a loopback TCP listener that accepts a single connection,
-// optionally writes banner to it, then closes. It returns the dial address and
-// a cleanup func. It models a reachable database port.
+// optionally writes banner to it, then holds the connection open until cleanup.
+// It models a live, reachable database port (a banner-speaking engine, or a
+// silent client-speaks-first engine that keeps the socket open while awaiting
+// the client). Holding open is what lets the silent case read as a confirmed
+// reachable port rather than a premature close.
 func listenOnce(t *testing.T, banner []byte) (string, func()) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if len(banner) > 0 {
+			_, _ = conn.Write(banner)
+		}
+		<-stop // keep the connection open (a live server) until cleanup
+	}()
+	return ln.Addr().String(), func() { close(stop); ln.Close(); <-done }
+}
+
+// listenAcceptThenClose accepts one connection and immediately closes it,
+// modelling a SYN-proxy / scrubbing middlebox that completes the TCP handshake
+// then tears the connection down before any service banner.
+func listenAcceptThenClose(t *testing.T) (string, func()) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -34,12 +63,7 @@ func listenOnce(t *testing.T, banner []byte) (string, func()) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
-		if len(banner) > 0 {
-			_, _ = conn.Write(banner)
-		}
-		// Hold briefly so the client reads before we close.
-		time.Sleep(50 * time.Millisecond)
+		conn.Close() // immediate close → client sees EOF/reset before any banner
 	}()
 	return ln.Addr().String(), func() { ln.Close(); <-done }
 }
@@ -75,16 +99,40 @@ func TestRDSReachableConfirmedNoBanner(t *testing.T) {
 	addr, cleanup := listenOnce(t, nil) // silent server (client-speaks-first engine)
 	defer cleanup()
 
+	// A short deadline bounds the passive read so the test does not wait the full
+	// banner window for a server that (correctly) stays silent.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	v := &rdsPublicReachable{}
+	ev, err := v.Validate(ctx, Env{}, rdsFinding(addr))
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if ev == nil || ev.Verdict != VerdictConfirmed {
+		t.Fatalf("an open port held open with no banner should still confirm, got %+v", ev)
+	}
+	if !strings.Contains(ev.Response, "no banner") {
+		t.Fatalf("expected a no-banner note: %q", ev.Response)
+	}
+}
+
+func TestRDSReachableUnconfirmedOnHandshakeThenClose(t *testing.T) {
+	addr, cleanup := listenAcceptThenClose(t)
+	defer cleanup()
+
 	v := &rdsPublicReachable{}
 	ev, err := v.Validate(context.Background(), Env{}, rdsFinding(addr))
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	if ev == nil || ev.Verdict != VerdictConfirmed {
-		t.Fatalf("open port with no banner should still confirm, got %+v", ev)
+	// The handshake completed but the peer closed before any banner — a possible
+	// middlebox, so service reachability is inconclusive, not confirmed.
+	if ev == nil || ev.Verdict != VerdictUnconfirmed {
+		t.Fatalf("handshake-then-close should be unconfirmed, got %+v", ev)
 	}
-	if !strings.Contains(ev.Response, "no banner") {
-		t.Fatalf("expected a no-banner note: %q", ev.Response)
+	if !strings.Contains(ev.Response, "inconclusive") {
+		t.Fatalf("response should flag inconclusive reachability: %q", ev.Response)
 	}
 }
 

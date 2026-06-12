@@ -2,6 +2,7 @@ package validate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -59,9 +60,13 @@ func (ebsSnapshotPublic) Validate(ctx context.Context, env Env, f findings.Findi
 		return nil, nil // no authenticated session (e.g. offline validate) — skip
 	}
 	return confirmPublicShares(ctx, f.Affected, "ebs_snapshot",
-		"ec2:DescribeSnapshotAttribute(createVolumePermission) over %d snapshot(s)  (read-only)",
+		"ec2:DescribeSnapshotAttribute(createVolumePermission)", "snapshot(s)",
 		func(ctx context.Context, a findings.Affected) (bool, string, error) {
-			out, err := env.EC2SnapshotAttr(a.Region).DescribeSnapshotAttribute(ctx, &ec2.DescribeSnapshotAttributeInput{
+			c := env.EC2SnapshotAttr(a.Region)
+			if c == nil {
+				return false, "", errNoRegionClient
+			}
+			out, err := c.DescribeSnapshotAttribute(ctx, &ec2.DescribeSnapshotAttributeInput{
 				SnapshotId: aws.String(a.ID),
 				Attribute:  ec2types.SnapshotAttributeNameCreateVolumePermission,
 			})
@@ -89,9 +94,13 @@ func (amiPublic) Validate(ctx context.Context, env Env, f findings.Finding) (*fi
 		return nil, nil
 	}
 	return confirmPublicShares(ctx, f.Affected, "ami",
-		"ec2:DescribeImageAttribute(launchPermission) over %d image(s)  (read-only)",
+		"ec2:DescribeImageAttribute(launchPermission)", "image(s)",
 		func(ctx context.Context, a findings.Affected) (bool, string, error) {
-			out, err := env.EC2ImageAttr(a.Region).DescribeImageAttribute(ctx, &ec2.DescribeImageAttributeInput{
+			c := env.EC2ImageAttr(a.Region)
+			if c == nil {
+				return false, "", errNoRegionClient
+			}
+			out, err := c.DescribeImageAttribute(ctx, &ec2.DescribeImageAttributeInput{
 				ImageId:   aws.String(a.ID),
 				Attribute: ec2types.ImageAttributeNameLaunchPermission,
 			})
@@ -119,9 +128,13 @@ func (rdsSnapshotPublic) Validate(ctx context.Context, env Env, f findings.Findi
 		return nil, nil
 	}
 	return confirmPublicShares(ctx, f.Affected, "rds_snapshot",
-		"rds:DescribeDBSnapshotAttributes(restore) over %d snapshot(s)  (read-only)",
+		"rds:DescribeDBSnapshotAttributes(restore)", "snapshot(s)",
 		func(ctx context.Context, a findings.Affected) (bool, string, error) {
-			out, err := env.RDSSnapshotAttr(a.Region).DescribeDBSnapshotAttributes(ctx, &rds.DescribeDBSnapshotAttributesInput{
+			c := env.RDSSnapshotAttr(a.Region)
+			if c == nil {
+				return false, "", errNoRegionClient
+			}
+			out, err := c.DescribeDBSnapshotAttributes(ctx, &rds.DescribeDBSnapshotAttributesInput{
 				DBSnapshotIdentifier: aws.String(a.ID),
 			})
 			if err != nil {
@@ -152,58 +165,99 @@ func rdsRestoreGrantsAll(attrs []rdstypes.DBSnapshotAttribute) bool {
 
 // --- shared aggregate-confirmation helper -----------------------------------
 
+// errNoRegionClient is recorded for an affected item whose region has no
+// read-only client (the Env capability closure returned nil). Such an item is
+// undeterminable, not clean.
+var errNoRegionClient = errors.New("no read-only client for region")
+
+// maxValidateItems caps how many resources one aggregate validator probes in a
+// single invocation. It bounds the burst of authenticated control-plane API
+// calls a single finding can trigger (the validation pass is opt-in, but should
+// not hammer the API). When an aggregate finding lists more, the overflow is
+// reported explicitly in the evidence — never silently dropped — and the
+// operator can re-run with a larger --timeout or a narrower scope.
+const maxValidateItems = 200
+
 // confirmPublicShares runs probe over every wantType-typed affected item and
 // folds the per-item results into a single authenticated-vantage evidence
-// record: any item confirmed public → confirmed; an undeterminable read (error)
-// with nothing confirmed → blocked; every item read and none public →
-// unconfirmed. It returns nil when no item is in scope. probe returns whether
-// the item is public, a human-readable detail for the non-error case, and any
-// describe error. reqFmt is the request summary, formatted with the probed count.
+// record. probe reports whether the item is public, a human-readable detail for
+// the non-error case, and any describe error.
+//
+// Verdict: any item provably public → confirmed (the exposure is real); nothing
+// confirmed but at least one item unreadable or unprobed → blocked
+// (undeterminable); every in-scope item read and none public → unconfirmed.
+// Crucially, the evidence always carries a confirmed/errored/clean/probed
+// summary, so a confirmed verdict from a partial run (some items errored or hit
+// the cap/timeout) is never mistaken for a complete all-clear — the operator
+// can see that other in-scope resources went unconfirmed.
 func confirmPublicShares(
 	ctx context.Context,
 	items []findings.Affected,
-	wantType, reqFmt string,
+	wantType, apiDesc, noun string,
 	probe func(context.Context, findings.Affected) (bool, string, error),
 ) (*findings.Evidence, error) {
-	var confirmed, checked int
-	var blockedErr error
+	var confirmed, errored, checked, inScope int
+	truncated := false
+	stopped := false
 	details := make([]string, 0, len(items))
 
 	for _, a := range items {
 		if a.Type != wantType || a.ID == "" {
 			continue
 		}
-		if err := ctx.Err(); err != nil {
-			blockedErr = err // out of the per-action budget; report what we have
-			break
+		inScope++ // count every in-scope item, even past the probing cut-off
+		if stopped {
+			truncated = true
+			continue
+		}
+		if checked >= maxValidateItems || ctx.Err() != nil {
+			stopped, truncated = true, true
+			continue
+		}
+		if a.Region == "" {
+			// A resource we cannot target (missing region) is undeterminable, not
+			// clean — count it as an error so it never reads as "not public".
+			checked++
+			errored++
+			details = append(details, a.ID+": missing region, cannot validate")
+			continue
 		}
 		checked++
 		public, detail, err := probe(ctx, a)
-		if err != nil {
-			blockedErr = err
+		switch {
+		case err != nil:
+			errored++
 			details = append(details, a.ID+": describe error: "+err.Error())
-			continue
-		}
-		if public {
+		case public:
 			confirmed++
+			details = append(details, detail)
+		default:
+			details = append(details, detail)
 		}
-		details = append(details, detail)
 	}
 
-	if checked == 0 {
+	if inScope == 0 {
 		return nil, nil // nothing in scope for this validator
+	}
+
+	clean := checked - confirmed - errored
+	summary := fmt.Sprintf("confirmed=%d errored=%d clean=%d probed=%d/%d",
+		confirmed, errored, clean, checked, inScope)
+	if truncated {
+		summary += fmt.Sprintf("; %d in-scope item(s) not probed (cap %d or timeout) — re-run with a larger --timeout or narrower scope",
+			inScope-checked, maxValidateItems)
 	}
 
 	ev := &findings.Evidence{
 		Vantage:    findings.VantageAuthenticated,
-		Request:    fmt.Sprintf(reqFmt, checked),
-		Response:   truncateJoin(details),
+		Request:    fmt.Sprintf("%s over %d of %d %s  (read-only)", apiDesc, checked, inScope, noun),
+		Response:   truncateJoin(append([]string{summary}, details...)),
 		CapturedAt: time.Now().UTC(),
 	}
 	switch {
 	case confirmed > 0:
 		ev.Verdict = VerdictConfirmed
-	case blockedErr != nil:
+	case errored > 0 || truncated:
 		ev.Verdict = VerdictBlocked
 	default:
 		ev.Verdict = VerdictUnconfirmed

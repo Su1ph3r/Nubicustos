@@ -304,10 +304,14 @@ Implemented validators:
   (object-level public read may still apply), a network failure is blocked.
 - **Publicly accessible RDS** (external vantage) — a TCP connect to the
   instance's collected endpoint with a passive banner read (no bytes sent, no
-  auth attempt). A successful connect confirms the port is genuinely reachable
-  from outside — distinguishing a live exposure from an instance merely flagged
-  `PubliclyAccessible` while a security group still blocks it; a refused
-  connection is unconfirmed, a timeout is blocked.
+  auth attempt). A banner, or a connection held open with none (a client-speaks-
+  first engine), confirms a live, internet-reachable port — distinguishing a
+  real exposure from an instance merely flagged `PubliclyAccessible` while a
+  security group still blocks it. A handshake that the peer immediately
+  closes/resets (a possible scrubbing middlebox, not the database) is
+  unconfirmed; a refused connection is unconfirmed and explicitly noted as
+  vantage-limited (it does not refute config-level public access); a timeout is
+  blocked.
 - **Public EBS snapshot** (authenticated vantage) — re-reads each snapshot's
   `createVolumePermission` with the scan credentials and confirms an explicit
   grant to the `all` group — the exact mechanism that makes a snapshot
@@ -317,6 +321,12 @@ Implemented validators:
   `launchPermission` and confirms a grant to the `all` group.
 - **Public RDS snapshot** (authenticated vantage) — re-reads each manual
   snapshot's `restore` attribute and confirms it lists `all`.
+
+Each authenticated-vantage validator probes per affected resource and folds the
+results into one evidence record carrying a `confirmed/errored/clean/probed`
+summary, so a confirmed verdict from a partial run (some resources unreadable,
+or beyond the per-finding probe cap) is never mistaken for a complete all-clear;
+any unprobed remainder is reported, never silently dropped.
 
 Authenticated-vantage validators need the live scan session, so they run only
 inline with `--validate`; the standalone `validate` command, which re-reads a
