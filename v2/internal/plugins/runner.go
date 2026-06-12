@@ -29,6 +29,12 @@ func Available(m Manifest) bool {
 // terrascan all exit non-zero precisely when they find issues, so the output is
 // parsed regardless and an error is returned only when the output is unusable.
 func Run(ctx context.Context, m Manifest, target string) ([]findings.Finding, error) {
+	// A target beginning with '-' would be parsed by the tool as a flag rather
+	// than a path/image (argument injection). The target is a discrete argv
+	// element (no shell), so this is the only injection vector — reject it.
+	if strings.HasPrefix(target, "-") {
+		return nil, fmt.Errorf("%s: refusing target %q: must not start with '-' (would be read as a flag)", m.Name, target)
+	}
 	if !Available(m) {
 		return nil, ErrNotAvailable
 	}
@@ -97,9 +103,6 @@ func RunAvailable(ctx context.Context, target string, concurrency int) []RunResu
 // runAvailable is the testable core of RunAvailable, parameterized by the tool
 // set so a test can supply manifests with known-absent binaries.
 func runAvailable(ctx context.Context, target string, manifests []Manifest, concurrency int) []RunResult {
-	if ctx.Err() != nil {
-		return nil
-	}
 	if concurrency < 1 {
 		concurrency = 1
 	}
@@ -107,23 +110,25 @@ func runAvailable(ctx context.Context, target string, manifests []Manifest, conc
 	// Pre-size by index so results stay in Builtin order despite concurrent
 	// completion; each goroutine writes only its own element's run fields, while
 	// the launching loop sets Manifest/Available before the go statement — so no
-	// field is written by two goroutines.
+	// field is written by two goroutines. Every manifest gets a result: a tool
+	// not run because the context was cancelled is recorded with the
+	// cancellation error, never silently dropped, so a cut-short sweep is not
+	// mistaken for a complete one.
 	results := make([]RunResult, len(manifests))
-	processed := 0
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 
 	for i := range manifests {
-		if ctx.Err() != nil {
-			break // stop launching new work; trailing tools are not reported
-		}
 		m := manifests[i]
 		results[i].Manifest = m
-		processed = i + 1
-		if !Available(m) {
-			continue // Available stays false; tool is skipped, not run
+		results[i].Available = Available(m)
+		if ctx.Err() != nil {
+			results[i].Err = ctx.Err() // cancelled before this tool could run
+			continue
 		}
-		results[i].Available = true
+		if !results[i].Available {
+			continue // not installed; skipped, not run (no error)
+		}
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(idx int, mf Manifest) {
@@ -139,7 +144,7 @@ func runAvailable(ctx context.Context, target string, manifests []Manifest, conc
 	}
 
 	wg.Wait()
-	return results[:processed]
+	return results
 }
 
 // Parse dispatches raw tool output to the format-specific parser.

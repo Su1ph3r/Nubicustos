@@ -141,6 +141,30 @@ func TestConflictBetweenSimulateAndProbeIsDeniedAndFlagged(t *testing.T) {
 	}
 }
 
+func TestConflictExcludedFromRemediationPolicy(t *testing.T) {
+	// s3:GetBucketAcl is genuinely IAM-denied; iam:ListUsers is IAM-allowed but
+	// runtime-blocked (conflict). The generated grant must include only the real
+	// IAM gap — attaching a policy cannot fix an SCP block.
+	sim := &fakeSim{allow: map[string]bool{"iam:ListUsers": true}} // s3 denied
+	probe := fakeProbe{d: map[string]Decision{"iam:ListUsers": DecisionDenied, "s3:GetBucketAcl": DecisionDenied}}
+	rep := Evaluate(context.Background(), Options{
+		Provider: "aws", Identity: "arn", Tools: []Tool{twoActionTool()}, Simulator: sim, Prober: probe,
+	})
+	tr := toolReport(rep)
+	if len(tr.Conflicts) != 1 || tr.Conflicts[0] != "iam:ListUsers" {
+		t.Fatalf("iam:ListUsers should be the conflict, got %v", tr.Conflicts)
+	}
+	if !strings.Contains(tr.Remediate.PolicyDocument, "s3:GetBucketAcl") {
+		t.Fatalf("the genuinely IAM-missing action should be in the policy:\n%s", tr.Remediate.PolicyDocument)
+	}
+	if strings.Contains(tr.Remediate.PolicyDocument, "iam:ListUsers") {
+		t.Fatalf("a runtime-blocked (SCP) action must NOT be in the grant — a policy can't fix it:\n%s", tr.Remediate.PolicyDocument)
+	}
+	if !strings.Contains(tr.Remediate.Summary, "SCP") {
+		t.Fatalf("summary should call out the runtime/SCP block separately: %q", tr.Remediate.Summary)
+	}
+}
+
 func TestSimulationUnavailableFallsBackToProbe(t *testing.T) {
 	sim := &fakeSim{err: errors.New("AccessDenied: not authorized to perform iam:SimulatePrincipalPolicy")}
 	probe := fakeProbe{d: map[string]Decision{"s3:GetBucketAcl": DecisionAllowed, "iam:ListUsers": DecisionDenied}}
@@ -161,9 +185,10 @@ func TestSimulationUnavailableFallsBackToProbe(t *testing.T) {
 	}
 }
 
-func TestUnprobedUnknownActionsDoNotFailReadiness(t *testing.T) {
-	// Simulation off; probe only knows one of two actions → the other is unknown,
-	// and an all-allowed-known set with no denials is still ready.
+func TestUnverifiedActionsDoNotPassAsReady(t *testing.T) {
+	// Simulation off; the probe knows only one of two required actions → the
+	// other is unverified. An unverified action must NOT be absorbed into a
+	// "ready" verdict (that would certify access the check never confirmed).
 	probe := fakeProbe{d: map[string]Decision{"s3:GetBucketAcl": DecisionAllowed}}
 	rep := Evaluate(context.Background(), Options{
 		Provider: "aws", Identity: "arn", Tools: []Tool{twoActionTool()}, Prober: probe,
@@ -172,15 +197,21 @@ func TestUnprobedUnknownActionsDoNotFailReadiness(t *testing.T) {
 	if len(tr.Unknown) != 1 || tr.Unknown[0] != "iam:ListUsers" {
 		t.Fatalf("the unprobed action should be unknown, got %v", tr.Unknown)
 	}
-	if tr.Readiness != ReadinessReady {
-		t.Fatalf("no denials + some allowed should be ready, got %s", tr.Readiness)
+	if tr.Readiness != ReadinessUnverified {
+		t.Fatalf("an unverified action must yield 'unverified', not 'ready', got %s", tr.Readiness)
+	}
+	if rep.Overall == ReadinessReady {
+		t.Fatal("overall must not be ready when a tool is unverified (so the CLI gate fails)")
+	}
+	if !strings.Contains(tr.Remediate.Summary, "could not be verified") {
+		t.Fatalf("remediation should flag the unverified permission: %q", tr.Remediate.Summary)
 	}
 }
 
-func TestNoVerificationSourceIsUnknown(t *testing.T) {
+func TestNoVerificationSourceIsUnverified(t *testing.T) {
 	rep := Evaluate(context.Background(), Options{Provider: "aws", Identity: "arn", Tools: []Tool{twoActionTool()}})
-	if rep.Overall != ReadinessUnknown {
-		t.Fatalf("no simulator and no prober should yield unknown, got %s", rep.Overall)
+	if rep.Overall != ReadinessUnverified {
+		t.Fatalf("no simulator and no prober should yield unverified (not ready), got %s", rep.Overall)
 	}
 	if !strings.Contains(rep.Method, "no verification source") {
 		t.Fatalf("method should note there was no source: %q", rep.Method)

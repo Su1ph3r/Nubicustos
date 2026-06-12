@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 	"github.com/spf13/cobra"
 
 	"github.com/Su1ph3r/nubicustos/internal/auth"
@@ -246,13 +248,24 @@ func (p *awsProber) Probe(ctx context.Context, action string) preflight.Decision
 	}
 }
 
+// isAccessDenied reports whether err is an authorization failure. It matches on
+// the error-code substring (so service-specific variants like
+// AccessDeniedException or UnauthorizedOperation are all caught) and, as a
+// backstop, on an HTTP 403 — so a denial under an unanticipated code is never
+// silently read as a non-denial (which would defeat the SCP cross-check).
 func isAccessDenied(err error) bool {
 	var ae smithy.APIError
 	if errors.As(err, &ae) {
-		switch ae.ErrorCode() {
-		case "AccessDenied", "AccessDeniedException", "UnauthorizedOperation", "AuthorizationError", "Client.UnauthorizedOperation":
-			return true
+		code := strings.ToLower(ae.ErrorCode())
+		for _, frag := range []string{"accessdenied", "unauthorized", "forbidden", "authorizationerror"} {
+			if strings.Contains(code, frag) {
+				return true
+			}
 		}
+	}
+	var re *smithyhttp.ResponseError
+	if errors.As(err, &re) && re.HTTPStatusCode() == http.StatusForbidden {
+		return true
 	}
 	return false
 }

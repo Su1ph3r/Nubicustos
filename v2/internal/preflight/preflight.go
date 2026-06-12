@@ -35,10 +35,11 @@ const (
 type Readiness string
 
 const (
-	ReadinessReady   Readiness = "ready"   // every required action allowed
-	ReadinessPartial Readiness = "partial" // some allowed, some missing
-	ReadinessFailed  Readiness = "failed"  // no required action allowed
-	ReadinessUnknown Readiness = "unknown" // nothing could be determined
+	ReadinessReady      Readiness = "ready"      // every required action verified allowed
+	ReadinessPartial    Readiness = "partial"    // some allowed, some denied
+	ReadinessFailed     Readiness = "failed"     // no required action allowed, some denied
+	ReadinessUnverified Readiness = "unverified" // no denials, but some required actions could not be verified
+	ReadinessUnknown    Readiness = "unknown"    // nothing could be determined
 )
 
 // ActionResult is the verdict for one required action.
@@ -194,26 +195,35 @@ func evaluateTool(ctx context.Context, t Tool, sim map[string]Decision, simOK bo
 	return tr
 }
 
-// toolReadiness: every action allowed → ready; some allowed, some denied →
-// partial; none allowed but some denied → failed; nothing determinable → unknown.
+// toolReadiness classifies a tool. A required action that could not be verified
+// (neither simulated nor probed) is "unknown", and unknowns must never be
+// absorbed into a "ready" verdict — that would certify access the check never
+// confirmed. So: any denial → partial (with some allowed) or failed (none
+// allowed); no denials but unverified actions remain → unverified; every action
+// verified-allowed → ready; nothing in scope or determinable → unknown.
 func toolReadiness(tr ToolReport) Readiness {
 	switch {
-	case len(tr.Denied) == 0 && len(tr.Unknown) == 0:
-		return ReadinessReady
-	case len(tr.Denied) == 0 && len(tr.Allowed) > 0:
-		return ReadinessReady // remaining are unknown (unprobed), none denied
-	case len(tr.Allowed) == 0 && len(tr.Denied) == 0:
-		return ReadinessUnknown
-	case len(tr.Allowed) == 0:
-		return ReadinessFailed
-	default:
+	case len(tr.Denied) > 0 && len(tr.Allowed) > 0:
 		return ReadinessPartial
+	case len(tr.Denied) > 0:
+		return ReadinessFailed // allowed == 0
+	case len(tr.Unknown) > 0:
+		return ReadinessUnverified // no denials, but coverage is incomplete
+	case len(tr.Allowed) > 0:
+		return ReadinessReady // every action verified allowed, none unknown
+	default:
+		return ReadinessUnknown // nothing in scope
 	}
 }
 
 func overallReadiness(tools []ToolReport) Readiness {
 	worst := ReadinessReady
-	rank := map[Readiness]int{ReadinessReady: 0, ReadinessUnknown: 1, ReadinessPartial: 2, ReadinessFailed: 3}
+	// Anything other than fully-ready must not present as ready. Unverified and
+	// unknown both mean "not confirmed" and outrank ready for gating.
+	rank := map[Readiness]int{
+		ReadinessReady: 0, ReadinessUnverified: 1, ReadinessUnknown: 2,
+		ReadinessPartial: 3, ReadinessFailed: 4,
+	}
 	for _, t := range tools {
 		if rank[t.Readiness] > rank[worst] {
 			worst = t.Readiness
@@ -222,37 +232,61 @@ func overallReadiness(tools []ToolReport) Readiness {
 	return worst
 }
 
-// buildRemediation produces the client-facing fix: the managed policies to
-// attach and a generated least-privilege inline policy of exactly the missing
-// (denied) actions, plus a one-line summary.
+// buildRemediation produces the client-facing fix, distinguishing three kinds
+// of gap: IAM permissions the identity lacks (fixable by attaching a policy),
+// permissions IAM allows but the runtime blocks via an SCP/boundary (needs an
+// org-level change, not a policy attach), and permissions that could not be
+// verified at all. The generated inline policy grants only the genuinely
+// IAM-missing actions — granting a runtime-blocked one would not unblock it.
 func buildRemediation(t Tool, tr ToolReport) Remediation {
-	r := Remediation{ManagedPolicies: t.RequiredManagedPolicies, PolicyName: t.RemediationPolicyName}
+	// Surface managed policies as full ARNs so the client report is directly
+	// attachable (`aws iam attach-*-policy --policy-arn ...`); fall back to the
+	// short name if the ARN is unknown.
+	r := Remediation{PolicyName: t.RemediationPolicyName}
+	for _, name := range t.RequiredManagedPolicies {
+		if arn, ok := AWSManagedPolicyARN[name]; ok {
+			r.ManagedPolicies = append(r.ManagedPolicies, arn)
+		} else {
+			r.ManagedPolicies = append(r.ManagedPolicies, name)
+		}
+	}
 	if tr.Readiness == ReadinessReady {
 		r.Summary = fmt.Sprintf("%s: all %d required permission(s) present — ready.", t.Name, len(tr.Allowed))
 		return r
 	}
-	missing := append([]string(nil), tr.Denied...)
-	sort.Strings(missing)
-	if len(missing) > 0 {
-		r.PolicyDocument = inlinePolicy(t.RemediationPolicyName, missing)
+
+	// Conflicts (IAM-allowed but runtime-denied) are a subset of Denied; exclude
+	// them from the IAM-missing set since a policy attach cannot fix an SCP block.
+	conflict := make(map[string]bool, len(tr.Conflicts))
+	for _, c := range tr.Conflicts {
+		conflict[c] = true
+	}
+	var iamMissing []string
+	for _, d := range tr.Denied {
+		if !conflict[d] {
+			iamMissing = append(iamMissing, d)
+		}
+	}
+	sort.Strings(iamMissing)
+	if len(iamMissing) > 0 {
+		r.PolicyDocument = inlinePolicy(t.RemediationPolicyName, iamMissing)
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s: missing %d of %d required permission(s)", t.Name, len(tr.Denied), len(tr.Actions))
+	var parts []string
+	if len(iamMissing) > 0 {
+		fix := fmt.Sprintf("apply the generated %s inline policy", t.RemediationPolicyName)
+		if len(t.RequiredManagedPolicies) > 0 {
+			fix = fmt.Sprintf("attach %s, or %s", strings.Join(t.RequiredManagedPolicies, " / "), fix)
+		}
+		parts = append(parts, fmt.Sprintf("missing %d IAM permission(s) — %s", len(iamMissing), fix))
+	}
 	if len(tr.Conflicts) > 0 {
-		fmt.Fprintf(&b, " (%d blocked at runtime despite IAM allow — SCP/boundary)", len(tr.Conflicts))
+		parts = append(parts, fmt.Sprintf("%d permission(s) IAM-allowed but blocked at runtime (SCP/permission boundary) — requires an org/SCP change, not a policy attachment", len(tr.Conflicts)))
 	}
 	if len(tr.Unknown) > 0 {
-		fmt.Fprintf(&b, ", %d undetermined", len(tr.Unknown))
+		parts = append(parts, fmt.Sprintf("%d permission(s) could not be verified — grant iam:SimulatePrincipalPolicy for an authoritative check", len(tr.Unknown)))
 	}
-	b.WriteString(". ")
-	if len(t.RequiredManagedPolicies) > 0 {
-		fmt.Fprintf(&b, "Attach %s, or apply the generated %s inline policy granting the missing actions.",
-			strings.Join(t.RequiredManagedPolicies, " / "), t.RemediationPolicyName)
-	} else {
-		fmt.Fprintf(&b, "Apply the generated %s inline policy granting the missing actions.", t.RemediationPolicyName)
-	}
-	r.Summary = b.String()
+	r.Summary = fmt.Sprintf("%s [%s]: %s.", t.Name, tr.Readiness, strings.Join(parts, "; "))
 	return r
 }
 

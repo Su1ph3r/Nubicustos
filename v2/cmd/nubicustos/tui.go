@@ -251,15 +251,15 @@ func (a *tuiActions) Preflight() ([]tui.ToolReadiness, error) {
 func readinessDetail(t preflight.ToolReport) string {
 	switch t.Readiness {
 	case preflight.ReadinessReady:
-		return fmt.Sprintf("all %d ok", len(t.Allowed))
-	case preflight.ReadinessFailed:
-		return fmt.Sprintf("missing all %d", len(t.Actions))
-	case preflight.ReadinessPartial:
+		return fmt.Sprintf("all %d verified", len(t.Allowed))
+	case preflight.ReadinessFailed, preflight.ReadinessPartial:
 		d := fmt.Sprintf("missing %d of %d", len(t.Denied), len(t.Actions))
 		if len(t.Conflicts) > 0 {
 			d += fmt.Sprintf(" (%d SCP-blocked)", len(t.Conflicts))
 		}
 		return d
+	case preflight.ReadinessUnverified:
+		return fmt.Sprintf("%d/%d verified, %d undetermined", len(t.Allowed), len(t.Actions), len(t.Unknown))
 	default:
 		return "undetermined"
 	}

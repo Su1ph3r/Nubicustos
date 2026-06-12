@@ -201,8 +201,8 @@ func (m Model) toolsView() string {
 		if t.HasRun {
 			last = theme.Muted.Render(fmt.Sprintf("last %s · %d findings", t.LastRun, t.Findings))
 		}
-		row := fmt.Sprintf("%-12s %-12s %-14s", t.Name, t.Category, "")
-		b.WriteString(cursor + theme.Value.Render(row) + avail + "  " + last + "\n")
+		row := fmt.Sprintf("%-12s %-12s", t.Name, t.Category)
+		b.WriteString(cursor + theme.Value.Render(row) + "  " + avail + "  " + last + "\n")
 	}
 
 	if m.actions.PreflightAvailable() {
@@ -216,12 +216,14 @@ func (m Model) toolsView() string {
 	return b.String()
 }
 
-// readinessStyle maps a preflight readiness to a colour.
+// readinessStyle maps a preflight readiness to a colour. Only a fully-verified
+// "ready" gets the good tone; "unverified" (incomplete coverage) is deliberately
+// not green so it can't be mistaken for confirmed access.
 func readinessStyle(readiness string) lipgloss.Style {
 	switch readiness {
 	case "ready":
 		return theme.Severity("low") // green-ish "good" tone
-	case "partial":
+	case "partial", "unverified":
 		return theme.Severity("medium")
 	case "failed":
 		return theme.Severity("critical")

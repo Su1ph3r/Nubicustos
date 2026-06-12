@@ -54,11 +54,23 @@ func TestRunAvailableClampsConcurrency(t *testing.T) {
 	assertSkippedInOrder(t, ms, runAvailable(context.Background(), ".", ms, 0))
 }
 
-func TestRunAvailableStopsOnCancelledContext(t *testing.T) {
+func TestRunAvailableSurfacesCancellation(t *testing.T) {
+	ms := absentManifests()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel before the sweep starts
-	if results := runAvailable(ctx, ".", absentManifests(), DefaultSweepConcurrency); len(results) != 0 {
-		t.Fatalf("a cancelled context must stop the sweep before any tool, got %d results", len(results))
+	results := runAvailable(ctx, ".", ms, DefaultSweepConcurrency)
+	// Cancellation must not silently drop tools: every manifest is still
+	// reported, each carrying the cancellation error and never marked as run.
+	if len(results) != len(ms) {
+		t.Fatalf("cancellation must not drop tools: got %d, want %d", len(results), len(ms))
+	}
+	for _, r := range results {
+		if r.Err == nil {
+			t.Fatalf("a tool skipped by cancellation must carry the cancellation error, got nil for %s", r.Manifest.Name)
+		}
+		if !r.StartedAt.IsZero() {
+			t.Fatalf("a cancelled tool must not have been started, got %v", r.StartedAt)
+		}
 	}
 }
 
