@@ -53,6 +53,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newExportCmd())
 	root.AddCommand(newPathsCmd())
 	root.AddCommand(newValidateCmd())
+	root.AddCommand(newPreflightCmd())
 	root.AddCommand(newTUICmd())
 	root.AddCommand(newPluginsCmd())
 	root.AddCommand(newRulesCmd())

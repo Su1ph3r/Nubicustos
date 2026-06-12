@@ -236,6 +236,39 @@ resource types today: `aws_s3_bucket`, `aws_rds_instance`, `aws_iam_user`,
 `aws_security_group`, `azure_storage_account`, `azure_key_vault`,
 `gcp_storage_bucket`, `k8s_pod` (extended by surfacing more of the state model).
 
+### Preflight: confirm a credential has the access the tooling needs
+
+`preflight` answers, before a scan runs, whether the identity behind a
+credential holds the permissions each tool requires — Nubicustos's own native
+checks plus the optional external tools (Prowler, ScoutSuite, CloudSploit) — and
+produces a client-ready report of exactly what is missing and how to grant it.
+
+```bash
+nubicustos preflight --profile prod                 # check all tools
+nubicustos preflight --tools nubicustos,prowler     # a subset
+nubicustos preflight --format json                  # machine-readable report
+nubicustos preflight --write-policies ./fixes       # emit a remediation policy per non-ready tool
+```
+
+It is read-only and verifies access two ways: it leads with IAM policy
+simulation (`iam:SimulatePrincipalPolicy`) for an exact allow/deny on every
+required action without firing a scan, and cross-checks with a thin live
+read-probe (one representative call per service) that catches denials simulation
+cannot see — SCPs and permission boundaries — and that covers the case where the
+identity cannot simulate at all. Each action's verdict records its basis
+(simulated / probed / both), and a disagreement (IAM allows but the runtime
+probe is denied) is flagged as a likely SCP block and treated as denied, so a
+"ready" verdict is never optimistic.
+
+Per tool it reports `ready` / `partial` / `failed`, the exact missing actions,
+and a **generated least-privilege IAM policy of precisely those actions**
+(`--write-policies` saves one JSON per tool) alongside the managed-policy
+recommendation (`SecurityAudit` / `ViewOnlyAccess`) — the artifact to hand a
+client team. The Nubicustos requirement set is authoritative (derived from the
+collectors' API calls); the external-tool sets are their documented requirements.
+The command exits non-zero unless every selected tool is `ready`, so it can gate
+a pipeline.
+
 ### Optional tool plugins
 
 `plugins` runs well-known read-only scanners **if they are installed** and
