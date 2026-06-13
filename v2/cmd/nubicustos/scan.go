@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/Su1ph3r/nubicustos/internal/auth"
 	ruleschecks "github.com/Su1ph3r/nubicustos/internal/checks/rules"
+	"github.com/Su1ph3r/nubicustos/internal/discovery"
 	"github.com/Su1ph3r/nubicustos/internal/engine"
 	"github.com/Su1ph3r/nubicustos/internal/export"
 	"github.com/Su1ph3r/nubicustos/internal/findings"
@@ -48,6 +51,15 @@ type scanFlags struct {
 	// Kubernetes
 	contexts []string
 
+	// AWS org-wide scanning (§9.4)
+	org             bool
+	accounts        []string
+	excludeAccts    []string
+	ous             []string
+	orgRole         string
+	includeMgmt     bool
+	acctConcurrency int
+
 	dbPath     string
 	exportPath string
 	validate   bool
@@ -81,6 +93,14 @@ func newScanCmd() *cobra.Command {
 	pf.StringSliceVar(&f.projects, "project", nil, "GCP project id(s) to scan (repeatable; default: all active)")
 	pf.StringSliceVar(&f.contexts, "context", nil, "Kubernetes context(s) to scan (repeatable; default: current context)")
 
+	pf.BoolVar(&f.org, "org", false, "AWS: enumerate the organization and scan every member account")
+	pf.StringSliceVar(&f.accounts, "accounts", nil, "AWS: explicit member account id(s) to scan (implies org mode; skips org enumeration)")
+	pf.StringSliceVar(&f.excludeAccts, "exclude", nil, "AWS org: account id(s) to skip")
+	pf.StringSliceVar(&f.ous, "ou", nil, "AWS org: restrict to accounts under these OU id(s), recursively (implies org mode)")
+	pf.StringVar(&f.orgRole, "org-role", "", "AWS org: role assumed in each member account (default OrganizationAccountAccessRole)")
+	pf.BoolVar(&f.includeMgmt, "include-mgmt", false, "AWS org: also scan the management/base account itself")
+	pf.IntVar(&f.acctConcurrency, "account-concurrency", 4, "AWS org: how many accounts to scan in parallel")
+
 	pf.StringVar(&f.dbPath, "db", "nubicustos.db", "path to the SQLite results database")
 	pf.StringVar(&f.exportPath, "export", "", "write Cairn-format findings JSON to this path")
 	pf.BoolVar(&f.validate, "validate", false, "opt-in: actively (read-only) confirm findings and capture evidence")
@@ -93,6 +113,12 @@ func runScan(ctx context.Context, f *scanFlags) error {
 	provider := strings.ToLower(f.provider)
 	if provider == "" {
 		return fmt.Errorf("--provider is required (aws | azure | gcp | k8s)")
+	}
+
+	// AWS org-wide scanning takes a dedicated multi-account path (§9.4). The
+	// single-account flow below is left untouched.
+	if provider == "aws" && (f.org || len(f.accounts) > 0 || len(f.ous) > 0) {
+		return runScanAWSOrg(ctx, f)
 	}
 
 	prompter := auth.NewCLIPrompter(f.mfaToken, !f.nonInteractive)
@@ -253,6 +279,270 @@ func runScan(ctx context.Context, f *scanFlags) error {
 
 	printSummary(result, scanID)
 	return nil
+}
+
+// runScanAWSOrg enumerates the AWS organization off one MFA-satisfied base
+// session and scans every in-scope member account, attributing each to its own
+// scan row (§9.4). Accounts scan in parallel (bounded); only persistence is
+// serialized, since the embedded SQLite has no concurrent-writer guard.
+func runScanAWSOrg(ctx context.Context, f *scanFlags) error {
+	prompter := auth.NewCLIPrompter(f.mfaToken, !f.nonInteractive)
+
+	cfg, ident, path, err := auth.ResolveAWS(ctx, auth.AWSOptions{
+		Profile:         f.profile,
+		Region:          firstRegion(f.regions),
+		MFASerial:       f.mfaSerial,
+		MFAToken:        f.mfaToken,
+		SessionDuration: f.sessionDur,
+		AllowSSOLogin:   f.ssoLogin,
+	}, prompter)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "authenticated to AWS account %s as %s (via %s)\n", ident.Account, ident.ARN, path)
+
+	disc, err := discovery.AWSAccounts(ctx, cfg, discovery.AWSOptions{
+		RoleName:    f.orgRole,
+		Accounts:    f.accounts,
+		Exclude:     f.excludeAccts,
+		OUs:         f.ous,
+		IncludeMgmt: f.includeMgmt,
+		Region:      firstRegion(f.regions),
+		Validate:    true,
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, s := range disc.Skipped {
+		fmt.Fprintf(os.Stderr, "  skip %s (%s): %s\n", s.ID, s.Name, s.Reason)
+	}
+	if len(disc.Accounts) == 0 {
+		return fmt.Errorf("no accounts in scope to scan (%d skipped)", len(disc.Skipped))
+	}
+	conc := accountConcurrency(f)
+	fmt.Fprintf(os.Stderr, "scanning %d account(s) across the organization (%d skipped), %d at a time\n",
+		len(disc.Accounts), len(disc.Skipped), conc)
+
+	// Load user policy-as-code rules once; the rules check reads this at evaluation.
+	ruleschecks.SetUserRulesDir(f.rulesDir)
+
+	st, err := store.Open(ctx, f.dbPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	var (
+		mu        sync.Mutex // guards persistence + summaries + stderr lines
+		summaries []orgAccountSummary
+	)
+	report := func(acc discovery.Account, s orgAccountSummary) {
+		summaries = append(summaries, s)
+		if s.err != nil {
+			fmt.Fprintf(os.Stderr, "  ✗ %s (%s): %v\n", acc.ID, acc.Name, s.err)
+			return
+		}
+		fmt.Fprintf(os.Stderr, "  ✓ %s (%s): %d finding(s), %d path(s)%s\n",
+			acc.ID, acc.Name, s.findings, s.paths, errSuffix(s.scanErrs))
+	}
+
+	runAccountPool(disc.Accounts, conc, func(acc discovery.Account) {
+		s := scanOneAccount(ctx, f, st, &mu, acc)
+		mu.Lock()
+		report(acc, s)
+		mu.Unlock()
+	})
+
+	printOrgSummary(disc, summaries)
+	return nil
+}
+
+// orgAccountSummary is one account's outcome in an org-wide scan.
+type orgAccountSummary struct {
+	id, name, scanID string
+	findings, paths  int
+	scanErrs         int                       // non-fatal collector/check errors
+	counts           map[findings.Severity]int // severity histogram
+	err              error                     // fatal for this account (persistence/export failed)
+}
+
+// scanOneAccount runs the engine against one account and persists the result.
+// persistMu serializes the database writes across the concurrent account pool.
+func scanOneAccount(ctx context.Context, f *scanFlags, st *store.Store, persistMu *sync.Mutex, acc discovery.Account) orgAccountSummary {
+	sum := orgAccountSummary{id: acc.ID, name: acc.Name}
+
+	// Resolve regions per account — enabled regions can differ across the estate.
+	regions := f.regions
+	if len(regions) == 0 {
+		if regs, rerr := awsprovider.EnabledRegions(ctx, acc.Config); rerr == nil && len(regs) > 0 {
+			regions = regs
+		} else {
+			regions = []string{acc.Config.Region}
+		}
+	}
+
+	sc := &engine.ScanContext{
+		Ctx:      ctx,
+		Provider: "aws",
+		Account:  acc.ID,
+		Regions:  regions,
+		AWS:      acc.Config,
+	}
+
+	started := time.Now().UTC()
+	result := engine.Run(sc)
+
+	if f.validate {
+		// Confirm findings read-only against this account's own session; evidence
+		// attaches to the findings before they are persisted/exported.
+		validate.Run(ctx, result.Findings, validate.Options{Env: validate.NewAWSEnv(acc.Config)})
+	}
+	finished := time.Now().UTC()
+
+	identity := acc.Identity
+	if identity == "" {
+		identity = acc.ID
+	}
+	scanID := newScanID()
+
+	persistMu.Lock()
+	err := func() error {
+		if err := st.CreateScan(ctx, scanID, "aws", acc.ID, identity, started); err != nil {
+			return err
+		}
+		if err := st.SaveFindings(ctx, scanID, result.Findings, finished); err != nil {
+			return err
+		}
+		return st.SaveGraph(ctx, scanID, result.Graph)
+	}()
+	persistMu.Unlock()
+	if err != nil {
+		sum.err = fmt.Errorf("persist: %w", err)
+		return sum
+	}
+
+	if f.exportPath != "" {
+		if err := exportAccountCairn(f.exportPath, acc.ID, result.Findings, finished); err != nil {
+			sum.err = fmt.Errorf("export: %w", err)
+			return sum
+		}
+	}
+
+	sum.scanID = scanID
+	sum.findings = len(result.Findings)
+	if result.Graph != nil {
+		sum.paths = len(result.Graph.Paths)
+	}
+	sum.scanErrs = len(result.Errors)
+	sum.counts = severityCounts(result.Findings)
+	return sum
+}
+
+// exportAccountCairn writes one account's findings to a per-account Cairn file,
+// derived from the --export path by inserting the account id before the extension.
+func exportAccountCairn(base, accountID string, fs []findings.Finding, finishedAt time.Time) error {
+	out, err := os.Create(accountExportPath(base, accountID))
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	return export.Cairn(out, "aws", accountID, fs, finishedAt)
+}
+
+// accountExportPath turns "findings.json" + "222..." into "findings.222....json".
+func accountExportPath(base, accountID string) string {
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	return stem + "." + accountID + ext
+}
+
+// accountConcurrency clamps the per-account parallelism to at least 1.
+func accountConcurrency(f *scanFlags) int {
+	if f.acctConcurrency < 1 {
+		return 1
+	}
+	return f.acctConcurrency
+}
+
+// runAccountPool runs fn over accounts with a bounded number of workers.
+func runAccountPool(accs []discovery.Account, workers int, fn func(discovery.Account)) {
+	if len(accs) == 0 {
+		return
+	}
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	for _, a := range accs {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(a discovery.Account) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			fn(a)
+		}(a)
+	}
+	wg.Wait()
+}
+
+// severityCounts builds a severity histogram for a finding set.
+func severityCounts(fs []findings.Finding) map[findings.Severity]int {
+	counts := map[findings.Severity]int{}
+	for _, f := range fs {
+		counts[f.Severity]++
+	}
+	return counts
+}
+
+// errSuffix annotates a per-account line when non-fatal scan errors occurred.
+func errSuffix(n int) string {
+	if n > 0 {
+		return fmt.Sprintf(" — %d non-fatal error(s)", n)
+	}
+	return ""
+}
+
+// printOrgSummary prints the estate-wide rollup: per-account lines plus totals,
+// keeping the skipped count visible so a partial run never reads as full coverage.
+func printOrgSummary(disc *discovery.AWSResult, summaries []orgAccountSummary) {
+	sort.Slice(summaries, func(i, j int) bool { return summaries[i].id < summaries[j].id })
+
+	totals := map[findings.Severity]int{}
+	totalFindings, totalPaths, failed := 0, 0, 0
+	for _, s := range summaries {
+		if s.err != nil {
+			failed++
+			continue
+		}
+		totalFindings += s.findings
+		totalPaths += s.paths
+		for sev, n := range s.counts {
+			totals[sev] += n
+		}
+	}
+
+	fmt.Printf("\nOrg scan — %d account(s), %d finding(s), %d attack path(s)\n",
+		len(summaries), totalFindings, totalPaths)
+	if failed > 0 {
+		fmt.Printf("  ⚠ %d account(s) failed to scan (see stderr)\n", failed)
+	}
+	if len(disc.Skipped) > 0 {
+		fmt.Printf("  %d account(s) skipped (not in scope — see stderr)\n", len(disc.Skipped))
+	}
+	for _, sev := range []findings.Severity{
+		findings.SeverityCritical, findings.SeverityHigh, findings.SeverityMedium, findings.SeverityLow, findings.SeverityInfo,
+	} {
+		if totals[sev] > 0 {
+			fmt.Printf("  %-8s %d\n", sev, totals[sev])
+		}
+	}
+	for _, s := range summaries {
+		if s.err != nil {
+			fmt.Printf("  [FAILED]  %s (%s) — %v\n", s.id, s.name, s.err)
+			continue
+		}
+		fmt.Printf("  %s (%s) — %d finding(s), %d path(s)%s [%s]\n",
+			s.id, s.name, s.findings, s.paths, errSuffix(s.scanErrs), s.scanID)
+	}
 }
 
 // firstRegion returns the first region or "" — STS/global resolution only needs one.

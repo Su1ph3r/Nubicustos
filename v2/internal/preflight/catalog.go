@@ -106,6 +106,24 @@ var nubicustosAWSActions = []string{
 	// ACM
 	"acm:ListCertificates",
 	"acm:DescribeCertificate",
+	// Route 53 (dangling-DNS / subdomain-takeover collector — runs every AWS scan)
+	"route53:ListHostedZones",
+	"route53:ListResourceRecordSets",
+}
+
+// nubicustosAWSOrgActions are additionally required only for an org-wide scan
+// (`scan --org` / `--accounts` / `--ou`, §9.4): enumerate the organization from
+// the management/delegated-admin account and assume the org access role into each
+// member. They are intentionally kept out of the always-required set above so a
+// single-account preflight does not report them as missing — the common path
+// never calls Organizations. The SecurityAudit managed policy does not grant
+// these; an org operator needs them granted explicitly (e.g. AWSOrganizationsReadOnlyAccess
+// plus sts:AssumeRole on the member-account role).
+var nubicustosAWSOrgActions = []string{
+	"organizations:ListAccounts",
+	"organizations:ListAccountsForParent",
+	"organizations:ListOrganizationalUnitsForParent",
+	"sts:AssumeRole",
 }
 
 // AWSTools is the requirement catalog for AWS scanning tools. The Nubicustos
@@ -190,4 +208,20 @@ func AWSToolByKey(key string) (Tool, bool) {
 		}
 	}
 	return Tool{}, false
+}
+
+// AWSToolWithOrg returns t with the org-wide-scan actions appended when org is
+// true and t is the native Nubicustos tool; otherwise t is returned unchanged.
+// `preflight --org` uses it so an operator can confirm Organizations enumeration
+// and member assume-role access (§9.4) before launching an estate-wide scan,
+// without those actions polluting the common single-account check.
+func AWSToolWithOrg(t Tool, org bool) Tool {
+	if !org || t.Key != "nubicustos" {
+		return t
+	}
+	merged := make([]string, 0, len(t.RequiredActions)+len(nubicustosAWSOrgActions))
+	merged = append(merged, t.RequiredActions...)
+	merged = append(merged, nubicustosAWSOrgActions...)
+	t.RequiredActions = merged
+	return t
 }

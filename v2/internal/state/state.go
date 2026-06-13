@@ -280,6 +280,20 @@ type Certificate struct {
 	DaysToExpiry int
 }
 
+// Route53Record is a collected DNS record relevant to subdomain-takeover
+// analysis: a CNAME or an alias A/AAAA record and the target it points at. Plain
+// A/AAAA records to literal IPs are not collected — only records that delegate
+// to another hostname (where the target can disappear out from under the record)
+// are takeover candidates.
+type Route53Record struct {
+	ZoneID string // hosted zone id (e.g. Z123ABC)
+	Zone   string // hosted zone name (e.g. example.com.)
+	Name   string // record name (e.g. app.example.com.)
+	Type   string // CNAME | A | AAAA
+	Target string // CNAME value, or the alias AliasTarget DNSName
+	Alias  bool   // true for an alias (A/AAAA) record, false for a plain CNAME
+}
+
 // --- aggregate --------------------------------------------------------------
 
 // AWS is the collected AWS-side state for one account.
@@ -308,9 +322,10 @@ type AWS struct {
 	PublicAMIs         []ResourceRef
 	PublicRDSSnapshots []ResourceRef
 
-	Secrets       []SecretInfo
-	LoadBalancers []LoadBalancer
-	Certificates  []Certificate
+	Secrets        []SecretInfo
+	LoadBalancers  []LoadBalancer
+	Certificates   []Certificate
+	Route53Records []Route53Record
 }
 
 // --- Azure ------------------------------------------------------------------
@@ -717,4 +732,11 @@ func (s *State) AddCertificate(c Certificate) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.AWS.Certificates = append(s.AWS.Certificates, c)
+}
+
+// AddRoute53Record appends a collected DNS record under lock.
+func (s *State) AddRoute53Record(r Route53Record) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.AWS.Route53Records = append(s.AWS.Route53Records, r)
 }

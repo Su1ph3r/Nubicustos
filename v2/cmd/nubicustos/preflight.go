@@ -28,6 +28,7 @@ type preflightFlags struct {
 	format        string
 	noProbe       bool
 	writePolicies string
+	org           bool
 }
 
 func newPreflightCmd() *cobra.Command {
@@ -58,6 +59,7 @@ func newPreflightCmd() *cobra.Command {
 	pf.StringVar(&f.format, "format", "text", "output format: text | json")
 	pf.BoolVar(&f.noProbe, "no-probe", false, "skip the live read-probe cross-check (simulation only)")
 	pf.StringVar(&f.writePolicies, "write-policies", "", "directory to write a remediation policy JSON per non-ready tool")
+	pf.BoolVar(&f.org, "org", false, "also verify org-wide scan access (Organizations enumeration + member assume-role) for the native checks")
 	return cmd
 }
 
@@ -68,7 +70,7 @@ func runPreflight(ctx context.Context, f *preflightFlags) error {
 
 	// Validate the tool selection before authenticating, so a typo fails fast
 	// without resolving credentials.
-	tools, err := selectTools(f.tools)
+	tools, err := selectTools(f.tools, f.org)
 	if err != nil {
 		return err
 	}
@@ -122,10 +124,15 @@ func runPreflight(ctx context.Context, f *preflightFlags) error {
 	return nil
 }
 
-// selectTools returns the requested catalog tools (all if keys is empty).
-func selectTools(keys []string) ([]preflight.Tool, error) {
+// selectTools returns the requested catalog tools (all if keys is empty). When
+// org is set, the native Nubicustos entry also carries the org-wide-scan actions.
+func selectTools(keys []string, org bool) ([]preflight.Tool, error) {
 	if len(keys) == 0 {
-		return preflight.AWSTools, nil
+		out := make([]preflight.Tool, 0, len(preflight.AWSTools))
+		for _, t := range preflight.AWSTools {
+			out = append(out, preflight.AWSToolWithOrg(t, org))
+		}
+		return out, nil
 	}
 	var out []preflight.Tool
 	for _, k := range keys {
@@ -133,7 +140,7 @@ func selectTools(keys []string) ([]preflight.Tool, error) {
 		if !ok {
 			return nil, fmt.Errorf("unknown tool %q (known: nubicustos, prowler, scoutsuite, cloudsploit)", k)
 		}
-		out = append(out, t)
+		out = append(out, preflight.AWSToolWithOrg(t, org))
 	}
 	return out, nil
 }

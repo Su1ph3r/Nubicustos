@@ -268,4 +268,54 @@ func TestCatalogNativeAndExternalPresent(t *testing.T) {
 			t.Fatalf("malformed action %q", a)
 		}
 	}
+
+	// Route 53 collector runs on every AWS scan, so its actions are always required.
+	if !hasAction(nub.RequiredActions, "route53:ListResourceRecordSets") {
+		t.Error("native action list must include route53:ListResourceRecordSets (always-on collector)")
+	}
+	// Organizations / assume-role are conditional — present only with --org.
+	if hasAction(nub.RequiredActions, "organizations:ListAccounts") {
+		t.Error("organizations:ListAccounts must NOT be in the base set (org-only, would false-flag single-account preflight)")
+	}
+}
+
+func TestAWSToolWithOrg(t *testing.T) {
+	base, _ := AWSToolByKey("nubicustos")
+
+	// org=false is a no-op.
+	if got := AWSToolWithOrg(base, false); len(got.RequiredActions) != len(base.RequiredActions) {
+		t.Fatalf("org=false changed the action set: %d != %d", len(got.RequiredActions), len(base.RequiredActions))
+	}
+
+	// org=true appends the org actions to the native tool.
+	withOrg := AWSToolWithOrg(base, true)
+	for _, a := range []string{
+		"organizations:ListAccounts",
+		"organizations:ListAccountsForParent",
+		"organizations:ListOrganizationalUnitsForParent",
+		"sts:AssumeRole",
+	} {
+		if !hasAction(withOrg.RequiredActions, a) {
+			t.Errorf("org=true must add %q to the native action set", a)
+		}
+	}
+	// The base slice must not be mutated by the append.
+	if hasAction(base.RequiredActions, "organizations:ListAccounts") {
+		t.Error("AWSToolWithOrg mutated the shared base action slice")
+	}
+
+	// Org actions only apply to the native tool, not external tools.
+	prowler, _ := AWSToolByKey("prowler")
+	if got := AWSToolWithOrg(prowler, true); len(got.RequiredActions) != len(prowler.RequiredActions) {
+		t.Error("org actions must only augment the native nubicustos tool")
+	}
+}
+
+func hasAction(actions []string, want string) bool {
+	for _, a := range actions {
+		if a == want {
+			return true
+		}
+	}
+	return false
 }

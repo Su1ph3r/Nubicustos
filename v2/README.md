@@ -7,7 +7,9 @@ full design.
 
 > Status: **native multi-cloud posture engine.** Up-front auth/MFA across AWS
 > (SSO/AssumeRole+MFA/GetSessionToken/default chain), Azure (CLI/browser/device-
-> code/SP/MI), GCP (ADC), and Kubernetes (kubeconfig contexts). Native checks for
+> code/SP/MI), GCP (ADC), and Kubernetes (kubeconfig contexts), with AWS
+> Organization-wide scanning that fans out across member accounts off a single
+> MFA-satisfied session. Native checks for
 > AWS (S3/IAM/EC2/VPC/RDS/CloudTrail/KMS/Config/GuardDuty/Secrets Manager/ELB/ACM),
 > Azure (storage/NSG/key vault), GCP (storage/firewall/IAM), and Kubernetes
 > (pod-security/RBAC), persisted to SQLite, queryable offline, and exportable as
@@ -17,9 +19,9 @@ full design.
 > read-only active-validation pass confirms findings with evidence; a terminal UI
 > browses a scan; optional plugins integrate trivy/grype/checkov/terrascan/
 > kube-bench when present; a CEL/YAML policy-as-code engine evaluates built-in and
-> user rules at runtime; and a read-only MCP server exposes results to an LLM.
-> Distributed as a single static cross-platform binary. The optional embedded web
-> UI is the remaining planned item.
+> user rules at runtime; a read-only MCP server exposes results to an LLM; and an
+> optional embedded web UI (REST + SPA over SSE) browses and drives scans.
+> Distributed as a single static cross-platform binary.
 
 ### Finding shapes
 
@@ -45,6 +47,43 @@ Two shapes, chosen per check:
 | Secrets Manager | rotation disabled* |
 | ELB | internet-facing HTTP listener, weak TLS policy, access logs disabled |
 | ACM | certificate expired, certificate expiring (<30d) |
+| Route53 | record delegates to a takeover-prone target (dangling DNS / subdomain takeover) |
+
+### Org-wide scanning (AWS)
+
+By default `scan --provider aws` scans the one account the profile resolves to.
+`--org` turns that into "scan the estate": it enumerates the AWS Organization
+from the management (or a delegated-admin) account, then assumes the org access
+role into each member and scans them — attributing each account to its own scan
+row for per-account filtering and diffing. MFA is satisfied **once** on the base
+session; the chained per-member `AssumeRole` inherits it and never re-prompts.
+
+```bash
+# Whole organization (skips suspended accounts and the management account itself)
+nubicustos scan --provider aws --org --profile mgmt
+
+# Also scan the management account, and assume a custom role name in members
+nubicustos scan --provider aws --org --include-mgmt --org-role MyAuditRole
+
+# Restrict to an OU subtree (recursive), excluding a couple of accounts
+nubicustos scan --provider aws --ou ou-prod-abc123 --exclude 111111111111,222222222222
+
+# Explicit account list (skips Organizations enumeration entirely)
+nubicustos scan --provider aws --accounts 333333333333,444444444444
+
+# Tune per-account parallelism (default 4) and export per-account Cairn files
+nubicustos scan --provider aws --org --account-concurrency 8 --export findings.json
+```
+
+Accounts scan in parallel (bounded by `--account-concurrency`); a single
+account's `AccessDenied` (assume-role or a collector) is tolerated and reported,
+never fatal to the run. Out-of-scope accounts — suspended, excluded, or
+un-assumable — are listed with their reason so a partial run never reads as full
+coverage. With `--export`, each account is written to its own file derived from
+the path (`findings.json` → `findings.<account-id>.json`). Requires
+`organizations:ListAccounts` (and `ListAccountsForParent`/
+`ListOrganizationalUnitsForParent` for `--ou`) on the base identity, plus
+`sts:AssumeRole` into the member role.
 
 ### Check catalog (Azure)
 
@@ -248,7 +287,13 @@ nubicustos preflight --profile prod                 # check all tools
 nubicustos preflight --tools nubicustos,prowler     # a subset
 nubicustos preflight --format json                  # machine-readable report
 nubicustos preflight --write-policies ./fixes       # emit a remediation policy per non-ready tool
+nubicustos preflight --org                          # also verify org-wide scan access (Organizations + assume-role)
 ```
+
+`--org` adds the org-wide scan permissions (`organizations:ListAccounts`,
+`ListAccountsForParent`/`ListOrganizationalUnitsForParent`, and `sts:AssumeRole`)
+to the native-checks requirement set, so an estate operator can confirm a base
+identity is ready for `scan --org` before launching the fan-out.
 
 It is read-only and verifies access two ways: it leads with IAM policy
 simulation (`iam:SimulatePrincipalPolicy`) for an exact allow/deny on every
@@ -439,6 +484,13 @@ Implemented validators:
   `launchPermission` and confirms a grant to the `all` group.
 - **Public RDS snapshot** (authenticated vantage) — re-reads each manual
   snapshot's `restore` attribute and confirms it lists `all`.
+- **Dangling DNS / subdomain takeover** (external vantage) — resolves the
+  record's delegation target: an `NXDOMAIN` target is a confirmed claimable
+  dangle; otherwise it issues one anonymous GET to the subdomain and matches a
+  narrow set of service "unclaimed" fingerprints (e.g. S3 `NoSuchBucket`). A live
+  target with no marker is `unconfirmed` (live from this vantage, ownership
+  unverified — not a refutation); an unreachable target is `blocked`. Read-only:
+  it never registers the target.
 
 Each authenticated-vantage validator probes per affected resource and folds the
 results into one evidence record carrying a `confirmed/errored/clean/probed`
@@ -454,8 +506,11 @@ flags as `scan`); a scan with only external-vantage findings never prompts. If
 that session can't be resolved, the authenticated validators are skipped with an
 explicit notice (never silently), and the external-vantage validators still run.
 
-The framework registers validators by check id; loose-OIDC AssumeRole tests and
-dangling-DNS checks are the next to slot in.
+The framework registers validators by check id. A loose-OIDC `AssumeRole` test
+is the next candidate, though an honest active confirmation is constrained: STS
+validates a web-identity token's signature before evaluating the trust policy, so
+a crafted token cannot prove broad trust from the scanner's vantage — the static
+trust analysis (§9.3) remains the primary signal there.
 
 ### Attack-path graph
 
