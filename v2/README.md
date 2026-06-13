@@ -326,6 +326,29 @@ request. Four views (`1`/`2`/`3`/`4` or `tab` to switch):
 
 Severity is color-coded throughout (critical/high/medium/low/info).
 
+### Web UI (read-only)
+
+`web` serves the embedded single-page UI and a read-only REST API over a stored
+scan database — a browse-and-export console for sharing results, including with
+non-operators. It performs no cloud calls and spawns no work, and binds a
+loopback address by default.
+
+```bash
+nubicustos web                              # serve http://127.0.0.1:8088
+nubicustos web --db prod.db --addr 127.0.0.1:9000
+```
+
+The API is under `/api/v1` (JSON; `scan` ids accept the `latest` alias): `meta`
+(version + mode + capabilities), `scans` / `scans/{id}` / `scans/{id}/summary`,
+`scans/{id}/findings` (with `severity`/`service`/`provider`/`reachable`/
+`has_evidence` filters, `sort`, and `limit`/`offset`), `findings/{id}`,
+`services`, `paths` / `paths/{id}`, `export/{cairn|sarif|csv|html}`, and `tools`.
+`meta` reports `mode: read-only` with no capabilities; the UI renders action
+affordances purely off that, and the server independently mounts only the
+read-only routes — so a shared instance exposes nothing live. Operator-mode
+actions (scan/tool runs, preflight, auth) are added behind an explicit launch
+flag in a later release.
+
 ### Active validation (opt-in, read-only)
 
 `--validate` (and the `validate` command) run a confirmation pass that proves a

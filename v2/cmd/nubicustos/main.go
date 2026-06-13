@@ -55,6 +55,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newValidateCmd())
 	root.AddCommand(newPreflightCmd())
 	root.AddCommand(newTUICmd())
+	root.AddCommand(newWebCmd())
 	root.AddCommand(newPluginsCmd())
 	root.AddCommand(newRulesCmd())
 	root.AddCommand(newMCPCmd())
