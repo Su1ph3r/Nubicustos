@@ -1,0 +1,52 @@
+# Built-in policy-as-code rules. These demonstrate the rule engine by expressing
+# a few posture checks declaratively; they are compiled and evaluated alongside
+# any user-supplied rules. The Go-coded native checks remain the source of truth
+# for complex/graph logic — these rules cover simple config assertions.
+
+- id: rule_aws_s3_public_acl_or_policy
+  title: S3 bucket is publicly accessible (policy-as-code)
+  severity: high
+  provider: aws
+  service: s3
+  resource_type: aws_s3_bucket
+  expression: '(resource.acl_public || resource.policy_public) && !resource.fully_blocked'
+  rationale: A bucket reachable by anonymous or any-AWS principals exposes its objects to the internet.
+  impact: An unauthenticated attacker can list and read objects in the bucket.
+  remediation: Enable Block Public Access and remove public ACL grants / policy statements.
+  poc: aws s3api get-bucket-policy-status --bucket <name>
+  compliance:
+    - framework: CIS AWS 3.0
+      control: "2.1.4"
+
+- id: rule_aws_rds_public
+  title: RDS instance is publicly accessible (policy-as-code)
+  severity: high
+  provider: aws
+  service: rds
+  resource_type: aws_rds_instance
+  expression: 'resource.public'
+  rationale: A publicly accessible database is reachable from the internet.
+  impact: Only network controls and DB authentication stand between an attacker and the data.
+  remediation: Set PubliclyAccessible to false and place the instance in a private subnet.
+
+- id: rule_azure_storage_blob_public
+  title: Storage account allows anonymous blob access (policy-as-code)
+  severity: high
+  provider: azure
+  service: storage
+  resource_type: azure_storage_account
+  expression: 'resource.allow_blob_public_access'
+  rationale: The account permits anonymous read of any container/blob configured public.
+  impact: Unauthenticated callers can read public containers and blobs.
+  remediation: az storage account update --name <name> --allow-blob-public-access false
+
+- id: rule_k8s_privileged_pod
+  title: Pod runs a privileged container (policy-as-code)
+  severity: high
+  provider: k8s
+  service: workload
+  resource_type: k8s_pod
+  expression: 'resource.privileged'
+  rationale: A privileged container has nearly all host capabilities; escape is trivial.
+  impact: Compromise of the container is compromise of the node.
+  remediation: Remove securityContext.privileged from the pod's containers.

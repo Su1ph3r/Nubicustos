@@ -39,6 +39,7 @@ type job struct {
 	done       int
 	total      int
 	scanIDs    []string
+	summary    string
 	errMsg     string
 	startedAt  time.Time
 	finishedAt time.Time
@@ -78,6 +79,9 @@ func (j *job) emit(e sseEvent) {
 		if m, ok := e.data.(map[string]any); ok {
 			if ids, ok := m["scan_ids"].([]string); ok {
 				j.scanIDs = ids
+			}
+			if sm, ok := m["summary"].(string); ok {
+				j.summary = sm
 			}
 		}
 	case "error":
@@ -151,7 +155,7 @@ func (j *job) terminalEvent() (sseEvent, bool) {
 	defer j.mu.Unlock()
 	switch j.status {
 	case jobDone:
-		return sseEvent{name: "done", data: map[string]any{"status": jobDone, "scan_ids": j.scanIDs}}, true
+		return sseEvent{name: "done", data: map[string]any{"status": jobDone, "scan_ids": j.scanIDs, "summary": j.summary}}, true
 	case jobError, jobCancelled:
 		return sseEvent{name: "error", data: map[string]any{"status": j.status, "message": j.errMsg}}, true
 	default:
@@ -159,12 +163,20 @@ func (j *job) terminalEvent() (sseEvent, bool) {
 	}
 }
 
-// subscribe returns the event backlog and, if the job is still running, a
-// channel for live events (nil when already terminal).
-func (j *job) subscribe() (backlog []sseEvent, live chan sseEvent) {
+// subscribe returns the event backlog from index fromIdx (so a reconnecting
+// client that already saw events 0..fromIdx-1 via Last-Event-ID gets only the
+// rest, never duplicates) and, if the job is still running, a channel for live
+// events (nil when already terminal).
+func (j *job) subscribe(fromIdx int) (backlog []sseEvent, live chan sseEvent) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	backlog = append([]sseEvent(nil), j.history...)
+	if fromIdx < 0 {
+		fromIdx = 0
+	}
+	if fromIdx > len(j.history) {
+		fromIdx = len(j.history)
+	}
+	backlog = append([]sseEvent(nil), j.history[fromIdx:]...)
 	if j.closed {
 		return backlog, nil
 	}

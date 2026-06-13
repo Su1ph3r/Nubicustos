@@ -42,7 +42,7 @@ func do(s *Server, method, path string, header map[string]string) *httptest.Resp
 
 func TestJobFanoutAndTerminal(t *testing.T) {
 	j := &job{id: "j1", kind: "tool", status: jobRunning}
-	backlog, live := j.subscribe()
+	backlog, live := j.subscribe(0)
 	if len(backlog) != 0 || live == nil {
 		t.Fatalf("a fresh job should have empty backlog and a live channel")
 	}
@@ -65,7 +65,7 @@ func TestJobLateSubscriberGetsBacklogNoLive(t *testing.T) {
 	j := &job{id: "j2", kind: "tool", status: jobRunning}
 	j.emitLog("a")
 	j.finishDone(nil, "done")
-	backlog, live := j.subscribe()
+	backlog, live := j.subscribe(0)
 	if live != nil {
 		t.Fatal("a terminal job must not hand out a live channel")
 	}

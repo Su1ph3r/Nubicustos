@@ -27,6 +27,9 @@ reports/
 remediation-scripts/
 logs/
 data/
+# Built-in policy rules are go:embed source, not data output — keep tracked.
+!v2/internal/rules/data/
+!v2/internal/rules/data/**
 *.log
 *.html
 *.csv

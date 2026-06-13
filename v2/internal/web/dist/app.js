@@ -49,15 +49,38 @@ function reachBadge(r) {
 function preBlock(text, cls) {
   return `<div class="codewrap"><button class="copy" type="button" data-copy>copy</button><pre class="code ${cls || ""}">${esc(text)}</pre></div>`;
 }
-document.addEventListener("click", (ev) => {
-  const btn = ev.target.closest("[data-copy]");
-  if (!btn) return;
-  const pre = btn.parentElement.querySelector("pre");
-  if (!pre) return;
-  navigator.clipboard?.writeText(pre.textContent);
-  const orig = btn.textContent;
-  btn.textContent = "✓ copied"; btn.classList.add("copied");
+function flash(btn, txt, cls) {
+  const orig = btn.getAttribute("data-orig") || btn.textContent;
+  btn.setAttribute("data-orig", orig);
+  btn.textContent = txt; if (cls) btn.classList.add(cls);
   setTimeout(() => { btn.textContent = orig; btn.classList.remove("copied"); }, 1300);
+}
+function legacyCopy(text) {
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand("copy"); document.body.removeChild(ta); return ok;
+  } catch { return false; }
+}
+// Delegated clicks: copy buttons (read the adjacent <pre>, never embed data),
+// and service/tool chips (data attributes, never interpolated into a handler).
+document.addEventListener("click", (ev) => {
+  const cp = ev.target.closest("[data-copy]");
+  if (cp) {
+    const pre = cp.parentElement.querySelector("pre");
+    if (!pre) return;
+    const text = pre.textContent;
+    const ok = () => flash(cp, "✓ copied", "copied");
+    const fail = () => { if (legacyCopy(text)) ok(); else flash(cp, "copy failed"); };
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(ok, fail);
+    else fail();
+    return;
+  }
+  const svc = ev.target.closest("[data-svc]");
+  if (svc) { setService(svc.getAttribute("data-svc")); return; }
+  const tool = ev.target.closest("[data-tool]");
+  if (tool) { startTool(tool.getAttribute("data-tool")); return; }
 });
 
 // --- boot + routing --------------------------------------------------------
@@ -235,7 +258,7 @@ async function renderFindings(scr) {
   const sevChips = SEV.map((s) => `<button class="fchip ${state.fSev.has(s) ? "on" : ""}" onclick="toggleSev('${s}')">${s}</button>`).join("");
   const reachChips = [["", "all"], ["reachable", "reachable"], ["not_reachable", "not reachable"], ["unknown", "unknown"]]
     .map(([v, l]) => `<button class="fchip ${state.fReach === v ? "on" : ""}" onclick="setReach('${v}')">${l}</button>`).join("");
-  const svcChips = ["", ...state.services].map((s) => `<button class="fchip ${state.fService === s ? "on" : ""}" onclick="setService('${esc(s)}')">${s || "all services"}</button>`).join("");
+  const svcChips = ["", ...state.services].map((s) => `<button class="fchip ${state.fService === s ? "on" : ""}" type="button" data-svc="${esc(s)}">${esc(s) || "all services"}</button>`).join("");
   const rows = state.findings.map((f, i) => `
     <tr class="row" onclick="openFinding(${i})">
       <td>${sevPill(f.severity)}</td>
@@ -325,7 +348,7 @@ async function renderTools(scr) {
   const ctrl = (t) => {
     if (!op) return `<span class="disabled-action">operator only</span>`;
     if (!t.available) return `<span class="disabled-action">not installed</span>`;
-    return `<button class="btn" onclick="startTool('${esc(t.name)}')">▸ run</button>`;
+    return `<button class="btn" type="button" data-tool="${esc(t.name)}">▸ run</button>`;
   };
   const rows = tools.map((t) => `<div class="pathitem" style="cursor:default">
       <span class="mono" style="color:${t.available ? "#3fd089" : "#7e8a9c"}">${t.available ? "●" : "○"}</span>
@@ -334,7 +357,7 @@ async function renderTools(scr) {
       <div>${ctrl(t)}</div></div>`).join("");
   const header = op
     ? `<div style="display:flex;justify-content:flex-end;margin-bottom:12px">
-         <button class="btn primary" onclick="startTool('')" ${anyInstalled ? "" : "disabled"}>▸ Run all installed</button></div>`
+         <button class="btn primary" type="button" data-tool="" ${anyInstalled ? "" : "disabled"}>▸ Run all installed</button></div>`
     : "";
   scr.innerHTML = header + (rows || `<div class="empty">No tools registered.</div>`);
 }
@@ -393,9 +416,12 @@ window.closeModal = () => { const m = el("modal-root"); if (m) m.innerHTML = "";
 let activeJob = null;
 
 // streamJob opens the SSE stream for a started job and renders live progress.
-// The bar advances only on real backend "phase" events — never a timer.
+// The bar advances only on real backend "phase" events — never a timer. The
+// stream resumes via Last-Event-ID on reconnect, so transient drops don't
+// duplicate the log; a terminal frame is processed exactly once (finished
+// guard), and a server that stays unreachable resolves to a "connection lost"
+// state instead of spinning forever.
 function streamJob(jobID, title, onDone) {
-  activeJob = jobID;
   openModal(`<h3>${esc(title)}</h3>
     <div class="phase-line" id="job-phase">starting…</div>
     <div class="prog indeterminate" id="job-prog"><i></i></div>
@@ -418,24 +444,42 @@ function streamJob(jobID, title, onDone) {
     else { bar.classList.add("indeterminate"); fill.style.width = ""; }
   };
 
-  const url = `/api/v1/jobs/${jobID}/events` + (TOKEN ? `?t=${encodeURIComponent(TOKEN)}` : "");
-  const es = new EventSource(url);
+  const es = new EventSource(`/api/v1/jobs/${jobID}/events` + (TOKEN ? `?t=${encodeURIComponent(TOKEN)}` : ""));
   activeJob = { id: jobID, es };
-  es.addEventListener("phase", (e) => { const d = JSON.parse(e.data); setPhase(d.phase, d.done, d.total); append("ph", "→ " + d.phase + (d.total > 0 ? ` (${d.done}/${d.total})` : "") + (d.detail ? " · " + d.detail : "")); });
-  es.addEventListener("log", (e) => append("", JSON.parse(e.data).message));
-  es.addEventListener("done", (e) => { es.close(); onDone(JSON.parse(e.data)); });
+  let finished = false, drops = 0;
+  const finish = (fn) => { if (finished) return; finished = true; es.close(); fn(); };
+
+  es.addEventListener("phase", (e) => { if (finished) return; drops = 0; const d = JSON.parse(e.data); setPhase(d.phase, d.done, d.total); append("ph", "→ " + d.phase + (d.total > 0 ? ` (${d.done}/${d.total})` : "") + (d.detail ? " · " + d.detail : "")); });
+  es.addEventListener("log", (e) => { if (finished) return; drops = 0; append("", JSON.parse(e.data).message); });
+  es.addEventListener("done", (e) => { drops = 0; const d = JSON.parse(e.data); finish(() => onDone(d)); });
   es.addEventListener("error", (e) => {
-    // Named terminal error frames carry data; bare connection errors do not.
-    let msg = ""; try { if (e.data) msg = JSON.parse(e.data).message; } catch {}
-    if (!msg) return; // transient connection blip; EventSource handles it
-    es.close();
-    openModal(`<h3>Run failed</h3><div class="err mono">${esc(msg)}</div>
-      <div class="foot"><button class="btn" onclick="closeModal()">Close</button></div>`);
+    // A named terminal frame carries data (status: error|cancelled); a bare
+    // connection error does not — EventSource will reconnect and resume.
+    let data = null; try { if (e.data) data = JSON.parse(e.data); } catch {}
+    if (data) {
+      const cancelled = data.status === "cancelled";
+      finish(() => openModal(`<h3>${cancelled ? "Run cancelled" : "Run failed"}</h3>
+        <div class="${cancelled ? "muted" : "err mono"}">${esc(data.message || "")}</div>
+        <div class="foot"><button class="btn" onclick="closeModal()">Close</button></div>`));
+      return;
+    }
+    if (finished) { es.close(); return; }
+    if (++drops > 5) {
+      finish(() => openModal(`<h3>Connection lost</h3>
+        <div class="muted">Lost contact with the server; the job may still be running. Re-open this view to check its status.</div>
+        <div class="foot"><button class="btn" onclick="closeModal()">Close</button></div>`));
+    }
   });
 }
 
 window.cancelJob = async () => {
-  if (activeJob && activeJob.id) { try { await api(`/api/v1/jobs/${activeJob.id}/cancel`, { method: "POST" }); } catch {} }
+  const p = el("job-phase"); if (p) p.textContent = "cancelling…";
+  if (!(activeJob && activeJob.id)) return;
+  try {
+    await api(`/api/v1/jobs/${activeJob.id}/cancel`, { method: "POST" });
+  } catch (e) {
+    const L = el("job-log"); if (L) { const d = document.createElement("div"); d.className = "err"; d.textContent = "cancel request failed: " + e.message; L.appendChild(d); }
+  }
 };
 
 // scan launcher
@@ -455,9 +499,13 @@ window.startScan = async () => {
   try {
     const r = await api("/api/v1/scans/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ regions, validate }) });
     streamJob(r.job_id, "Scanning…", async (data) => {
-      await refreshScans();
-      openModal(`<h3>Scan complete</h3><div class="muted">${esc(data.summary || "")}</div>
-        <div class="foot"><button class="btn primary" onclick="closeModal();location.hash='#/overview'">Open dashboard →</button></div>`);
+      const persisted = (data.scan_ids || []).length > 0;
+      if (persisted) await refreshScans();
+      openModal(`<h3>Scan complete</h3>
+        <div class="muted">${esc(data.summary || (persisted ? "" : "no new results persisted"))}</div>
+        <div class="foot">${persisted
+          ? `<button class="btn primary" onclick="closeModal();location.hash='#/overview'">Open dashboard →</button>`
+          : `<button class="btn" onclick="closeModal()">Close</button>`}</div>`);
     });
   } catch (e) {
     openModal(`<h3>Could not start scan</h3><div class="err mono">${esc(e.message)}</div>
@@ -470,9 +518,12 @@ window.startTool = async (name) => {
   try {
     const r = await api("/api/v1/tools/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tool: name, target: "." }) });
     streamJob(r.job_id, name ? "Running " + name + "…" : "Running all installed tools…", async (data) => {
-      await refreshScans();
+      const persisted = (data.scan_ids || []).length > 0;
+      if (persisted) await refreshScans();
       openModal(`<h3>Tools complete</h3><div class="muted">${esc(data.summary || "")}</div>
-        <div class="foot"><button class="btn primary" onclick="closeModal();location.hash='#/findings'">View findings →</button></div>`);
+        <div class="foot">${persisted
+          ? `<button class="btn primary" onclick="closeModal();location.hash='#/findings'">View findings →</button>`
+          : `<button class="btn" onclick="closeModal()">Close</button>`}</div>`);
     });
   } catch (e) {
     openModal(`<h3>Could not start tool</h3><div class="err mono">${esc(e.message)}</div>

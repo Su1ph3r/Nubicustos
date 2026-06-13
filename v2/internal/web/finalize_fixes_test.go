@@ -115,3 +115,29 @@ func TestStoreDeleteScanRemovesScan(t *testing.T) {
 		t.Fatalf("the deleted scan should 404, got %d", code)
 	}
 }
+
+// SSE resume: a reconnect carrying Last-Event-ID must replay only events the
+// client hasn't seen — no duplicated log/phase frames, no re-fired terminal.
+func TestSSEResumesFromLastEventID(t *testing.T) {
+	s, tok := opServer(t)
+	j := s.jobs.create("tool", func() {})
+	j.emitLog("first")        // id 0
+	j.emitLog("second")       // id 1
+	j.finishDone(nil, "done") // id 2
+
+	full := do(s, "GET", "/api/v1/jobs/"+j.id+"/events?t="+tok, nil).Body.String()
+	if !strings.Contains(full, "first") || !strings.Contains(full, "event: done") {
+		t.Fatalf("full stream should carry all frames:\n%s", full)
+	}
+	if !strings.Contains(full, "id: 0") {
+		t.Fatalf("frames must carry SSE ids:\n%s", full)
+	}
+
+	resumed := do(s, "GET", "/api/v1/jobs/"+j.id+"/events?t="+tok, map[string]string{"Last-Event-ID": "1"}).Body.String()
+	if strings.Contains(resumed, "first") || strings.Contains(resumed, "second") {
+		t.Fatalf("resume must not replay already-seen events:\n%s", resumed)
+	}
+	if !strings.Contains(resumed, "event: done") {
+		t.Fatalf("resume must still deliver the unseen terminal frame:\n%s", resumed)
+	}
+}

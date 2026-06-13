@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -186,18 +187,29 @@ func (s *Server) handleJobEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
-	backlog, live := j.subscribe()
+	// Resume from the client's Last-Event-ID (EventSource sends it on reconnect),
+	// so a reconnect replays only events the client hasn't seen — no duplicate
+	// log/phase lines and no re-fired terminal frame.
+	idx := 0
+	if last := r.Header.Get("Last-Event-ID"); last != "" {
+		if n, err := strconv.Atoi(last); err == nil {
+			idx = n + 1
+		}
+	}
+	backlog, live := j.subscribe(idx)
 	sawTerminal := false
 	for _, e := range backlog {
-		writeSSE(w, e)
+		writeSSE(w, idx, e)
 		if e.name == "done" || e.name == "error" {
 			sawTerminal = true
 		}
+		idx++
 	}
 	flusher.Flush()
 	if live == nil {
-		if !sawTerminal { // already terminal but backlog somehow lacked the frame
-			emitTerminal(w, flusher, j)
+		if !sawTerminal { // terminal, but the client hasn't seen the terminal frame
+			writeSSE(w, idx, mustTerminal(j))
+			flusher.Flush()
 		}
 		return
 	}
@@ -216,14 +228,16 @@ func (s *Server) handleJobEvents(w http.ResponseWriter, r *http.Request) {
 				// reconstruct it from the authoritative status — a connected client
 				// must never read a finished/failed job as still running.
 				if !sawTerminal {
-					emitTerminal(w, flusher, j)
+					writeSSE(w, idx, mustTerminal(j))
+					flusher.Flush()
 				}
 				return
 			}
-			writeSSE(w, e)
+			writeSSE(w, idx, e)
 			if e.name == "done" || e.name == "error" {
 				sawTerminal = true
 			}
+			idx++
 			flusher.Flush()
 		case <-heartbeat.C:
 			fmt.Fprint(w, ": keep-alive\n\n") // comment frame; keeps proxies from idling out
@@ -232,18 +246,19 @@ func (s *Server) handleJobEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// emitTerminal writes the reconstructed terminal event (if the job has one).
-func emitTerminal(w http.ResponseWriter, flusher http.Flusher, j *job) {
+// mustTerminal returns the job's reconstructed terminal event (or a generic
+// error frame if, improbably, none is available).
+func mustTerminal(j *job) sseEvent {
 	if e, ok := j.terminalEvent(); ok {
-		writeSSE(w, e)
-		flusher.Flush()
+		return e
 	}
+	return sseEvent{name: "error", data: map[string]any{"status": jobError, "message": "job ended without a terminal status"}}
 }
 
-func writeSSE(w http.ResponseWriter, e sseEvent) {
+func writeSSE(w http.ResponseWriter, id int, e sseEvent) {
 	b, err := json.Marshal(e.data)
 	if err != nil {
 		return
 	}
-	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", e.name, b)
+	fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", id, e.name, b)
 }
