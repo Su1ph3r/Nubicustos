@@ -154,6 +154,32 @@ pre.code.poc { border-left-color: var(--sev-high); }
 .hop { padding: 0 0 14px 22px; position: relative; border-left: 1px solid var(--hair-2); margin-left: 9px; }
 .hop .node { position: absolute; left: -7px; top: 2px; width: 13px; height: 13px; border-radius: 50%; border: 2px solid; background: var(--bg-app); }
 
+/* buttons / actions */
+.btn { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; border-radius: 6px; padding: 6px 12px; border: 1px solid var(--border-mid); background: var(--surface-inset); color: var(--tx-2); }
+.btn:hover { background: #1a1a1d; }
+.btn.primary { background: var(--acc); color: var(--acc-ink); border-color: var(--acc); box-shadow: 0 0 18px rgba(154, 230, 75, 0.28); }
+.btn.danger { color: var(--sev-critical); border-color: #5a2a30; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.input { font-family: var(--mono); font-size: 12px; background: var(--surface-inset); border: 1px solid var(--border-mid); border-radius: 6px; padding: 7px 10px; color: var(--tx); width: 100%; }
+label.field { display: block; margin-bottom: 12px; }
+label.field .lbl { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--tx-faint); display: block; margin-bottom: 5px; }
+
+/* modal */
+.modal-scrim { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); z-index: 20; display: flex; align-items: center; justify-content: center; }
+.modal { width: min(660px, 94%); max-height: 88vh; overflow-y: auto; background: var(--bg-side); border: 1px solid var(--border-mid); border-radius: 12px; box-shadow: 0 30px 90px rgba(0, 0, 0, 0.75); padding: 20px 22px; }
+.modal h3 { margin: 0 0 4px; font-size: 15px; }
+.modal .foot { display: flex; gap: 10px; align-items: center; margin-top: 16px; }
+
+/* live job progress (honest: bar moves only on real backend events) */
+.prog { height: 6px; background: var(--surface-inset); border-radius: 3px; overflow: hidden; margin: 10px 0; }
+.prog > i { display: block; height: 100%; background: var(--acc); border-radius: 3px; transition: width 0.2s; }
+.prog.indeterminate > i { width: 35%; animation: slide 1.1s ease-in-out infinite; }
+@keyframes slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+.phase-line { font-family: var(--mono); font-size: 12px; color: var(--tx-2); }
+.log { background: var(--code-bg); border: 1px solid var(--hair-2); border-radius: 7px; padding: 10px 12px; font-family: var(--mono); font-size: 11px; color: var(--tx-mut); max-height: 220px; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
+.log .ph { color: var(--acc); }
+.log .err { color: var(--sev-critical); }
+
 /* states */
 .empty { text-align: center; color: var(--tx-mut); padding: 48px 0; }
 .banner { font-family: var(--mono); font-size: 11px; color: var(--tx-faint); }

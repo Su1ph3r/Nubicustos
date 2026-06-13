@@ -73,8 +73,28 @@ async function boot() {
     state.scanID = scans.data?.[0]?.id || null;
     if (state.scanID) state.scanMeta = scans.data[0];
   } catch {}
+  await refreshAuth();
   renderShell();
   window.addEventListener("hashchange", renderScreen);
+  renderScreen();
+}
+
+const isOperator = () => state.meta && state.meta.mode === "operator";
+const authPresent = () => state.auth && state.auth.status && state.auth.status !== "none";
+
+async function refreshAuth() {
+  if (!isOperator()) return;
+  try { state.auth = await api("/api/v1/auth"); } catch { state.auth = { status: "none" }; }
+}
+
+async function refreshScans() {
+  try {
+    const s = await api("/api/v1/scans?limit=1");
+    state.scanID = s.data?.[0]?.id || null;
+    state.scanMeta = s.data?.[0] || null;
+  } catch {}
+  state.services = [];
+  renderShell();
   renderScreen();
 }
 
@@ -108,6 +128,7 @@ function renderShell() {
         <div><div class="title" id="scr-title"></div><div class="subtitle" id="scr-sub"></div></div>
         <div class="right">
           ${state.scanMeta ? `<span class="chip">${esc(state.scanMeta.provider)} · ${esc(state.scanMeta.account)}</span>` : ""}
+          ${op ? `<button class="btn primary" onclick="openLauncher()">▸ Run scan</button>` : ""}
         </div>
       </header>
       <div class="content"><div id="screen"></div></div>
@@ -122,8 +143,13 @@ function navLink([key, label]) {
 
 function modeCard(op) {
   if (op) {
+    const a = state.auth;
+    const sess = authPresent()
+      ? `<div class="note mono" style="word-break:break-all">${esc(a.identity || "")}</div>
+         <div class="note">${esc(a.method || "")}${a.expires_at ? " · exp " + esc(a.expires_at.slice(11, 16)) + "Z" : a.expiry === "unknown" ? " · exp unknown" : ""}</div>`
+      : `<div class="note">no session</div>`;
     return `<div class="modecard op"><div class="row"><span class="dot"></span><span class="lbl">OPERATOR</span><span class="mono muted">127.0.0.1</span></div>
-      <div class="note">Live actions enabled (token session).</div></div>`;
+      ${sess}<button class="btn" style="margin-top:8px;width:100%" onclick="openAuthModal()">${authPresent() ? "session" : "sign in"}</button></div>`;
   }
   return `<div class="modecard read"><div class="row"><span class="dot"></span><span class="lbl">READ ONLY</span></div>
     <div class="note">Browse &amp; export results. No live actions.</div></div>`;
@@ -294,28 +320,55 @@ window.selPath = (i) => { state.selPath = i; renderScreen(); };
 async function renderTools(scr) {
   setHeader("Tools", "optional external scanners");
   const tools = (await api("/api/v1/tools")).data || [];
-  const op = state.meta.mode === "operator";
+  const op = isOperator();
+  const anyInstalled = tools.some((t) => t.available);
+  const ctrl = (t) => {
+    if (!op) return `<span class="disabled-action">operator only</span>`;
+    if (!t.available) return `<span class="disabled-action">not installed</span>`;
+    return `<button class="btn" onclick="startTool('${esc(t.name)}')">▸ run</button>`;
+  };
   const rows = tools.map((t) => `<div class="pathitem" style="cursor:default">
       <span class="mono" style="color:${t.available ? "#3fd089" : "#7e8a9c"}">${t.available ? "●" : "○"}</span>
       <div style="flex:1"><div>${esc(t.name)} <span class="mono muted">${esc(t.category)}</span></div>
         <div class="fsub">${t.has_run ? "last " + esc(t.last_run) + " · " + t.findings + " findings" : "never run"}</div></div>
-      <div>${op ? "" : `<span class="disabled-action">operator only</span>`}</div></div>`).join("");
-  scr.innerHTML = rows || `<div class="empty">No tools registered.</div>`;
+      <div>${ctrl(t)}</div></div>`).join("");
+  const header = op
+    ? `<div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+         <button class="btn primary" onclick="startTool('')" ${anyInstalled ? "" : "disabled"}>▸ Run all installed</button></div>`
+    : "";
+  scr.innerHTML = header + (rows || `<div class="empty">No tools registered.</div>`);
 }
 
 // --- preflight (operator-run report; Pass B adds the run button) -----------
 async function renderPreflight(scr) {
   setHeader("Access preflight", "tool access for the active credential");
+  const op = isOperator();
+  const runBtn = op
+    ? `<div style="display:flex;justify-content:flex-end;margin-bottom:12px"><button class="btn primary" onclick="runPreflight()" ${authPresent() ? "" : "disabled title='sign in first'"}>▸ Run / re-run preflight</button></div>`
+    : "";
   try {
     const rep = await api("/api/v1/preflight");
-    scr.innerHTML = `<div class="banner">method: ${esc(rep.method)} · overall ${esc(rep.overall)}</div>` +
+    scr.innerHTML = runBtn + `<div class="banner">method: ${esc(rep.method)} · overall ${esc(rep.overall)}</div>` +
       (rep.tools || []).map(preflightCard).join("");
   } catch (e) {
     if (e.status === 404) {
-      scr.innerHTML = `<div class="empty">No preflight report yet.${state.meta.mode === "operator" ? " Run one to check tool access." : " Available in operator mode."}</div>`;
+      scr.innerHTML = runBtn + `<div class="empty">No preflight report yet.${op ? " Run one to check tool access." : " Available in operator mode."}</div>`;
     } else throw e;
   }
 }
+
+window.runPreflight = async () => {
+  if (!authPresent()) { openAuthModal(); return; }
+  const scr = el("screen");
+  scr.innerHTML = `<div class="empty">checking access — simulating + probing IAM…</div>`;
+  try {
+    await api("/api/v1/preflight/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  } catch (e) {
+    scr.innerHTML = `<div class="empty">preflight failed: ${esc(e.message)}</div>`;
+    return;
+  }
+  renderScreen();
+};
 const RDY_C = { ready: "#3fd089", partial: "#f3c14b", unverified: "#9aa0d6", failed: "#ff5263", unknown: "#7e8a9c" };
 function preflightCard(t) {
   const c = RDY_C[t.readiness] || "#7e8a9c";
@@ -328,5 +381,136 @@ function preflightCard(t) {
     ${list("could not verify", t.unknown, "#9aa0d6")}
     ${t.remediation?.policy_document ? `<div style="margin-top:8px"><div class="section-label">remediation policy</div>${preBlock(t.remediation.policy_document)}</div>` : ""}</div>`;
 }
+
+// --- operator actions: modals, SSE job streaming --------------------------
+function openModal(html) {
+  let m = el("modal-root");
+  if (!m) { m = document.createElement("div"); m.id = "modal-root"; document.body.appendChild(m); }
+  m.innerHTML = `<div class="modal-scrim"><div class="modal">${html}</div></div>`;
+}
+window.closeModal = () => { const m = el("modal-root"); if (m) m.innerHTML = ""; };
+
+let activeJob = null;
+
+// streamJob opens the SSE stream for a started job and renders live progress.
+// The bar advances only on real backend "phase" events — never a timer.
+function streamJob(jobID, title, onDone) {
+  activeJob = jobID;
+  openModal(`<h3>${esc(title)}</h3>
+    <div class="phase-line" id="job-phase">starting…</div>
+    <div class="prog indeterminate" id="job-prog"><i></i></div>
+    <div class="log" id="job-log"></div>
+    <div class="foot"><button class="btn danger" onclick="cancelJob()">× Cancel</button>
+      <button class="btn" onclick="closeModal()">Hide</button></div>`);
+
+  const append = (cls, msg) => {
+    const L = el("job-log"); if (!L) return;
+    const d = document.createElement("div");
+    if (cls) d.className = cls;
+    d.textContent = msg; // textContent: never interpret backend strings as HTML
+    L.appendChild(d); L.scrollTop = L.scrollHeight;
+  };
+  const setPhase = (phase, done, total) => {
+    const p = el("job-phase"); if (p) p.textContent = phase + (total > 0 ? ` — ${done}/${total}` : "");
+    const bar = el("job-prog"); if (!bar) return;
+    const fill = bar.querySelector("i");
+    if (total > 0) { bar.classList.remove("indeterminate"); fill.style.width = Math.round((done / total) * 100) + "%"; }
+    else { bar.classList.add("indeterminate"); fill.style.width = ""; }
+  };
+
+  const url = `/api/v1/jobs/${jobID}/events` + (TOKEN ? `?t=${encodeURIComponent(TOKEN)}` : "");
+  const es = new EventSource(url);
+  activeJob = { id: jobID, es };
+  es.addEventListener("phase", (e) => { const d = JSON.parse(e.data); setPhase(d.phase, d.done, d.total); append("ph", "→ " + d.phase + (d.total > 0 ? ` (${d.done}/${d.total})` : "") + (d.detail ? " · " + d.detail : "")); });
+  es.addEventListener("log", (e) => append("", JSON.parse(e.data).message));
+  es.addEventListener("done", (e) => { es.close(); onDone(JSON.parse(e.data)); });
+  es.addEventListener("error", (e) => {
+    // Named terminal error frames carry data; bare connection errors do not.
+    let msg = ""; try { if (e.data) msg = JSON.parse(e.data).message; } catch {}
+    if (!msg) return; // transient connection blip; EventSource handles it
+    es.close();
+    openModal(`<h3>Run failed</h3><div class="err mono">${esc(msg)}</div>
+      <div class="foot"><button class="btn" onclick="closeModal()">Close</button></div>`);
+  });
+}
+
+window.cancelJob = async () => {
+  if (activeJob && activeJob.id) { try { await api(`/api/v1/jobs/${activeJob.id}/cancel`, { method: "POST" }); } catch {} }
+};
+
+// scan launcher
+window.openLauncher = () => {
+  if (!authPresent()) { openAuthModal(); return; }
+  openModal(`<h3>Run scan</h3>
+    <label class="field"><span class="lbl">regions (comma-separated; blank = all enabled)</span>
+      <input class="input" id="lc-regions" placeholder="us-east-1, us-west-2"></label>
+    <label class="field"><span class="lbl"><input type="checkbox" id="lc-validate"> active validation (read-only)</span></label>
+    <div class="foot"><button class="btn primary" onclick="startScan()">▸ Start scan</button>
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <span class="mono muted" style="margin-left:auto">live scan against ${esc(state.auth.account)}</span></div>`);
+};
+window.startScan = async () => {
+  const regions = el("lc-regions").value.split(",").map((s) => s.trim()).filter(Boolean);
+  const validate = el("lc-validate").checked;
+  try {
+    const r = await api("/api/v1/scans/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ regions, validate }) });
+    streamJob(r.job_id, "Scanning…", async (data) => {
+      await refreshScans();
+      openModal(`<h3>Scan complete</h3><div class="muted">${esc(data.summary || "")}</div>
+        <div class="foot"><button class="btn primary" onclick="closeModal();location.hash='#/overview'">Open dashboard →</button></div>`);
+    });
+  } catch (e) {
+    openModal(`<h3>Could not start scan</h3><div class="err mono">${esc(e.message)}</div>
+      <div class="foot"><button class="btn" onclick="closeModal()">Close</button></div>`);
+  }
+};
+
+// tool runs
+window.startTool = async (name) => {
+  try {
+    const r = await api("/api/v1/tools/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tool: name, target: "." }) });
+    streamJob(r.job_id, name ? "Running " + name + "…" : "Running all installed tools…", async (data) => {
+      await refreshScans();
+      openModal(`<h3>Tools complete</h3><div class="muted">${esc(data.summary || "")}</div>
+        <div class="foot"><button class="btn primary" onclick="closeModal();location.hash='#/findings'">View findings →</button></div>`);
+    });
+  } catch (e) {
+    openModal(`<h3>Could not start tool</h3><div class="err mono">${esc(e.message)}</div>
+      <div class="foot"><button class="btn" onclick="closeModal()">Close</button></div>`);
+  }
+};
+
+// auth / session
+window.openAuthModal = () => {
+  const a = state.auth;
+  const status = authPresent()
+    ? `<div class="mono muted" style="word-break:break-all">${esc(a.identity)}<br>${esc(a.method || "")}${a.expires_at ? " · expires " + esc(a.expires_at) : a.expiry === "unknown" ? " · expiry unknown" : ""}</div>`
+    : `<div class="muted">No active session.</div>`;
+  openModal(`<h3>AWS session</h3>${status}
+    <div class="section-label" style="margin:14px 0 6px">sign in</div>
+    <label class="field"><span class="lbl">profile</span><input class="input" id="au-profile" placeholder="default / named profile"></label>
+    <label class="field"><span class="lbl">region</span><input class="input" id="au-region" placeholder="us-east-1"></label>
+    <label class="field"><span class="lbl">mfa serial (optional)</span><input class="input" id="au-mfaserial"></label>
+    <label class="field"><span class="lbl">mfa token (optional)</span><input class="input" id="au-mfatoken"></label>
+    <div class="foot"><button class="btn primary" onclick="doLogin()">Sign in</button>
+      ${authPresent() ? `<button class="btn" onclick="doLogout()">Sign out</button>` : ""}
+      <button class="btn" onclick="closeModal()">Close</button></div>
+    <div id="au-err" class="err mono" style="margin-top:8px"></div>`);
+};
+window.doLogin = async () => {
+  const body = {
+    provider: "aws", profile: el("au-profile").value.trim(), region: el("au-region").value.trim(),
+    mfa_serial: el("au-mfaserial").value.trim(), mfa_token: el("au-mfatoken").value.trim(),
+  };
+  try {
+    state.auth = await api("/api/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    closeModal(); renderShell(); renderScreen();
+  } catch (e) { const er = el("au-err"); if (er) er.textContent = e.message; }
+};
+window.doLogout = async () => {
+  try { await api("/api/v1/auth/logout", { method: "POST" }); } catch {}
+  state.auth = { status: "none" };
+  closeModal(); renderShell(); renderScreen();
+};
 
 boot();
