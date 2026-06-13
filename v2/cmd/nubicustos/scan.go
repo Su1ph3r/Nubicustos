@@ -10,9 +10,6 @@ import (
 	"sync"
 	"time"
 
-	awssdk "github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/ec2"
-	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/spf13/cobra"
 
 	"github.com/Su1ph3r/nubicustos/internal/auth"
@@ -211,7 +208,7 @@ func runScan(ctx context.Context, f *scanFlags) error {
 		progress.ReportPhase(sc.Progress, progress.PhaseValidate, "")
 		var venv validate.Env
 		if provider == "aws" {
-			venv = awsValidateEnv(sc.AWS) // authenticated, MFA-satisfied scan session
+			venv = validate.NewAWSEnv(sc.AWS) // authenticated, MFA-satisfied scan session
 		}
 		rep := validate.Run(ctx, result.Findings, validate.Options{Env: venv})
 		fmt.Fprintf(os.Stderr, "validation: %d confirmed of %d attempted\n", rep.Confirmed, rep.Attempted)
@@ -307,24 +304,6 @@ func phaseLabel(p progress.Phase) string {
 		return "persisting results"
 	default:
 		return string(p)
-	}
-}
-
-// awsValidateEnv builds the authenticated-vantage capabilities the validation
-// pass needs from an AWS session: read-only, region-bound EC2/RDS describe
-// clients for the public-snapshot and AMI validators. Shared by the inline
-// scan --validate path and the standalone validate command.
-func awsValidateEnv(cfg awssdk.Config) validate.Env {
-	return validate.Env{
-		EC2SnapshotAttr: func(region string) validate.EC2SnapshotAttrAPI {
-			return ec2.NewFromConfig(cfg, func(o *ec2.Options) { o.Region = region })
-		},
-		EC2ImageAttr: func(region string) validate.EC2ImageAttrAPI {
-			return ec2.NewFromConfig(cfg, func(o *ec2.Options) { o.Region = region })
-		},
-		RDSSnapshotAttr: func(region string) validate.RDSSnapshotAttrAPI {
-			return rds.NewFromConfig(cfg, func(o *rds.Options) { o.Region = region })
-		},
 	}
 }
 

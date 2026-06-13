@@ -119,9 +119,14 @@ func TestMetaCapabilitiesInOperatorMode(t *testing.T) {
 	if v["mode"] != "operator" {
 		t.Fatalf("mode should be operator, got %v", v["mode"])
 	}
-	caps := v["capabilities"].([]any)
-	if len(caps) != 1 || caps[0] != "tools.run" {
-		t.Fatalf("operator should advertise exactly the mounted capability, got %v", caps)
+	caps := map[string]bool{}
+	for _, c := range v["capabilities"].([]any) {
+		caps[c.(string)] = true
+	}
+	for _, want := range []string{"scan.run", "tools.run", "preflight.run", "auth"} {
+		if !caps[want] {
+			t.Fatalf("operator should advertise %q, got %v", want, v["capabilities"])
+		}
 	}
 }
 

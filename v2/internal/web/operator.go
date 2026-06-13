@@ -21,6 +21,11 @@ func (s *Server) routesOperator(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/jobs/{id}", s.handleJobStatus)
 	mux.HandleFunc("GET /api/v1/jobs/{id}/events", s.handleJobEvents)
 	mux.HandleFunc("POST /api/v1/jobs/{id}/cancel", s.handleJobCancel)
+	mux.HandleFunc("GET /api/v1/auth", s.handleAuthStatus)
+	mux.HandleFunc("POST /api/v1/auth/login", s.handleAuthLogin)
+	mux.HandleFunc("POST /api/v1/auth/logout", s.handleAuthLogout)
+	mux.HandleFunc("POST /api/v1/scans/run", s.handleScanRun)
+	mux.HandleFunc("POST /api/v1/preflight/run", s.handlePreflightRun)
 }
 
 // tokenGate enforces the session token on every /api request in operator mode.

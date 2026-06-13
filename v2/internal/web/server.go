@@ -2,7 +2,12 @@ package web
 
 import (
 	"net/http"
+	"sync"
+	"time"
 
+	awssdk "github.com/aws/aws-sdk-go-v2/aws"
+
+	"github.com/Su1ph3r/nubicustos/internal/preflight"
 	"github.com/Su1ph3r/nubicustos/internal/store"
 )
 
@@ -14,6 +19,17 @@ const (
 	ModeOperator Mode = "operator"  // opt-in: live actions (added in later slices)
 )
 
+// session is the resolved cloud credential the operator-mode actions use. It is
+// set by /auth/login, cleared by /auth/logout, and read by scan/preflight runs.
+type session struct {
+	cfg       awssdk.Config
+	account   string
+	identity  string
+	method    string
+	expiresAt time.Time
+	present   bool
+}
+
 // Server holds the dependencies and configuration for the web layer.
 type Server struct {
 	store   *store.Store
@@ -21,6 +37,12 @@ type Server struct {
 	version string
 	token   string // session token required on /api in operator mode ("" in read-only)
 	jobs    *jobManager
+
+	sessMu sync.Mutex
+	sess   session
+
+	pfMu     sync.Mutex
+	pfReport *preflight.Report // latest preflight report (operator runs; powers GET /preflight)
 }
 
 // New builds a server over an open store. mode controls which routes are mounted
@@ -52,7 +74,7 @@ func (s *Server) capabilities() []string {
 	if s.mode != ModeOperator {
 		return []string{}
 	}
-	return []string{"tools.run"} // scan.run / preflight.run / auth arrive in a later slice
+	return []string{"scan.run", "tools.run", "preflight.run", "auth"}
 }
 
 // routesRead registers the always-available read-only API.

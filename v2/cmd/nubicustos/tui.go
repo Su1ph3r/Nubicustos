@@ -94,7 +94,7 @@ func runTUI(ctx context.Context, f *tuiFlags) error {
 			fmt.Fprintf(os.Stderr, "warning: --preflight credential resolution failed (%v); access preflight will be unavailable\n", aerr)
 		} else {
 			fmt.Fprintf(os.Stderr, "authenticated to AWS account %s as %s (via %s)\n", ident.Account, ident.ARN, path)
-			actions.pf = &preflightSession{simulator: iam.NewFromConfig(cfg), prober: &awsProber{cfg: cfg}, identity: ident.ARN, account: ident.Account}
+			actions.pf = &preflightSession{simulator: iam.NewFromConfig(cfg), prober: preflight.NewAWSProber(cfg), identity: ident.ARN, account: ident.Account}
 		}
 	}
 

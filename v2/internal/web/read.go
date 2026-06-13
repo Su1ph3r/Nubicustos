@@ -301,11 +301,18 @@ func (s *Server) handleTools(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, list{Data: out, Total: len(out)})
 }
 
-// handlePreflight returns the most recent stored preflight report. Preflight is
-// run on demand (operator mode) and not yet persisted, so for now there is
-// nothing to return — a later slice adds persistence.
+// handlePreflight returns the most recent preflight report. It is run on demand
+// in operator mode (POST /preflight/run) and held in memory; a read-only
+// instance has none, and 404s.
 func (s *Server) handlePreflight(w http.ResponseWriter, _ *http.Request) {
-	writeError(w, http.StatusNotFound, "no_preflight", "no stored preflight report; run one in operator mode")
+	s.pfMu.Lock()
+	rep := s.pfReport
+	s.pfMu.Unlock()
+	if rep == nil {
+		writeError(w, http.StatusNotFound, "no_preflight", "no preflight report yet; run one in operator mode")
+		return
+	}
+	writeJSON(w, http.StatusOK, rep)
 }
 
 // --- helpers ---------------------------------------------------------------

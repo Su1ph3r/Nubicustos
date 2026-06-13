@@ -96,7 +96,7 @@ func runValidate(ctx context.Context, f *validateFlags) error {
 				"warning: could not authenticate to AWS (%v); %d authenticated-vantage finding(s) will be skipped — re-run with --profile/--region or valid credentials\n",
 				aerr, authN)
 		} else {
-			venv = awsValidateEnv(cfg)
+			venv = validate.NewAWSEnv(cfg)
 			fmt.Fprintf(os.Stderr, "authenticated to AWS account %s as %s (via %s)\n", ident.Account, ident.ARN, path)
 		}
 	}

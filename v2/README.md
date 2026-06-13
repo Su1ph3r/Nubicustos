@@ -372,8 +372,27 @@ nubicustos web --allow-actions             # prints the tokened URL
 - `POST /api/v1/jobs/{id}/cancel` — cancels the run.
 
 Each tool's findings persist as their own `plugin:<tool>` scan, browsable like
-any other. Scan/preflight runs and the cloud auth flow are the next operator
-actions.
+any other.
+
+Operator mode also resolves a cloud credential and runs the credentialed
+actions:
+
+- `GET /api/v1/auth` — session status; `POST /api/v1/auth/login`
+  `{provider:aws, profile?, region?, mfa_serial?, mfa_token?}` resolves a
+  read-only AWS session (non-interactive: a TOTP may be supplied, SSO is honored
+  only via a valid cached token — an expired SSO session needs an out-of-band
+  `aws sso login`, since a handler must not launch a blocking browser login);
+  `POST /api/v1/auth/logout` clears it.
+- `POST /api/v1/scans/run` `{regions?, validate?}` → a scan **job** whose SSE
+  stream carries the engine's real phase progress (enumerate → collect → checks
+  → graph → optional validation → persist); the result is persisted and becomes
+  the latest scan.
+- `POST /api/v1/preflight/run` `{tools?}` → runs the access preflight against the
+  session and returns the report (also held in memory so `GET /api/v1/preflight`
+  serves it). `409 no_session` until a credential is resolved.
+
+In-app browser/device-code SSO is a documented follow-on; the AWS auth path
+resolves non-interactively today.
 
 ### Active validation (opt-in, read-only)
 
