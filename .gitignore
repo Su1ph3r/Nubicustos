@@ -67,6 +67,9 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+# The embedded web UI is source (go:embed), not build output — keep it tracked.
+!v2/internal/web/dist/
+!v2/internal/web/dist/**
 downloads/
 eggs/
 .eggs/
