@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -61,7 +63,7 @@ func (s *Server) handleToolsRun(w http.ResponseWriter, r *http.Request) {
 		Target      string `json:"target"`
 		Concurrency int    `json:"concurrency"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil && err.Error() != "EOF" {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
@@ -78,7 +80,7 @@ func (s *Server) handleToolsRun(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	j := s.jobs.create("tool", cancel)
-	go s.runToolsJob(ctx, j, req.Tool, req.Target, req.Concurrency)
+	go j.guard(func() { s.runToolsJob(ctx, j, req.Tool, req.Target, req.Concurrency) })
 
 	writeJSON(w, http.StatusAccepted, map[string]any{"job_id": j.id, "kind": "tool", "status": jobRunning})
 }
@@ -140,6 +142,7 @@ func (s *Server) persistPluginScan(ctx context.Context, res plugins.RunResult, t
 		return "", err
 	}
 	if err := s.store.SaveFindings(ctx, id, res.Findings, res.FinishedAt); err != nil {
+		s.cleanupScan(id) // remove the half-written scan row
 		return "", err
 	}
 	return id, nil
@@ -184,12 +187,19 @@ func (s *Server) handleJobEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
 	backlog, live := j.subscribe()
+	sawTerminal := false
 	for _, e := range backlog {
 		writeSSE(w, e)
+		if e.name == "done" || e.name == "error" {
+			sawTerminal = true
+		}
 	}
 	flusher.Flush()
 	if live == nil {
-		return // already terminal; backlog was the whole story
+		if !sawTerminal { // already terminal but backlog somehow lacked the frame
+			emitTerminal(w, flusher, j)
+		}
+		return
 	}
 
 	heartbeat := time.NewTicker(15 * time.Second)
@@ -197,17 +207,36 @@ func (s *Server) handleJobEvents(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
-			return // client disconnected
+			j.unsubscribe(live) // client disconnected; stop sending to a dead channel
+			return
 		case e, open := <-live:
 			if !open {
-				return // job terminal; channel closed after the final event
+				// The channel closed = the job is terminal. The terminal frame may
+				// have been dropped from a full buffer, so if we never saw it,
+				// reconstruct it from the authoritative status — a connected client
+				// must never read a finished/failed job as still running.
+				if !sawTerminal {
+					emitTerminal(w, flusher, j)
+				}
+				return
 			}
 			writeSSE(w, e)
+			if e.name == "done" || e.name == "error" {
+				sawTerminal = true
+			}
 			flusher.Flush()
 		case <-heartbeat.C:
 			fmt.Fprint(w, ": keep-alive\n\n") // comment frame; keeps proxies from idling out
 			flusher.Flush()
 		}
+	}
+}
+
+// emitTerminal writes the reconstructed terminal event (if the job has one).
+func emitTerminal(w http.ResponseWriter, flusher http.Flusher, j *job) {
+	if e, ok := j.terminalEvent(); ok {
+		writeSSE(w, e)
+		flusher.Flush()
 	}
 }
 

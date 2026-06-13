@@ -22,12 +22,13 @@ const (
 // session is the resolved cloud credential the operator-mode actions use. It is
 // set by /auth/login, cleared by /auth/logout, and read by scan/preflight runs.
 type session struct {
-	cfg       awssdk.Config
-	account   string
-	identity  string
-	method    string
-	expiresAt time.Time
-	present   bool
+	cfg         awssdk.Config
+	account     string
+	identity    string
+	method      string
+	expiresAt   time.Time
+	expiryKnown bool // whether the credential's expiry could be determined
+	present     bool
 }
 
 // Server holds the dependencies and configuration for the web layer.
@@ -91,10 +92,11 @@ func (s *Server) routesRead(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/scans/{id}/export/{format}", s.handleExport)
 	mux.HandleFunc("GET /api/v1/tools", s.handleTools)
 	mux.HandleFunc("GET /api/v1/preflight", s.handlePreflight)
-	// Catch-all for the API subtree so an unmatched /api path returns a JSON 404
-	// (and, in read-only mode, an operator route reads as absent) rather than
-	// falling through to the SPA shell. Specific routes above always win.
-	mux.HandleFunc("/api/v1/", func(w http.ResponseWriter, r *http.Request) {
+	// Catch-all for the whole /api subtree (not just /api/v1) so any unmatched
+	// API path returns a JSON 404 — and, in read-only mode, an operator route
+	// reads as absent — rather than falling through to the SPA shell. Specific
+	// routes above always win by longest-prefix match.
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "no such endpoint: "+r.URL.Path)
 	})
 }

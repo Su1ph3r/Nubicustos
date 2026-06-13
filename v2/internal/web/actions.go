@@ -3,7 +3,9 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -40,8 +42,13 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, _ *http.Request) {
 		"status": status, "provider": "aws",
 		"account": sess.account, "identity": sess.identity, "method": sess.method,
 	}
-	if !sess.expiresAt.IsZero() {
+	switch {
+	case !sess.expiresAt.IsZero():
 		out["expires_at"] = sess.expiresAt.UTC().Format(time.RFC3339)
+	case !sess.expiryKnown:
+		// Expiry could not be determined — say so rather than implying a
+		// non-expiring session (which could read as active right up to a failure).
+		out["expiry"] = "unknown"
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -57,7 +64,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		MFASerial string `json:"mfa_serial"`
 		MFAToken  string `json:"mfa_token"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil && err.Error() != "EOF" {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
@@ -81,8 +88,11 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess := session{cfg: cfg, account: ident.Account, identity: ident.ARN, method: string(path), present: true}
-	if creds, cerr := cfg.Credentials.Retrieve(r.Context()); cerr == nil && creds.CanExpire {
-		sess.expiresAt = creds.Expires
+	if creds, cerr := cfg.Credentials.Retrieve(r.Context()); cerr == nil {
+		sess.expiryKnown = true // retrieval succeeded; CanExpire tells us if it has an expiry
+		if creds.CanExpire {
+			sess.expiresAt = creds.Expires
+		}
 	}
 	s.sessMu.Lock()
 	s.sess = sess
@@ -110,14 +120,14 @@ func (s *Server) handleScanRun(w http.ResponseWriter, r *http.Request) {
 		Regions  []string `json:"regions"`
 		Validate bool     `json:"validate"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil && err.Error() != "EOF" {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	j := s.jobs.create("scan", cancel)
-	go s.runScanJob(ctx, j, sess, req.Regions, req.Validate)
+	go j.guard(func() { s.runScanJob(ctx, j, sess, req.Regions, req.Validate) })
 	writeJSON(w, http.StatusAccepted, map[string]any{"job_id": j.id, "kind": "scan", "status": jobRunning})
 }
 
@@ -156,11 +166,15 @@ func (s *Server) runScanJob(ctx context.Context, j *job, sess session, regions [
 		j.finishError(jobError, "persisting scan: "+err.Error())
 		return
 	}
+	// If findings/graph fail to persist, delete the scan row so a half-written
+	// scan can never be listed as a complete (empty) one.
 	if err := s.store.SaveFindings(ctx, id, result.Findings, finished); err != nil {
+		s.cleanupScan(id)
 		j.finishError(jobError, "persisting findings: "+err.Error())
 		return
 	}
 	if err := s.store.SaveGraph(ctx, id, result.Graph); err != nil {
+		s.cleanupScan(id)
 		j.finishError(jobError, "persisting graph: "+err.Error())
 		return
 	}
@@ -170,6 +184,14 @@ func (s *Server) runScanJob(ctx context.Context, j *job, sess session, regions [
 
 func formatScanSummary(r *engine.Result) string {
 	return fmt.Sprintf("scan complete: %d finding(s)", len(r.Findings))
+}
+
+// cleanupScan removes a partially-persisted scan row. It uses a fresh context so
+// it runs even when the scan's own context was cancelled.
+func (s *Server) cleanupScan(id string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = s.store.DeleteScan(ctx, id)
 }
 
 // --- preflight run ---------------------------------------------------------
@@ -183,7 +205,7 @@ func (s *Server) handlePreflightRun(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Tools []string `json:"tools"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil && err.Error() != "EOF" {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}

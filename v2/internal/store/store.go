@@ -55,6 +55,31 @@ func (s *Store) CreateScan(ctx context.Context, id, provider, account, identity 
 	return nil
 }
 
+// DeleteScan removes a scan and all rows keyed to it (findings, principals,
+// edges, attack paths, compliance results), in one transaction. Used to clean
+// up a scan whose persistence failed partway, so an orphaned scan row can never
+// be listed as a complete (empty) scan.
+func (s *Store) DeleteScan(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	for _, q := range []string{
+		`DELETE FROM findings WHERE scan_id = ?`,
+		`DELETE FROM principals WHERE scan_id = ?`,
+		`DELETE FROM edges WHERE scan_id = ?`,
+		`DELETE FROM attack_paths WHERE scan_id = ?`,
+		`DELETE FROM compliance_results WHERE scan_id = ?`,
+		`DELETE FROM scans WHERE id = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, q, id); err != nil {
+			return fmt.Errorf("deleting scan %s: %w", id, err)
+		}
+	}
+	return tx.Commit()
+}
+
 // CountFindings returns the number of findings stored for a scan.
 func (s *Store) CountFindings(ctx context.Context, scanID string) (int, error) {
 	var n int

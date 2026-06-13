@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"sync"
 	"time"
 
@@ -80,12 +81,18 @@ func (j *job) emit(e sseEvent) {
 			}
 		}
 	case "error":
-		j.status, j.finishedAt, j.closed = jobError, time.Now().UTC(), true
+		// Honor the terminal status carried in the payload (error vs cancelled);
+		// don't hardcode jobError, or a cancelled job would report "error".
+		st := jobError
 		if m, ok := e.data.(map[string]any); ok {
+			if s, ok := m["status"].(string); ok && s != "" {
+				st = s
+			}
 			if msg, ok := m["message"].(string); ok {
 				j.errMsg = msg
 			}
 		}
+		j.status, j.finishedAt, j.closed = st, time.Now().UTC(), true
 	}
 
 	for _, ch := range j.subs {
@@ -118,10 +125,38 @@ func (j *job) finishDone(scanIDs []string, summary string) {
 }
 
 func (j *job) finishError(status, message string) {
-	j.mu.Lock()
-	j.status = status // "error" or "cancelled"
-	j.mu.Unlock()
+	// emit records the terminal status (error|cancelled) from the payload.
 	j.emit(sseEvent{name: "error", data: map[string]any{"status": status, "message": message}})
+}
+
+// unsubscribe removes ch from the live subscriber set (called when an SSE client
+// disconnects, so the producer stops sending to a dead channel).
+func (j *job) unsubscribe(ch chan sseEvent) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	for i, c := range j.subs {
+		if c == ch {
+			j.subs = append(j.subs[:i], j.subs[i+1:]...)
+			return
+		}
+	}
+}
+
+// terminalEvent reconstructs the terminal SSE event from the authoritative
+// status snapshot. Used when the live channel closed without the consumer
+// having seen a done/error frame (a dropped terminal event), so a connected
+// client never mistakes a finished/failed job for one still running.
+func (j *job) terminalEvent() (sseEvent, bool) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	switch j.status {
+	case jobDone:
+		return sseEvent{name: "done", data: map[string]any{"status": jobDone, "scan_ids": j.scanIDs}}, true
+	case jobError, jobCancelled:
+		return sseEvent{name: "error", data: map[string]any{"status": j.status, "message": j.errMsg}}, true
+	default:
+		return sseEvent{}, false
+	}
 }
 
 // subscribe returns the event backlog and, if the job is still running, a
@@ -176,6 +211,18 @@ func (m *jobManager) create(kind string, cancel context.CancelFunc) *job {
 	m.jobs[j.id] = j
 	m.mu.Unlock()
 	return j
+}
+
+// guard runs a job body, converting a panic into a terminal error event. This
+// guarantees the job reaches a terminal state (never stuck "running" with SSE
+// subscribers blocked) and stops a panic in one job from crashing the server.
+func (j *job) guard(fn func()) {
+	defer func() {
+		if v := recover(); v != nil {
+			j.finishError(jobError, fmt.Sprintf("internal error: %v", v))
+		}
+	}()
+	fn()
 }
 
 func (m *jobManager) get(id string) (*job, bool) {
