@@ -16,16 +16,12 @@ import (
 // handleMeta advertises version + mode + capabilities. The UI renders action
 // affordances purely off `capabilities`; the server enforces independently.
 func (s *Server) handleMeta(w http.ResponseWriter, _ *http.Request) {
-	caps := []string{}
-	if s.mode == ModeOperator {
-		caps = []string{"scan.run", "tools.run", "preflight.run", "auth"}
-	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name":                "nubicustos",
 		"version":             s.version,
 		"schema_version":      "1.0",
 		"mode":                string(s.mode),
-		"capabilities":        caps,
+		"capabilities":        s.capabilities(),
 		"providers_supported": []string{"aws", "azure", "gcp", "k8s"},
 	})
 }

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -16,8 +18,9 @@ import (
 )
 
 type webFlags struct {
-	dbPath string
-	addr   string
+	dbPath       string
+	addr         string
+	allowActions bool
 }
 
 func newWebCmd() *cobra.Command {
@@ -25,11 +28,13 @@ func newWebCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "web",
 		Short: "Serve the read-only results UI and REST API over the local database",
-		Long: "Serve the embedded single-page UI and a read-only REST API over a stored\n" +
-			"scan database. Browse-and-export only; it performs no cloud calls and spawns\n" +
-			"no work. Bind to a loopback address; this is a local viewer, not a public\n" +
-			"service. (Operator-mode live actions are added behind an explicit flag in a\n" +
-			"later release.)",
+		Long: "Serve the embedded single-page UI and a REST API over a stored scan\n" +
+			"database. By default it is read-only (browse and export; no cloud calls, no\n" +
+			"spawned work) and needs no token. With --allow-actions it enters operator\n" +
+			"mode: live actions (currently the external-tool sweep) are enabled, the whole\n" +
+			"API is gated by a one-time session token printed at startup, and you should\n" +
+			"keep it bound to a loopback address. This is a local tool, not a public\n" +
+			"service.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runWeb(cmd.Context(), f)
 		},
@@ -37,6 +42,7 @@ func newWebCmd() *cobra.Command {
 	pf := cmd.Flags()
 	pf.StringVar(&f.dbPath, "db", "nubicustos.db", "path to the SQLite results database")
 	pf.StringVar(&f.addr, "addr", "127.0.0.1:8088", "address to listen on (use a loopback address)")
+	pf.BoolVar(&f.allowActions, "allow-actions", false, "operator mode: enable live actions, gated by a session token")
 	return cmd
 }
 
@@ -47,7 +53,11 @@ func runWeb(ctx context.Context, f *webFlags) error {
 	}
 	defer st.Close()
 
-	srv := web.New(st, web.ModeReadOnly, version)
+	mode, token := web.ModeReadOnly, ""
+	if f.allowActions {
+		mode, token = web.ModeOperator, newSessionToken()
+	}
+	srv := web.New(st, mode, version, token)
 	httpSrv := &http.Server{
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -57,7 +67,14 @@ func runWeb(ctx context.Context, f *webFlags) error {
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", f.addr, err)
 	}
-	fmt.Fprintf(os.Stderr, "nubicustos web (read-only) serving %s on http://%s\n", f.dbPath, ln.Addr())
+	if f.allowActions {
+		if !isLoopback(ln.Addr()) {
+			fmt.Fprintf(os.Stderr, "warning: operator mode is bound to a non-loopback address (%s) — live actions are reachable off-host\n", ln.Addr())
+		}
+		fmt.Fprintf(os.Stderr, "nubicustos web (OPERATOR) serving %s\n  open: http://%s/?t=%s\n", f.dbPath, ln.Addr(), token)
+	} else {
+		fmt.Fprintf(os.Stderr, "nubicustos web (read-only) serving %s on http://%s\n", f.dbPath, ln.Addr())
+	}
 
 	// Shut down gracefully when the command context is cancelled (e.g. Ctrl-C).
 	go func() {
@@ -71,4 +88,21 @@ func runWeb(ctx context.Context, f *webFlags) error {
 		return err
 	}
 	return nil
+}
+
+// newSessionToken returns a 128-bit random hex token for the operator session.
+func newSessionToken() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
+// isLoopback reports whether addr is a loopback TCP address.
+func isLoopback(addr net.Addr) bool {
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

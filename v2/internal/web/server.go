@@ -19,22 +19,40 @@ type Server struct {
 	store   *store.Store
 	mode    Mode
 	version string
+	token   string // session token required on /api in operator mode ("" in read-only)
+	jobs    *jobManager
 }
 
-// New builds a server over an open store. mode controls which routes are
-// mounted and what /meta advertises.
-func New(st *store.Store, mode Mode, version string) *Server {
-	return &Server{store: st, mode: mode, version: version}
+// New builds a server over an open store. mode controls which routes are mounted
+// and what /meta advertises; token gates the API in operator mode (ignored in
+// read-only mode).
+func New(st *store.Store, mode Mode, version, token string) *Server {
+	return &Server{store: st, mode: mode, version: version, token: token, jobs: newJobManager()}
 }
 
-// Handler returns the full HTTP handler: the read-only REST API under
-// /api/v1 plus the embedded single-page UI. Operator routes are mounted only
-// when the server is in operator mode (added in a later slice).
+// Handler returns the full HTTP handler: the read-only REST API under /api/v1
+// plus the embedded single-page UI, and — only in operator mode — the action
+// routes, with the whole /api surface gated by the session token.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.routesRead(mux)
+	if s.mode == ModeOperator {
+		s.routesOperator(mux)
+	}
 	mux.Handle("/", s.spaHandler()) // SPA + static assets (catch-all, last)
+	if s.mode == ModeOperator {
+		return s.tokenGate(mux)
+	}
 	return mux
+}
+
+// capabilities reports the action capabilities for /meta, reflecting what is
+// actually mounted (so the UI never offers an action the server won't serve).
+func (s *Server) capabilities() []string {
+	if s.mode != ModeOperator {
+		return []string{}
+	}
+	return []string{"tools.run"} // scan.run / preflight.run / auth arrive in a later slice
 }
 
 // routesRead registers the always-available read-only API.
@@ -51,6 +69,12 @@ func (s *Server) routesRead(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/scans/{id}/export/{format}", s.handleExport)
 	mux.HandleFunc("GET /api/v1/tools", s.handleTools)
 	mux.HandleFunc("GET /api/v1/preflight", s.handlePreflight)
+	// Catch-all for the API subtree so an unmatched /api path returns a JSON 404
+	// (and, in read-only mode, an operator route reads as absent) rather than
+	// falling through to the SPA shell. Specific routes above always win.
+	mux.HandleFunc("/api/v1/", func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, http.StatusNotFound, "not_found", "no such endpoint: "+r.URL.Path)
+	})
 }
 
 // resolveScan maps the "latest" alias to a concrete scan id, returning ok=false

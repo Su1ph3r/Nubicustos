@@ -345,9 +345,35 @@ The API is under `/api/v1` (JSON; `scan` ids accept the `latest` alias): `meta`
 `services`, `paths` / `paths/{id}`, `export/{cairn|sarif|csv|html}`, and `tools`.
 `meta` reports `mode: read-only` with no capabilities; the UI renders action
 affordances purely off that, and the server independently mounts only the
-read-only routes — so a shared instance exposes nothing live. Operator-mode
-actions (scan/tool runs, preflight, auth) are added behind an explicit launch
-flag in a later release.
+read-only routes — so a shared instance exposes nothing live.
+
+**Operator mode** (`web --allow-actions`) enables live actions and gates the
+whole API behind a one-time session token printed at startup (open the printed
+`http://127.0.0.1:8088/?t=<token>` URL). The token is required on every `/api`
+request as `Authorization: Bearer <token>` or, for the event stream that the
+browser's EventSource can't add headers to, the `?t=<token>` query parameter —
+which also resists cross-site requests, since a forged page can't read the local
+token. `meta` then advertises the mounted capabilities.
+
+This release wires the external-tool sweep as the first action:
+
+```bash
+nubicustos web --allow-actions             # prints the tokened URL
+```
+
+- `POST /api/v1/tools/run` `{tool?, target, concurrency?}` → `202 {job_id}` (omit
+  `tool` to run every installed tool).
+- `GET /api/v1/jobs/{id}` — job status (`running`/`done`/`error`/`cancelled`,
+  phase, `done/total`, resulting `scan_ids`).
+- `GET /api/v1/jobs/{id}/events` — **Server-Sent Events**: the buffered backlog
+  then live `phase` / `log` / `done` / `error` frames. The progress is the real
+  backend signal — a true `done/total` over the installed tools as each
+  completes, plus each tool's outcome — never a timer.
+- `POST /api/v1/jobs/{id}/cancel` — cancels the run.
+
+Each tool's findings persist as their own `plugin:<tool>` scan, browsable like
+any other. Scan/preflight runs and the cloud auth flow are the next operator
+actions.
 
 ### Active validation (opt-in, read-only)
 

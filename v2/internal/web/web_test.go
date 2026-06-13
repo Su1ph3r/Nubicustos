@@ -44,7 +44,7 @@ func seededServer(t *testing.T) *Server {
 	if err := st.SaveFindings(context.Background(), "scan-1", fs, now); err != nil {
 		t.Fatalf("save findings: %v", err)
 	}
-	return New(st, ModeReadOnly, "v-test")
+	return New(st, ModeReadOnly, "v-test", "")
 }
 
 func get(t *testing.T, s *Server, path string) (*http.Response, []byte) {
