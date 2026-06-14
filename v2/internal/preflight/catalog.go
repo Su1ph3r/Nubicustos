@@ -131,6 +131,13 @@ var nubicustosAWSOrgActions = []string{
 	"sts:AssumeRole",
 }
 
+// nubicustosAWSAssumeActions is the org-side access an *explicit* --accounts
+// preflight needs from the base identity: enumeration is skipped (the operator
+// supplied the account ids), but each member is still reached by assuming the
+// org role. So sts:AssumeRole is required while the organizations:* reads are
+// not — flagging those as missing would be a false partial for this mode.
+var nubicustosAWSAssumeActions = []string{"sts:AssumeRole"}
+
 // AWSTools is the requirement catalog for AWS scanning tools. The Nubicustos
 // entry is authoritative; the external entries are the documented required
 // access (ported from the v1 catalog) — for those, attaching the managed
@@ -224,9 +231,26 @@ func AWSToolWithOrg(t Tool, org bool) Tool {
 	if !org || t.Key != "nubicustos" {
 		return t
 	}
-	merged := make([]string, 0, len(t.RequiredActions)+len(nubicustosAWSOrgActions))
+	return appendActions(t, nubicustosAWSOrgActions)
+}
+
+// AWSToolWithMemberAssume returns the native tool with only sts:AssumeRole
+// appended — the base-identity requirement for an explicit --accounts estate
+// preflight, where Organizations enumeration is skipped but each member is still
+// reached by assuming the org role. Non-native tools are returned unchanged.
+func AWSToolWithMemberAssume(t Tool) Tool {
+	if t.Key != "nubicustos" {
+		return t
+	}
+	return appendActions(t, nubicustosAWSAssumeActions)
+}
+
+// appendActions returns t with extra actions appended, never mutating the shared
+// base slice (it allocates a fresh backing array).
+func appendActions(t Tool, extra []string) Tool {
+	merged := make([]string, 0, len(t.RequiredActions)+len(extra))
 	merged = append(merged, t.RequiredActions...)
-	merged = append(merged, nubicustosAWSOrgActions...)
+	merged = append(merged, extra...)
 	t.RequiredActions = merged
 	return t
 }

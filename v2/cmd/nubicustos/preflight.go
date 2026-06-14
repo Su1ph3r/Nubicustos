@@ -32,12 +32,22 @@ type preflightFlags struct {
 	writePolicies string
 	org           bool
 
+	// Estate scoping (§9.4) — verify access across every member, not just the
+	// base identity. AWS: org enumeration + per-member assume-role.
+	accounts        []string
+	excludeAccts    []string
+	ous             []string
+	orgRole         string
+	includeMgmt     bool
+	acctConcurrency int
+
 	// Azure
-	authMethod   string
-	tenantID     string
-	clientID     string
-	clientSecret string
-	subscription string
+	authMethod      string
+	tenantID        string
+	clientID        string
+	clientSecret    string
+	subscription    string
+	managementGroup string
 
 	// GCP / Kubernetes
 	project    string
@@ -72,16 +82,23 @@ func newPreflightCmd() *cobra.Command {
 	pf.StringVar(&f.format, "format", "text", "output format: text | json")
 	pf.BoolVar(&f.noProbe, "no-probe", false, "skip the live read-probe cross-check (simulation only)")
 	pf.StringVar(&f.writePolicies, "write-policies", "", "directory to write a remediation policy/role JSON per non-ready tool")
-	pf.BoolVar(&f.org, "org", false, "AWS: also verify org-wide scan access (Organizations enumeration + member assume-role) for the native checks")
+	pf.BoolVar(&f.org, "org", false, "verify access across the whole estate, not just the base identity (AWS: enumerate the org + assume into each member; Azure: every in-scope subscription; GCP: every enabled project; K8s: every kubeconfig context)")
+	pf.StringSliceVar(&f.accounts, "accounts", nil, "AWS: explicit member account id(s) to check (implies --org; skips Organizations enumeration)")
+	pf.StringSliceVar(&f.excludeAccts, "exclude", nil, "estate member id(s) to skip (AWS org accounts or Azure subscriptions)")
+	pf.StringSliceVar(&f.ous, "ou", nil, "AWS org: restrict to accounts under these OU id(s), recursively (implies --org)")
+	pf.StringVar(&f.orgRole, "org-role", "", "AWS org: role assumed in each member account (default OrganizationAccountAccessRole)")
+	pf.BoolVar(&f.includeMgmt, "include-mgmt", false, "AWS org: also check the management/base account itself")
+	pf.IntVar(&f.acctConcurrency, "account-concurrency", 4, "estate: how many members to check in parallel")
 
 	pf.StringVar(&f.authMethod, "auth", "", "Azure auth: auto | cli | interactive-browser | device-code | service-principal | managed-identity")
 	pf.StringVar(&f.tenantID, "tenant", "", "Azure tenant id (service-principal)")
 	pf.StringVar(&f.clientID, "client-id", "", "Azure client id (service-principal)")
 	pf.StringVar(&f.clientSecret, "client-secret", "", "Azure client secret (service-principal)")
-	pf.StringVar(&f.subscription, "subscription", "", "Azure subscription to probe (default: first enabled subscription)")
+	pf.StringVar(&f.subscription, "subscription", "", "Azure subscription to probe (default: first enabled subscription; ignored with --org)")
+	pf.StringVar(&f.managementGroup, "management-group", "", "Azure: restrict the estate check to subscriptions under this management group, recursively (implies --org)")
 
-	pf.StringVar(&f.project, "project", "", "GCP project to check (default: first active project)")
-	pf.StringVar(&f.k8sContext, "context", "", "Kubernetes context to check (default: current context)")
+	pf.StringVar(&f.project, "project", "", "GCP project to check (default: first active project; ignored with --org)")
+	pf.StringVar(&f.k8sContext, "context", "", "Kubernetes context to check (default: current context; ignored with --org)")
 	return cmd
 }
 
@@ -101,9 +118,15 @@ func runPreflight(ctx context.Context, f *preflightFlags) error {
 }
 
 func runPreflightAWS(ctx context.Context, f *preflightFlags) error {
+	// Estate mode: enumerate the organization and verify access in every member,
+	// not just the base identity. Triggered by --org or any account/OU scoping.
+	if f.org || len(f.accounts) > 0 || len(f.ous) > 0 {
+		return runPreflightAWSOrg(ctx, f)
+	}
+
 	// Validate the tool selection before authenticating, so a typo fails fast
 	// without resolving credentials.
-	tools, err := selectTools(f.tools, f.org)
+	tools, err := selectTools(f.tools, false)
 	if err != nil {
 		return err
 	}
@@ -139,6 +162,11 @@ func runPreflightAWS(ctx context.Context, f *preflightFlags) error {
 // assignments and Azure Policy), so the prober is the sole source and the Azure
 // remediator renders gaps as a custom role definition.
 func runPreflightAzure(ctx context.Context, f *preflightFlags) error {
+	// Estate mode: check every in-scope subscription, not just one.
+	if f.org || f.managementGroup != "" {
+		return runPreflightAzureEstate(ctx, f)
+	}
+
 	tools, err := selectAzureTools(f.tools)
 	if err != nil {
 		return err
@@ -194,6 +222,11 @@ func runPreflightGCP(ctx context.Context, f *preflightFlags) error {
 	if err != nil {
 		return err
 	}
+
+	// Estate mode: check every enabled project, not just one.
+	if f.org {
+		return runPreflightGCPEstate(ctx, f, creds, tools)
+	}
 	project := f.project
 	if project == "" {
 		projects, derr := gcpprovider.EnabledProjects(ctx, creds)
@@ -225,6 +258,11 @@ func runPreflightK8s(ctx context.Context, f *preflightFlags) error {
 	tools, err := selectK8sTools(f.tools)
 	if err != nil {
 		return err
+	}
+
+	// Estate mode: check every kubeconfig context, not just the current one.
+	if f.org {
+		return runPreflightK8sEstate(ctx, f, tools)
 	}
 
 	var contexts []string

@@ -235,20 +235,33 @@ func toolReadiness(tr ToolReport) Readiness {
 	}
 }
 
-func overallReadiness(tools []ToolReport) Readiness {
+// readinessRank orders verdicts worst-last for worst-case rollups. Anything
+// other than fully-ready must not present as ready: unverified and unknown both
+// mean "not confirmed" and outrank ready for gating.
+var readinessRank = map[Readiness]int{
+	ReadinessReady: 0, ReadinessUnverified: 1, ReadinessUnknown: 2,
+	ReadinessPartial: 3, ReadinessFailed: 4,
+}
+
+// worstReadiness returns the worst (highest-ranked) verdict in rs; an empty set
+// is Ready (nothing checked failed). Estate rollups that must distinguish
+// "nothing checked" handle that case before calling this.
+func worstReadiness(rs ...Readiness) Readiness {
 	worst := ReadinessReady
-	// Anything other than fully-ready must not present as ready. Unverified and
-	// unknown both mean "not confirmed" and outrank ready for gating.
-	rank := map[Readiness]int{
-		ReadinessReady: 0, ReadinessUnverified: 1, ReadinessUnknown: 2,
-		ReadinessPartial: 3, ReadinessFailed: 4,
-	}
-	for _, t := range tools {
-		if rank[t.Readiness] > rank[worst] {
-			worst = t.Readiness
+	for _, r := range rs {
+		if readinessRank[r] > readinessRank[worst] {
+			worst = r
 		}
 	}
 	return worst
+}
+
+func overallReadiness(tools []ToolReport) Readiness {
+	rs := make([]Readiness, len(tools))
+	for i, t := range tools {
+		rs[i] = t.Readiness
+	}
+	return worstReadiness(rs...)
 }
 
 // buildRemediation produces the client-facing fix, distinguishing three kinds
