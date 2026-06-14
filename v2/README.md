@@ -341,7 +341,7 @@ resource types today: `aws_s3_bucket`, `aws_rds_instance`, `aws_iam_user`,
 credential holds the permissions each tool requires — Nubicustos's own native
 checks plus the optional external tools (Prowler, ScoutSuite, CloudSploit) — and
 produces a client-ready report of exactly what is missing and how to grant it.
-It supports both AWS and Azure (`--provider`).
+It supports all four providers (`--provider aws | azure | gcp | k8s`).
 
 ```bash
 nubicustos preflight --profile prod                 # AWS: check all tools
@@ -350,8 +350,9 @@ nubicustos preflight --format json                  # machine-readable report
 nubicustos preflight --write-policies ./fixes       # emit a remediation policy/role per non-ready tool
 nubicustos preflight --org                          # AWS: also verify org-wide scan access (Organizations + assume-role)
 
-nubicustos preflight --provider azure               # Azure: check native-check RBAC access
 nubicustos preflight --provider azure --subscription <id>
+nubicustos preflight --provider gcp --project <id>
+nubicustos preflight --provider k8s --context <name>
 ```
 
 `--org` adds the org-wide scan permissions (`organizations:ListAccounts`,
@@ -393,6 +394,32 @@ recommended built-in roles (`Reader` + `Website Contributor`, the latter for the
 App Service settings-listing action Reader does not grant) plus a generated
 **custom role definition** of exactly the missing actions, scoped to the
 subscription and ready for `az role definition create`.
+
+**GCP (`--provider gcp`).** GCP *does* have an authoritative permission API:
+Resource Manager `TestIamPermissions` returns exactly which of a queried
+permission set the caller holds. Preflight checks the whole required set
+(`storage.buckets.list`, `storage.buckets.getIamPolicy`, `compute.firewalls.list`,
+`resourcemanager.projects.get`/`getIamPolicy`) in **one batch call** against the
+project — held permissions are `allowed`, the rest `denied`. Gaps render as
+predefined roles (`roles/iam.securityReviewer` + `roles/viewer`) plus a generated
+**custom role** of the missing permissions, ready for `gcloud iam roles create
+--file`.
+
+**Kubernetes (`--provider k8s`).** Kubernetes' canonical "can-i" API,
+`SelfSubjectAccessReview`, is authoritative (it evaluates the full RBAC ruleset)
+and every authenticated user may call it. Preflight runs one review per required
+action (`list pods`, and `list`/`roles`/`clusterroles`/`rolebindings`/
+`clusterrolebindings` in `rbac.authorization.k8s.io`) against the selected
+`--context`. Gaps render as a generated **ClusterRole** of exactly the missing
+verbs/resources (grouped by API group, ready for `kubectl apply -f`) to bind to
+the scan identity with a ClusterRoleBinding — the built-in `view` role covers pods
+but deliberately excludes RBAC objects.
+
+The verification engine, readiness model, and report are identical across all
+four clouds; only the access source (IAM simulation, RBAC read-probe,
+`TestIamPermissions`, `SelfSubjectAccessReview`) and the remediation artifact
+(IAM policy, Azure custom role, GCP custom role, K8s ClusterRole) are
+provider-specific.
 
 ### Optional tool plugins
 

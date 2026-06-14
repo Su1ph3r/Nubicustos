@@ -15,6 +15,7 @@ import (
 	"github.com/Su1ph3r/nubicustos/internal/auth"
 	"github.com/Su1ph3r/nubicustos/internal/discovery"
 	"github.com/Su1ph3r/nubicustos/internal/preflight"
+	gcpprovider "github.com/Su1ph3r/nubicustos/internal/providers/gcp"
 )
 
 type preflightFlags struct {
@@ -37,6 +38,10 @@ type preflightFlags struct {
 	clientID     string
 	clientSecret string
 	subscription string
+
+	// GCP / Kubernetes
+	project    string
+	k8sContext string
 }
 
 func newPreflightCmd() *cobra.Command {
@@ -56,7 +61,7 @@ func newPreflightCmd() *cobra.Command {
 		},
 	}
 	pf := cmd.Flags()
-	pf.StringVar(&f.provider, "provider", "aws", "cloud provider: aws | azure")
+	pf.StringVar(&f.provider, "provider", "aws", "cloud provider: aws | azure | gcp | k8s")
 	pf.StringVar(&f.profile, "profile", "", "AWS named profile")
 	pf.StringVar(&f.region, "region", "", "AWS region for the session")
 	pf.StringVar(&f.mfaSerial, "mfa-serial", "", "AWS MFA device ARN")
@@ -74,6 +79,9 @@ func newPreflightCmd() *cobra.Command {
 	pf.StringVar(&f.clientID, "client-id", "", "Azure client id (service-principal)")
 	pf.StringVar(&f.clientSecret, "client-secret", "", "Azure client secret (service-principal)")
 	pf.StringVar(&f.subscription, "subscription", "", "Azure subscription to probe (default: first enabled subscription)")
+
+	pf.StringVar(&f.project, "project", "", "GCP project to check (default: first active project)")
+	pf.StringVar(&f.k8sContext, "context", "", "Kubernetes context to check (default: current context)")
 	return cmd
 }
 
@@ -83,8 +91,12 @@ func runPreflight(ctx context.Context, f *preflightFlags) error {
 		return runPreflightAWS(ctx, f)
 	case "azure":
 		return runPreflightAzure(ctx, f)
+	case "gcp":
+		return runPreflightGCP(ctx, f)
+	case "k8s":
+		return runPreflightK8s(ctx, f)
 	default:
-		return fmt.Errorf("preflight supports --provider aws | azure")
+		return fmt.Errorf("preflight supports --provider aws | azure | gcp | k8s")
 	}
 }
 
@@ -168,6 +180,79 @@ func runPreflightAzure(ctx context.Context, f *preflightFlags) error {
 	return emitPreflight(ctx, f, opts)
 }
 
+// runPreflightGCP verifies GCP IAM access for the native checks against a
+// project. It uses Resource Manager's TestIamPermissions — GCP's authoritative
+// "which of these can I do" API — so the check is probe-only and the GCP
+// remediator renders gaps as a custom role definition.
+func runPreflightGCP(ctx context.Context, f *preflightFlags) error {
+	tools, err := selectGCPTools(f.tools)
+	if err != nil {
+		return err
+	}
+
+	creds, err := auth.ResolveGCP(ctx)
+	if err != nil {
+		return err
+	}
+	project := f.project
+	if project == "" {
+		projects, derr := gcpprovider.EnabledProjects(ctx, creds)
+		if derr != nil {
+			return fmt.Errorf("resolving a project to check: %w", derr)
+		}
+		if len(projects) == 0 {
+			return fmt.Errorf("no active project visible to this identity (use --project)")
+		}
+		project = projects[0]
+	}
+	fmt.Fprintf(os.Stderr, "authenticated to GCP; checking access against project %s\n", project)
+
+	opts := preflight.Options{
+		Provider:   "gcp",
+		Identity:   "GCP credential",
+		Account:    project,
+		Tools:      tools,
+		Prober:     preflight.NewGCPProber(ctx, creds, project),
+		Remediator: preflight.NewGCPRemediator(project),
+	}
+	return emitPreflight(ctx, f, opts)
+}
+
+// runPreflightK8s verifies Kubernetes RBAC access for the native checks against
+// one context. It uses SelfSubjectAccessReview — the canonical "can-i" API — so
+// the check is probe-only and the K8s remediator renders gaps as a ClusterRole.
+func runPreflightK8s(ctx context.Context, f *preflightFlags) error {
+	tools, err := selectK8sTools(f.tools)
+	if err != nil {
+		return err
+	}
+
+	var contexts []string
+	if f.k8sContext != "" {
+		contexts = []string{f.k8sContext}
+	}
+	clusters, err := auth.ResolveK8s(contexts)
+	if err != nil {
+		return err
+	}
+	cluster := clusters[0] // check one context; --context selects it
+	fmt.Fprintf(os.Stderr, "checking Kubernetes access against context %s\n", cluster.Context)
+
+	prober, err := preflight.NewK8sProber(cluster.Config)
+	if err != nil {
+		return fmt.Errorf("building Kubernetes client: %w", err)
+	}
+	opts := preflight.Options{
+		Provider:   "k8s",
+		Identity:   "Kubernetes credential",
+		Account:    cluster.Context,
+		Tools:      tools,
+		Prober:     prober,
+		Remediator: preflight.NewK8sRemediator(),
+	}
+	return emitPreflight(ctx, f, opts)
+}
+
 // emitPreflight evaluates, optionally writes remediation files, renders the
 // report, and gates the exit code — shared across providers.
 func emitPreflight(ctx context.Context, f *preflightFlags, opts preflight.Options) error {
@@ -198,14 +283,30 @@ func emitPreflight(ctx context.Context, f *preflightFlags, opts preflight.Option
 
 // selectAzureTools returns the requested Azure catalog tools (all if keys empty).
 func selectAzureTools(keys []string) ([]preflight.Tool, error) {
+	return selectProviderTools(keys, "Azure", preflight.AzureTools, preflight.AzureToolByKey)
+}
+
+// selectGCPTools returns the requested GCP catalog tools (all if keys empty).
+func selectGCPTools(keys []string) ([]preflight.Tool, error) {
+	return selectProviderTools(keys, "GCP", preflight.GCPTools, preflight.GCPToolByKey)
+}
+
+// selectK8sTools returns the requested Kubernetes catalog tools (all if keys empty).
+func selectK8sTools(keys []string) ([]preflight.Tool, error) {
+	return selectProviderTools(keys, "Kubernetes", preflight.K8sTools, preflight.K8sToolByKey)
+}
+
+// selectProviderTools resolves a tool selection against a single-provider catalog
+// that has no external tools (Azure/GCP/K8s — only the native engine today).
+func selectProviderTools(keys []string, label string, all []preflight.Tool, byKey func(string) (preflight.Tool, bool)) ([]preflight.Tool, error) {
 	if len(keys) == 0 {
-		return preflight.AzureTools, nil
+		return all, nil
 	}
 	var out []preflight.Tool
 	for _, k := range keys {
-		t, ok := preflight.AzureToolByKey(strings.TrimSpace(k))
+		t, ok := byKey(strings.TrimSpace(k))
 		if !ok {
-			return nil, fmt.Errorf("unknown Azure tool %q (known: nubicustos)", k)
+			return nil, fmt.Errorf("unknown %s tool %q (known: nubicustos)", label, k)
 		}
 		out = append(out, t)
 	}
