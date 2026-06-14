@@ -207,18 +207,31 @@ func runPreflightGCPEstate(ctx context.Context, f *preflightFlags, creds *google
 	return emitEstatePreflight(f, est)
 }
 
-// runPreflightK8sEstate checks every kubeconfig context. A context whose client
-// cannot be built is recorded as skipped, never aborting the run.
+// runPreflightK8sEstate checks every kubeconfig context. A context that cannot be
+// built or reached is recorded as skipped, never aborting the run.
 func runPreflightK8sEstate(ctx context.Context, f *preflightFlags, tools []preflight.Tool) error {
-	clusters, err := auth.ResolveK8s(nil) // nil → every context in the kubeconfig
+	clusters, failures, err := auth.ResolveK8sAll()
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "checking %d Kubernetes context(s)\n", len(clusters))
+
+	// Seed the skip list with contexts that failed to build or were unreachable,
+	// so they show in the report with a reason instead of silently vanishing.
+	skipped := make([]preflight.SkippedAccount, 0, len(failures))
+	for _, fa := range failures {
+		skipped = append(skipped, preflight.SkippedAccount{ID: fa.Context, Reason: fa.Reason})
+	}
+
+	if len(clusters) == 0 {
+		for _, s := range skipped {
+			fmt.Fprintf(os.Stderr, "  skip %s: %s\n", s.ID, s.Reason)
+		}
+		return fmt.Errorf("no reachable kubeconfig context to check (%d skipped)", len(skipped))
+	}
+	fmt.Fprintf(os.Stderr, "checking %d Kubernetes context(s) (%d skipped)\n", len(clusters), len(skipped))
 
 	var (
 		reports []preflight.AccountReport
-		skipped []preflight.SkippedAccount
 		mu      sync.Mutex
 	)
 	checkMembersParallel(clusters, f.acctConcurrency, func(_ int, cl auth.K8sCluster) {
