@@ -69,6 +69,7 @@ func scanLambdaEnv(sc *engine.ScanContext, region string, st *state.State) {
 					st.AddSecretHit(secretHit(m, "lambda_env", name, region, k))
 				}
 			}
+			captureAWSKeysKV(sc, fn.Environment.Variables, "lambda_env", name, region)
 		}
 	}
 }
@@ -104,6 +105,7 @@ func scanEC2Userdata(sc *engine.ScanContext, region string, st *state.State) {
 				for _, m := range secrets.Scan(decoded, "userdata") {
 					st.AddSecretHit(secretHit(m, "ec2_userdata", id, region, m.Context))
 				}
+				captureAWSKeysText(sc, decoded, "ec2_userdata", id, region)
 			}
 		}
 	}
@@ -148,6 +150,30 @@ func scanSSMParameters(sc *engine.ScanContext, region string, st *state.State) {
 				st.AddSecretHit(secretHit(m, "ssm_parameter", name, region, name))
 			}
 		}
+	}
+}
+
+// captureAWSKeysKV pairs an access-key-id with its secret inside one key/value
+// surface and hands the raw pair to the capture sink (only when --capture-secrets
+// wired a sink). SSM is intentionally not paired: a single-value parameter cannot
+// hold both halves, and pairing across parameters would be a guess.
+func captureAWSKeysKV(sc *engine.ScanContext, kv map[string]string, surface, resource, region string) {
+	if sc.SecretSink == nil {
+		return
+	}
+	for _, c := range secrets.PairAWSKeysKV(kv) {
+		sc.SecretSink.AddAWSKey(c.AccessKeyID, c.SecretAccessKey, c.SessionToken, surface, resource, region)
+	}
+}
+
+// captureAWSKeysText pairs an access-key-id with a nearby secret in free text
+// (decoded userdata) and feeds the capture sink.
+func captureAWSKeysText(sc *engine.ScanContext, text, surface, resource, region string) {
+	if sc.SecretSink == nil {
+		return
+	}
+	for _, c := range secrets.PairAWSKeysText(text) {
+		sc.SecretSink.AddAWSKey(c.AccessKeyID, c.SecretAccessKey, c.SessionToken, surface, resource, region)
 	}
 }
 

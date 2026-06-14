@@ -24,6 +24,7 @@ import (
 	awsprovider "github.com/Su1ph3r/nubicustos/internal/providers/aws"
 	azureprovider "github.com/Su1ph3r/nubicustos/internal/providers/azure"
 	gcpprovider "github.com/Su1ph3r/nubicustos/internal/providers/gcp"
+	"github.com/Su1ph3r/nubicustos/internal/secrets"
 	"github.com/Su1ph3r/nubicustos/internal/store"
 	"github.com/Su1ph3r/nubicustos/internal/validate"
 )
@@ -60,10 +61,11 @@ type scanFlags struct {
 	includeMgmt     bool
 	acctConcurrency int
 
-	dbPath     string
-	exportPath string
-	validate   bool
-	rulesDir   string
+	dbPath         string
+	exportPath     string
+	validate       bool
+	captureSecrets bool
+	rulesDir       string
 }
 
 func newScanCmd() *cobra.Command {
@@ -104,6 +106,7 @@ func newScanCmd() *cobra.Command {
 	pf.StringVar(&f.dbPath, "db", "nubicustos.db", "path to the SQLite results database")
 	pf.StringVar(&f.exportPath, "export", "", "write Cairn-format findings JSON to this path")
 	pf.BoolVar(&f.validate, "validate", false, "opt-in: actively (read-only) confirm findings and capture evidence")
+	pf.BoolVar(&f.captureSecrets, "capture-secrets", false, "AWS: retain raw control-plane secrets in-process so --validate can confirm AWS-key liveness (never written to disk or exported)")
 	pf.StringVar(&f.rulesDir, "rules-dir", "", "directory of user policy-as-code rules to evaluate alongside the built-ins")
 
 	return cmd
@@ -224,6 +227,15 @@ func runScan(ctx context.Context, f *scanFlags) error {
 	// Load any user-supplied policy-as-code rules for the rules engine to pick up.
 	ruleschecks.SetUserRulesDir(f.rulesDir)
 
+	// Opt-in raw-secret capture (--capture-secrets): retain AWS key material the
+	// secrets collector recovers so --validate can confirm liveness. In-process
+	// only — never persisted; discarded when this command returns.
+	var capture *secrets.Capture
+	if f.captureSecrets && provider == "aws" {
+		capture = secrets.NewCapture()
+		sc.SecretSink = capture
+	}
+
 	started := time.Now().UTC()
 	sc.Progress = &cliProgress{} // honest per-phase progress to stderr (real totals)
 	result := engine.Run(sc)
@@ -235,6 +247,10 @@ func runScan(ctx context.Context, f *scanFlags) error {
 		var venv validate.Env
 		if provider == "aws" {
 			venv = validate.NewAWSEnv(sc.AWS) // authenticated, MFA-satisfied scan session
+			if capture != nil {
+				venv.CapturedAWSKeys = capture.AWSKeys()
+				venv.AWSKeyProber = validate.NewAWSKeyProber()
+			}
 		}
 		rep := validate.Run(ctx, result.Findings, validate.Options{Env: venv})
 		fmt.Fprintf(os.Stderr, "validation: %d confirmed of %d attempted\n", rep.Confirmed, rep.Attempted)
@@ -390,13 +406,24 @@ func scanOneAccount(ctx context.Context, f *scanFlags, st *store.Store, persistM
 		AWS:      acc.Config,
 	}
 
+	var capture *secrets.Capture
+	if f.captureSecrets {
+		capture = secrets.NewCapture()
+		sc.SecretSink = capture
+	}
+
 	started := time.Now().UTC()
 	result := engine.Run(sc)
 
 	if f.validate {
 		// Confirm findings read-only against this account's own session; evidence
 		// attaches to the findings before they are persisted/exported.
-		validate.Run(ctx, result.Findings, validate.Options{Env: validate.NewAWSEnv(acc.Config)})
+		venv := validate.NewAWSEnv(acc.Config)
+		if capture != nil {
+			venv.CapturedAWSKeys = capture.AWSKeys()
+			venv.AWSKeyProber = validate.NewAWSKeyProber()
+		}
+		validate.Run(ctx, result.Findings, validate.Options{Env: venv})
 	}
 	finished := time.Now().UTC()
 

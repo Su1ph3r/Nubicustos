@@ -104,13 +104,22 @@ non-placeholder values. **Privacy is a hard invariant:** a detection records onl
 a masked rendering (last four characters), its length, entropy, and a
 secret-safe locator — the raw value is dropped at the detector boundary, so
 nothing downstream (findings, the SQLite store, the Cairn export, logs) can leak
-it. Hits roll up into one `aws_exposed_secret` finding. Liveness is not asserted
-at scan time; confirming a found credential live/expired is the job of the
-opt-in active-validation pass (§9.1, planned cross-link). Requires
-`lambda:ListFunctions`, `ec2:DescribeInstanceAttribute`, `ssm:DescribeParameters`,
-and `ssm:GetParameters`; the last (reading parameter values) is not granted by
-`SecurityAudit`, so `preflight` flags it and emits it in the remediation policy
-when missing.
+it. Hits roll up into one `aws_exposed_secret` finding.
+
+Liveness is confirmed on demand via the §9.1 cross-link: `scan --capture-secrets
+--validate` retains the raw AWS key material **in-process only** (never written
+to disk, the store, or any export — discarded when the command returns) and the
+active-validation pass probes each captured key with `sts:GetCallerIdentity`. A
+masked posture finding ("a secret is in this Lambda env") becomes runtime-proven
+("that key is **live** and maps to `arn:aws:iam::…:user/deploy`", or
+rejected/expired). Key id and secret are paired within a single surface, and only
+when unambiguous (exactly one access-key-id present), so a pairing is never
+guessed. Evidence carries only the masked key id and the ARN it resolves to.
+
+Requires `lambda:ListFunctions`, `ec2:DescribeInstanceAttribute`,
+`ssm:DescribeParameters`, and `ssm:GetParameters`; the last (reading parameter
+values) is not granted by `SecurityAudit`, so `preflight` flags it and emits it
+in the remediation policy when missing.
 
 ### Check catalog (Azure)
 
@@ -518,6 +527,14 @@ Implemented validators:
   target with no marker is `unconfirmed` (live from this vantage, ownership
   unverified — not a refutation); an unreachable target is `blocked`. Read-only:
   it never registers the target.
+- **Exposed-secret liveness** (authenticated vantage, opt-in `--capture-secrets`)
+  — for each AWS key pair captured from the control plane, a single
+  `sts:GetCallerIdentity` whoami: a key AWS accepts is `confirmed` live and the
+  evidence records the ARN it maps to; a rejected (invalid/expired) key leaves
+  the finding `unconfirmed`; a probe that cannot complete is `blocked`. It uses
+  the key only to ask "who am I" and never for anything else, and emits no raw
+  secret material. Inert unless `--capture-secrets` was set (no captured keys →
+  the masked finding stands alone).
 
 Each authenticated-vantage validator probes per affected resource and folds the
 results into one evidence record carrying a `confirmed/errored/clean/probed`

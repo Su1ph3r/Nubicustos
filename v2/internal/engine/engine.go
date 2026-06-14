@@ -50,6 +50,20 @@ type ScanContext struct {
 	// report as indeterminate phases). Nil disables reporting. The reporter must
 	// be safe for concurrent calls — collectors and checks run in a worker pool.
 	Progress progress.Reporter
+
+	// SecretSink, if set, receives raw secret material a collector recovers
+	// from the control plane under the opt-in --capture-secrets, so the active-
+	// validation pass can confirm liveness. Nil (the default) means capture is
+	// off and no raw secret is ever retained. Must be safe for concurrent calls.
+	SecretSink SecretSink
+}
+
+// SecretSink receives raw credentials captured during collection when the
+// operator opts into --capture-secrets. Implemented by *secrets.Capture; kept as
+// an interface here so the engine does not depend on the secrets package. Nil is
+// the default (capture disabled). Implementations must be concurrency-safe.
+type SecretSink interface {
+	AddAWSKey(accessKeyID, secretAccessKey, sessionToken, surface, resource, region string)
 }
 
 // K8sSession carries the validated kubeconfig contexts in scope for the scan.

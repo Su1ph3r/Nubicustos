@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Su1ph3r/nubicustos/internal/findings"
+	"github.com/Su1ph3r/nubicustos/internal/secrets"
 )
 
 // BlastRadiusNone is the only blast radius the runner will execute. It encodes
@@ -66,6 +67,15 @@ type Env struct {
 	// RDSSnapshotAttr, when set, returns a read-only RDS snapshot-attribute
 	// describer bound to region (for confirming public RDS snapshot restore grants).
 	RDSSnapshotAttr func(region string) RDSSnapshotAttrAPI
+
+	// CapturedAWSKeys carries the raw AWS key pairs the secrets collector
+	// recovered from the control plane under --capture-secrets. It is the only
+	// place raw secret material reaches validation; empty unless the operator
+	// opted in. The exposed-secret validator probes each for liveness.
+	CapturedAWSKeys []secrets.AWSKeyCredential
+	// AWSKeyProber, when set, confirms a captured AWS credential read-only via
+	// sts:GetCallerIdentity. Built from the SDK in NewAWSKeyProber.
+	AWSKeyProber AWSKeyProber
 }
 
 var (
