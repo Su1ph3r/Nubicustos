@@ -286,8 +286,9 @@ type Certificate struct {
 type SecretHit struct {
 	Detector string // detector id, e.g. "aws_access_key_id", "generic_secret"
 	Kind     string // human label
-	Surface  string // where it was found, e.g. "lambda_env", "ec2_userdata", "ssm_parameter"
-	Resource string // owning resource (function name, instance id, parameter name)
+	Surface  string // where it was found, e.g. "lambda_env", "ec2_userdata", "azure_appservice_setting"
+	Resource string // owning resource (function name, instance id, parameter name, web app)
+	Account  string // owning account / subscription / project (empty for AWS, which scopes by AWS.Account)
 	Region   string
 	Locator  string // secret-safe field locator (env var name, "userdata"), never the value
 	Masked   string // masked rendering (last 4 only)
@@ -424,6 +425,7 @@ type Azure struct {
 	StorageAccounts []StorageAccount
 	NSGs            []NetworkSecurityGroup
 	KeyVaults       []KeyVault
+	SecretHits      []SecretHit
 }
 
 // --- GCP --------------------------------------------------------------------
@@ -600,6 +602,13 @@ func (s *State) AddKeyVault(v KeyVault) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Azure.KeyVaults = append(s.Azure.KeyVaults, v)
+}
+
+// AddAzureSecretHit appends a detected Azure control-plane secret under lock.
+func (s *State) AddAzureSecretHit(h SecretHit) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Azure.SecretHits = append(s.Azure.SecretHits, h)
 }
 
 // SetAWSAccount records the account id the AWS state belongs to.

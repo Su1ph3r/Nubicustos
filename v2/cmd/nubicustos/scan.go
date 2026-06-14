@@ -22,7 +22,6 @@ import (
 	"github.com/Su1ph3r/nubicustos/internal/findings"
 	"github.com/Su1ph3r/nubicustos/internal/progress"
 	awsprovider "github.com/Su1ph3r/nubicustos/internal/providers/aws"
-	azureprovider "github.com/Su1ph3r/nubicustos/internal/providers/azure"
 	gcpprovider "github.com/Su1ph3r/nubicustos/internal/providers/gcp"
 	"github.com/Su1ph3r/nubicustos/internal/secrets"
 	"github.com/Su1ph3r/nubicustos/internal/store"
@@ -61,6 +60,9 @@ type scanFlags struct {
 	includeMgmt     bool
 	acctConcurrency int
 
+	// Azure estate scoping (§9.4)
+	managementGroup string
+
 	dbPath         string
 	exportPath     string
 	validate       bool
@@ -97,11 +99,13 @@ func newScanCmd() *cobra.Command {
 
 	pf.BoolVar(&f.org, "org", false, "AWS: enumerate the organization and scan every member account")
 	pf.StringSliceVar(&f.accounts, "accounts", nil, "AWS: explicit member account id(s) to scan (implies org mode; skips org enumeration)")
-	pf.StringSliceVar(&f.excludeAccts, "exclude", nil, "AWS org: account id(s) to skip")
+	pf.StringSliceVar(&f.excludeAccts, "exclude", nil, "account/subscription id(s) to skip (AWS org members or Azure subscriptions)")
 	pf.StringSliceVar(&f.ous, "ou", nil, "AWS org: restrict to accounts under these OU id(s), recursively (implies org mode)")
 	pf.StringVar(&f.orgRole, "org-role", "", "AWS org: role assumed in each member account (default OrganizationAccountAccessRole)")
 	pf.BoolVar(&f.includeMgmt, "include-mgmt", false, "AWS org: also scan the management/base account itself")
 	pf.IntVar(&f.acctConcurrency, "account-concurrency", 4, "AWS org: how many accounts to scan in parallel")
+
+	pf.StringVar(&f.managementGroup, "management-group", "", "Azure: restrict the scan to subscriptions under this management group (recursive)")
 
 	pf.StringVar(&f.dbPath, "db", "nubicustos.db", "path to the SQLite results database")
 	pf.StringVar(&f.exportPath, "export", "", "write Cairn-format findings JSON to this path")
@@ -168,21 +172,28 @@ func runScan(ctx context.Context, f *scanFlags) error {
 			return err
 		}
 
-		// Discover the subscriptions in scope (§9.4), or honor an explicit list.
-		subs := f.subscriptions
-		if len(subs) == 0 {
-			subs, err = azureprovider.EnabledSubscriptions(ctx, cred)
-			if err != nil {
-				return fmt.Errorf("enumerating subscriptions: %w", err)
-			}
+		// Discover the subscriptions in scope (§9.4): enumerate, scope to a
+		// management group / allowlist, drop excluded and disabled ones (with a
+		// reason printed so a partial run never reads as full coverage).
+		disc, err := discovery.AzureSubscriptions(ctx, cred, discovery.AzureOptions{
+			Subscriptions:   f.subscriptions,
+			Exclude:         f.excludeAccts,
+			ManagementGroup: f.managementGroup,
+		})
+		if err != nil {
+			return fmt.Errorf("enumerating subscriptions: %w", err)
 		}
+		for _, s := range disc.Skipped {
+			fmt.Fprintf(os.Stderr, "  skip %s (%s): %s\n", s.ID, s.Name, s.Reason)
+		}
+		subs := disc.IDs()
 		if len(subs) == 0 {
-			return fmt.Errorf("no enabled Azure subscriptions visible to this identity (use --subscription to specify one)")
+			return fmt.Errorf("no enabled Azure subscriptions in scope (%d skipped; use --subscription to specify one)", len(disc.Skipped))
 		}
 		sc.Azure = engine.AzureSession{Credential: cred, Subscriptions: subs}
 		sc.Account = strings.Join(subs, ",")
 		account = sc.Account
-		fmt.Fprintf(os.Stderr, "authenticated to Azure; scanning %d subscription(s)\n", len(subs))
+		fmt.Fprintf(os.Stderr, "authenticated to Azure; scanning %d subscription(s) (%d skipped)\n", len(subs), len(disc.Skipped))
 
 	case "gcp":
 		creds, err := auth.ResolveGCP(ctx)

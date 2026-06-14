@@ -9,9 +9,10 @@ full design.
 > (SSO/AssumeRole+MFA/GetSessionToken/default chain), Azure (CLI/browser/device-
 > code/SP/MI), GCP (ADC), and Kubernetes (kubeconfig contexts), with AWS
 > Organization-wide scanning that fans out across member accounts off a single
-> MFA-satisfied session. Native checks for
-> AWS (S3/IAM/EC2/VPC/RDS/CloudTrail/KMS/Config/GuardDuty/Secrets Manager/ELB/ACM),
-> Azure (storage/NSG/key vault), GCP (storage/firewall/IAM), and Kubernetes
+> MFA-satisfied session and Azure management-group/subscription estate scoping.
+> Native checks for
+> AWS (S3/IAM/EC2/VPC/RDS/CloudTrail/KMS/Config/GuardDuty/Secrets Manager/ELB/ACM/Route53/control-plane secrets),
+> Azure (storage/NSG/key vault/control-plane secrets), GCP (storage/firewall/IAM), and Kubernetes
 > (pod-security/RBAC), persisted to SQLite, queryable offline, and exportable as
 > Cairn / SARIF / CSV / HTML. An in-process attack-path graph derives scored
 > internet-exposure, privilege-escalation, and assume-role/trust paths with
@@ -131,12 +132,35 @@ Native Azure checks run across the subscriptions discovered from the credential
 | Storage | anonymous blob public access, HTTPS-only not enforced, network rules default to Allow |
 | Network | NSG exposes sensitive ports to the internet (inbound Allow from `*`/`Internet`/`0.0.0.0/0`) |
 | Key Vault | soft-delete disabled, purge protection disabled, network rules default to Allow |
+| Secrets | credential material embedded in the control plane (App Service settings / connection strings) |
 
 ```bash
 # Azure — scan all enabled subscriptions (or pick one with --subscription)
 nubicustos scan --provider azure
 nubicustos scan --provider azure --subscription 00000000-0000-0000-0000-000000000000
+
+# Restrict the estate to a management-group subtree, excluding a subscription
+nubicustos scan --provider azure --management-group mg-prod --exclude 11111111-1111-1111-1111-111111111111
 ```
+
+**Estate scoping (§9.4).** One Azure credential already spans every subscription
+the identity can see, so Azure "discovery" is about *scoping and classification*
+rather than cross-account role assumption: it enumerates the visible
+subscriptions, optionally restricts to a `--management-group` subtree
+(recursive), drops `--exclude`d and disabled subscriptions — each listed with its
+reason so a partial run never reads as full coverage — and scans the in-scope
+set. `--subscription` remains an explicit allowlist.
+
+**Cloud-side secrets (§9.2).** The same detector that sweeps AWS surfaces runs
+over Azure App Service (and Function app) **application settings** and
+**connection strings** — the richest Azure secrets surface, where storage keys,
+database passwords, and API tokens routinely sit in plaintext. Application
+settings go through the pattern + entropy detector; connection strings are
+credentials by construction and each is flagged directly. Output is masked
+(last four only); hits roll up into one `azure_exposed_secret` finding per
+subscription. Reading these settings needs `Microsoft.Web/sites/config/list`
+(granted by Website Contributor / Contributor, not by Reader). Liveness
+validation is currently AWS-only.
 
 ### Check catalog (GCP)
 
@@ -599,7 +623,7 @@ The trust analyzer (§9.3) also emits standalone findings, surfaced through
 | `internal/engine` | registry + concurrent collect→check scanner + graph build |
 | `internal/state` | normalized collected cloud state |
 | `internal/providers/aws` | AWS collectors (read-only API gatherers) |
-| `internal/providers/azure` | Azure collectors (storage, NSG, key vault, subscription discovery) |
+| `internal/providers/azure` | Azure collectors (storage, NSG, key vault, control-plane secrets) |
 | `internal/providers/gcp` | GCP collectors (Cloud Storage, firewall, IAM, project discovery) |
 | `internal/providers/k8s` | Kubernetes collectors (pods, RBAC across kubeconfig contexts) |
 | `internal/checks/aws` | native AWS posture checks |
