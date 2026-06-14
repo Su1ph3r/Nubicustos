@@ -147,6 +147,9 @@ Thumbs.db
 secrets/
 .secrets/
 *.secret
+# ...but the v2 Go secrets-detection source package is code, not a credentials dir
+!v2/internal/secrets/
+!v2/internal/secrets/**
 
 # Local configuration overrides
 config/local/

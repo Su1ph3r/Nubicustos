@@ -48,6 +48,7 @@ Two shapes, chosen per check:
 | ELB | internet-facing HTTP listener, weak TLS policy, access logs disabled |
 | ACM | certificate expired, certificate expiring (<30d) |
 | Route53 | record delegates to a takeover-prone target (dangling DNS / subdomain takeover) |
+| Secrets | credential material embedded in the control plane (Lambda env / EC2 userdata / SSM plaintext) |
 
 ### Org-wide scanning (AWS)
 
@@ -84,6 +85,32 @@ the path (`findings.json` → `findings.<account-id>.json`). Requires
 `organizations:ListAccounts` (and `ListAccountsForParent`/
 `ListOrganizationalUnitsForParent` for `--ou`) on the base identity, plus
 `sts:AssumeRole` into the member role.
+
+### Cloud-side secrets detection (AWS)
+
+Source scanners (trufflehog, gitleaks) read code; the cloud control plane is the
+under-scanned surface where credentials actually accumulate. On every AWS scan a
+detector sweeps three high-signal text surfaces for embedded secrets:
+
+- **Lambda environment variables**
+- **EC2 instance userdata** (base64-decoded bootstrap scripts)
+- **SSM Parameter Store** plaintext (`String`/`StringList`) parameters —
+  `SecureString` parameters are encrypted by design and skipped
+
+The detector pairs a high-confidence pattern library (AWS access keys, private
+keys, GitHub/Slack/Google/Stripe tokens, JWTs, credentialed connection strings)
+with an entropy-gated heuristic for credential-named fields holding high-entropy,
+non-placeholder values. **Privacy is a hard invariant:** a detection records only
+a masked rendering (last four characters), its length, entropy, and a
+secret-safe locator — the raw value is dropped at the detector boundary, so
+nothing downstream (findings, the SQLite store, the Cairn export, logs) can leak
+it. Hits roll up into one `aws_exposed_secret` finding. Liveness is not asserted
+at scan time; confirming a found credential live/expired is the job of the
+opt-in active-validation pass (§9.1, planned cross-link). Requires
+`lambda:ListFunctions`, `ec2:DescribeInstanceAttribute`, `ssm:DescribeParameters`,
+and `ssm:GetParameters`; the last (reading parameter values) is not granted by
+`SecurityAudit`, so `preflight` flags it and emits it in the remediation policy
+when missing.
 
 ### Check catalog (Azure)
 

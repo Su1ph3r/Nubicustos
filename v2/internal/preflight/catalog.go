@@ -109,6 +109,11 @@ var nubicustosAWSActions = []string{
 	// Route 53 (dangling-DNS / subdomain-takeover collector — runs every AWS scan)
 	"route53:ListHostedZones",
 	"route53:ListResourceRecordSets",
+	// Cloud-side secrets detection (§9.2 — Lambda env, EC2 userdata, SSM plaintext)
+	"lambda:ListFunctions",
+	"ec2:DescribeInstanceAttribute",
+	"ssm:DescribeParameters",
+	"ssm:GetParameters",
 }
 
 // nubicustosAWSOrgActions are additionally required only for an org-wide scan

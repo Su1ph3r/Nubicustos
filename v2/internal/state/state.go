@@ -280,6 +280,21 @@ type Certificate struct {
 	DaysToExpiry int
 }
 
+// SecretHit is one secret detected on a cloud control-plane text surface (plan
+// §9.2). It carries only scrubbed material — a masked rendering and the last four
+// characters, never the raw value — so nothing downstream can leak the secret.
+type SecretHit struct {
+	Detector string // detector id, e.g. "aws_access_key_id", "generic_secret"
+	Kind     string // human label
+	Surface  string // where it was found, e.g. "lambda_env", "ec2_userdata", "ssm_parameter"
+	Resource string // owning resource (function name, instance id, parameter name)
+	Region   string
+	Locator  string // secret-safe field locator (env var name, "userdata"), never the value
+	Masked   string // masked rendering (last 4 only)
+	LastFour string
+	Entropy  float64
+}
+
 // Route53Record is a collected DNS record relevant to subdomain-takeover
 // analysis: a CNAME or an alias A/AAAA record and the target it points at. Plain
 // A/AAAA records to literal IPs are not collected — only records that delegate
@@ -326,6 +341,7 @@ type AWS struct {
 	LoadBalancers  []LoadBalancer
 	Certificates   []Certificate
 	Route53Records []Route53Record
+	SecretHits     []SecretHit
 }
 
 // --- Azure ------------------------------------------------------------------
@@ -739,4 +755,11 @@ func (s *State) AddRoute53Record(r Route53Record) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.AWS.Route53Records = append(s.AWS.Route53Records, r)
+}
+
+// AddSecretHit appends a detected control-plane secret under lock.
+func (s *State) AddSecretHit(h SecretHit) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.AWS.SecretHits = append(s.AWS.SecretHits, h)
 }
