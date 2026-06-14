@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Su1ph3r/nubicustos/internal/auth"
+	"github.com/Su1ph3r/nubicustos/internal/discovery"
 	"github.com/Su1ph3r/nubicustos/internal/preflight"
 )
 
@@ -29,6 +30,13 @@ type preflightFlags struct {
 	noProbe       bool
 	writePolicies string
 	org           bool
+
+	// Azure
+	authMethod   string
+	tenantID     string
+	clientID     string
+	clientSecret string
+	subscription string
 }
 
 func newPreflightCmd() *cobra.Command {
@@ -48,7 +56,7 @@ func newPreflightCmd() *cobra.Command {
 		},
 	}
 	pf := cmd.Flags()
-	pf.StringVar(&f.provider, "provider", "aws", "cloud provider (aws)")
+	pf.StringVar(&f.provider, "provider", "aws", "cloud provider: aws | azure")
 	pf.StringVar(&f.profile, "profile", "", "AWS named profile")
 	pf.StringVar(&f.region, "region", "", "AWS region for the session")
 	pf.StringVar(&f.mfaSerial, "mfa-serial", "", "AWS MFA device ARN")
@@ -58,16 +66,29 @@ func newPreflightCmd() *cobra.Command {
 	pf.StringSliceVar(&f.tools, "tools", nil, "tools to check by key (default: all; e.g. nubicustos,prowler)")
 	pf.StringVar(&f.format, "format", "text", "output format: text | json")
 	pf.BoolVar(&f.noProbe, "no-probe", false, "skip the live read-probe cross-check (simulation only)")
-	pf.StringVar(&f.writePolicies, "write-policies", "", "directory to write a remediation policy JSON per non-ready tool")
-	pf.BoolVar(&f.org, "org", false, "also verify org-wide scan access (Organizations enumeration + member assume-role) for the native checks")
+	pf.StringVar(&f.writePolicies, "write-policies", "", "directory to write a remediation policy/role JSON per non-ready tool")
+	pf.BoolVar(&f.org, "org", false, "AWS: also verify org-wide scan access (Organizations enumeration + member assume-role) for the native checks")
+
+	pf.StringVar(&f.authMethod, "auth", "", "Azure auth: auto | cli | interactive-browser | device-code | service-principal | managed-identity")
+	pf.StringVar(&f.tenantID, "tenant", "", "Azure tenant id (service-principal)")
+	pf.StringVar(&f.clientID, "client-id", "", "Azure client id (service-principal)")
+	pf.StringVar(&f.clientSecret, "client-secret", "", "Azure client secret (service-principal)")
+	pf.StringVar(&f.subscription, "subscription", "", "Azure subscription to probe (default: first enabled subscription)")
 	return cmd
 }
 
 func runPreflight(ctx context.Context, f *preflightFlags) error {
-	if strings.ToLower(f.provider) != "aws" {
-		return fmt.Errorf("preflight currently supports --provider aws")
+	switch strings.ToLower(f.provider) {
+	case "aws":
+		return runPreflightAWS(ctx, f)
+	case "azure":
+		return runPreflightAzure(ctx, f)
+	default:
+		return fmt.Errorf("preflight supports --provider aws | azure")
 	}
+}
 
+func runPreflightAWS(ctx context.Context, f *preflightFlags) error {
 	// Validate the tool selection before authenticating, so a typo fails fast
 	// without resolving credentials.
 	tools, err := selectTools(f.tools, f.org)
@@ -98,7 +119,58 @@ func runPreflight(ctx context.Context, f *preflightFlags) error {
 	if !f.noProbe {
 		opts.Prober = preflight.NewAWSProber(cfg)
 	}
+	return emitPreflight(ctx, f, opts)
+}
 
+// runPreflightAzure verifies Azure RBAC access for the native checks. Azure is
+// probe-only: a live read is itself authoritative for access (it reflects deny
+// assignments and Azure Policy), so the prober is the sole source and the Azure
+// remediator renders gaps as a custom role definition.
+func runPreflightAzure(ctx context.Context, f *preflightFlags) error {
+	tools, err := selectAzureTools(f.tools)
+	if err != nil {
+		return err
+	}
+
+	prompter := auth.NewCLIPrompter("", !f.nonInteract)
+	cred, err := auth.ResolveAzure(ctx, auth.AzureOptions{
+		Method:       auth.AzureMethod(f.authMethod),
+		TenantID:     f.tenantID,
+		ClientID:     f.clientID,
+		ClientSecret: f.clientSecret,
+	}, prompter)
+	if err != nil {
+		return err
+	}
+
+	// Resolve a subscription to probe resource-level reads against.
+	sub := f.subscription
+	if sub == "" {
+		disc, derr := discovery.AzureSubscriptions(ctx, cred, discovery.AzureOptions{})
+		if derr != nil {
+			return fmt.Errorf("resolving a subscription to probe: %w", derr)
+		}
+		if len(disc.Subscriptions) == 0 {
+			return fmt.Errorf("no enabled subscription visible to this identity (use --subscription)")
+		}
+		sub = disc.Subscriptions[0].ID
+	}
+	fmt.Fprintf(os.Stderr, "authenticated to Azure; checking access against subscription %s\n", sub)
+
+	opts := preflight.Options{
+		Provider:   "azure",
+		Identity:   "Azure credential",
+		Account:    sub,
+		Tools:      tools,
+		Prober:     preflight.NewAzureProber(cred, sub),
+		Remediator: preflight.NewAzureRemediator(sub),
+	}
+	return emitPreflight(ctx, f, opts)
+}
+
+// emitPreflight evaluates, optionally writes remediation files, renders the
+// report, and gates the exit code — shared across providers.
+func emitPreflight(ctx context.Context, f *preflightFlags, opts preflight.Options) error {
 	rep := preflight.Evaluate(ctx, opts)
 
 	if f.writePolicies != "" {
@@ -122,6 +194,22 @@ func runPreflight(ctx context.Context, f *preflightFlags) error {
 		return fmt.Errorf("preflight: overall access is %s (see report above)", rep.Overall)
 	}
 	return nil
+}
+
+// selectAzureTools returns the requested Azure catalog tools (all if keys empty).
+func selectAzureTools(keys []string) ([]preflight.Tool, error) {
+	if len(keys) == 0 {
+		return preflight.AzureTools, nil
+	}
+	var out []preflight.Tool
+	for _, k := range keys {
+		t, ok := preflight.AzureToolByKey(strings.TrimSpace(k))
+		if !ok {
+			return nil, fmt.Errorf("unknown Azure tool %q (known: nubicustos)", k)
+		}
+		out = append(out, t)
+	}
+	return out, nil
 }
 
 // selectTools returns the requested catalog tools (all if keys is empty). When

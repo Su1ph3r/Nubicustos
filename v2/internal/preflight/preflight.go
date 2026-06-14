@@ -94,8 +94,21 @@ type Simulator interface {
 // representative read call (catching SCP/boundary denials simulation misses). It
 // returns DecisionUnknown for actions it does not know how to probe. Implemented
 // by the command layer (it owns the per-service clients); faked in tests.
+//
+// AWS runs a Prober as a cross-check beside IAM simulation. Azure runs a Prober
+// as the *sole* source: a live read is itself authoritative for access (it
+// reflects deny assignments and Azure Policy that role math would miss), so
+// Azure preflight is probe-only with no simulator.
 type Prober interface {
 	Probe(ctx context.Context, action string) Decision
+}
+
+// Remediator renders the provider-specific, client-facing fix for a tool's
+// access gaps — an AWS IAM inline policy, an Azure custom role definition, etc.
+// nil in Options defaults to the AWS IAM remediator, preserving the original
+// behavior for every existing AWS caller.
+type Remediator interface {
+	Build(t Tool, tr ToolReport) Remediation
 }
 
 // Options configures an evaluation.
@@ -106,6 +119,8 @@ type Options struct {
 	Tools     []Tool
 	Simulator Simulator // nil → simulation skipped (probe-only)
 	Prober    Prober    // nil → probe cross-check skipped (simulation-only)
+	// Remediator renders each tool's fix. nil → the AWS IAM remediator (default).
+	Remediator Remediator
 }
 
 // simBatch caps actions per SimulatePrincipalPolicy call.
@@ -135,14 +150,18 @@ func Evaluate(ctx context.Context, opts Options) Report {
 		}
 	}
 
+	rem := opts.Remediator
+	if rem == nil {
+		rem = awsRemediator{} // default preserves the original AWS IAM behavior
+	}
 	for _, t := range opts.Tools {
-		rep.Tools = append(rep.Tools, evaluateTool(ctx, t, simDecisions, simOK, opts.Prober))
+		rep.Tools = append(rep.Tools, evaluateTool(ctx, t, simDecisions, simOK, opts.Prober, rem))
 	}
 	rep.Overall = overallReadiness(rep.Tools)
 	return rep
 }
 
-func evaluateTool(ctx context.Context, t Tool, sim map[string]Decision, simOK bool, prober Prober) ToolReport {
+func evaluateTool(ctx context.Context, t Tool, sim map[string]Decision, simOK bool, prober Prober, rem Remediator) ToolReport {
 	tr := ToolReport{Key: t.Key, Name: t.Name}
 	for _, action := range t.RequiredActions {
 		ar := ActionResult{Action: action, Decision: DecisionUnknown, Basis: BasisNone}
@@ -191,7 +210,7 @@ func evaluateTool(ctx context.Context, t Tool, sim map[string]Decision, simOK bo
 	}
 
 	tr.Readiness = toolReadiness(tr)
-	tr.Remediate = buildRemediation(t, tr)
+	tr.Remediate = rem.Build(t, tr)
 	return tr
 }
 

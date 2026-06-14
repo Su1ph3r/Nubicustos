@@ -341,13 +341,17 @@ resource types today: `aws_s3_bucket`, `aws_rds_instance`, `aws_iam_user`,
 credential holds the permissions each tool requires — Nubicustos's own native
 checks plus the optional external tools (Prowler, ScoutSuite, CloudSploit) — and
 produces a client-ready report of exactly what is missing and how to grant it.
+It supports both AWS and Azure (`--provider`).
 
 ```bash
-nubicustos preflight --profile prod                 # check all tools
+nubicustos preflight --profile prod                 # AWS: check all tools
 nubicustos preflight --tools nubicustos,prowler     # a subset
 nubicustos preflight --format json                  # machine-readable report
-nubicustos preflight --write-policies ./fixes       # emit a remediation policy per non-ready tool
-nubicustos preflight --org                          # also verify org-wide scan access (Organizations + assume-role)
+nubicustos preflight --write-policies ./fixes       # emit a remediation policy/role per non-ready tool
+nubicustos preflight --org                          # AWS: also verify org-wide scan access (Organizations + assume-role)
+
+nubicustos preflight --provider azure               # Azure: check native-check RBAC access
+nubicustos preflight --provider azure --subscription <id>
 ```
 
 `--org` adds the org-wide scan permissions (`organizations:ListAccounts`,
@@ -373,6 +377,22 @@ client team. The Nubicustos requirement set is authoritative (derived from the
 collectors' API calls); the external-tool sets are their documented requirements.
 The command exits non-zero unless every selected tool is `ready`, so it can gate
 a pipeline.
+
+**Azure (`--provider azure`).** The verification engine is provider-agnostic; only
+the access source and the remediation format differ per cloud. Azure has no
+`SimulatePrincipalPolicy` equivalent, so Azure preflight is **probe-only**: it
+performs one representative read per required ARM operation
+(`Microsoft.Storage/storageAccounts/read`, `Microsoft.KeyVault/vaults/read`,
+`Microsoft.Web/sites/config/list/Action`, …) against the in-scope subscription. A
+live read is in fact the strongest signal — it reflects deny assignments and
+Azure Policy that role math would miss: success is `allowed`, a 403 /
+`AuthorizationFailed` is `denied`, and an operation with no resource to read
+against (e.g. listing a web app's settings when there are no web apps) is honestly
+reported as unverified rather than passed. Gaps are rendered as Azure RBAC: the
+recommended built-in roles (`Reader` + `Website Contributor`, the latter for the
+App Service settings-listing action Reader does not grant) plus a generated
+**custom role definition** of exactly the missing actions, scoped to the
+subscription and ready for `az role definition create`.
 
 ### Optional tool plugins
 
