@@ -59,6 +59,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newPluginsCmd())
 	root.AddCommand(newRulesCmd())
 	root.AddCommand(newMCPCmd())
+	root.AddCommand(newComplianceCmd())
 	return root
 }
 
