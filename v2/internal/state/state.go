@@ -432,12 +432,39 @@ type WebApp struct {
 	FtpsState     string // "AllAllowed" (plain FTP permitted) | "FtpsOnly" | "Disabled"
 }
 
+// SQLFirewallRule is a single server-level firewall rule on an Azure SQL server.
+// The special range 0.0.0.0-0.0.0.0 is the "allow all Azure services" rule;
+// 0.0.0.0-255.255.255.255 opens the server to the entire internet.
+type SQLFirewallRule struct {
+	Name    string
+	StartIP string
+	EndIP   string
+}
+
+// OpensToInternet reports whether the rule spans the whole public range
+// (0.0.0.0 through 255.255.255.255), exposing the server to every host online.
+func (r SQLFirewallRule) OpensToInternet() bool {
+	return r.StartIP == "0.0.0.0" && r.EndIP == "255.255.255.255"
+}
+
+// SQLServer is the collected posture of an Azure SQL logical server.
+type SQLServer struct {
+	Name                string
+	ResourceGroup       string
+	Subscription        string
+	Location            string
+	PublicNetworkAccess bool   // public endpoint enabled (reachable outside the VNet)
+	MinTLSVersion       string // "None" | "1.0" | "1.1" | "1.2"
+	FirewallRules       []SQLFirewallRule
+}
+
 // Azure is the collected Azure-side state for one or more subscriptions.
 type Azure struct {
 	StorageAccounts []StorageAccount
 	NSGs            []NetworkSecurityGroup
 	KeyVaults       []KeyVault
 	WebApps         []WebApp
+	SQLServers      []SQLServer
 	SecretHits      []SecretHit
 }
 
@@ -622,6 +649,13 @@ func (s *State) AddWebApp(w WebApp) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Azure.WebApps = append(s.Azure.WebApps, w)
+}
+
+// AddSQLServer appends a collected Azure SQL server under lock.
+func (s *State) AddSQLServer(srv SQLServer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Azure.SQLServers = append(s.Azure.SQLServers, srv)
 }
 
 // AddAzureSecretHit appends a detected Azure control-plane secret under lock.

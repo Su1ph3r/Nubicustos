@@ -13,6 +13,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/managementgroups/armmanagementgroups"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armsubscriptions"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/sql/armsql"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
 )
 
@@ -115,6 +116,37 @@ func liveAzureReads(cred azcore.TokenCredential, subscription string) map[string
 				return err
 			}
 			return drainFirst(ctx, c.NewListBySubscriptionPager(nil))
+		},
+		"Microsoft.Sql/servers/read": func(ctx context.Context) error {
+			c, err := armsql.NewServersClient(subscription, cred, nil)
+			if err != nil {
+				return err
+			}
+			return drainFirst(ctx, c.NewListPager(nil))
+		},
+		"Microsoft.Sql/servers/firewallRules/read": func(ctx context.Context) error {
+			// Listing firewall rules needs an actual server; find one first.
+			sc, err := armsql.NewServersClient(subscription, cred, nil)
+			if err != nil {
+				return err
+			}
+			pager := sc.NewListPager(nil)
+			if !pager.More() {
+				return errNoResource
+			}
+			page, err := pager.NextPage(ctx)
+			if err != nil {
+				return err
+			}
+			if len(page.Value) == 0 || page.Value[0] == nil || page.Value[0].Name == nil {
+				return errNoResource
+			}
+			srv := page.Value[0]
+			fw, err := armsql.NewFirewallRulesClient(subscription, cred, nil)
+			if err != nil {
+				return err
+			}
+			return drainFirst(ctx, fw.NewListByServerPager(rgFromID(deref(srv.ID)), deref(srv.Name), nil))
 		},
 		"Microsoft.Web/sites/Read": func(ctx context.Context) error {
 			c, err := armappservice.NewWebAppsClient(subscription, cred, nil)

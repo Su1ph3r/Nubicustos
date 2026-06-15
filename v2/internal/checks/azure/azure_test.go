@@ -110,6 +110,43 @@ func TestAppServiceChecks(t *testing.T) {
 	}
 }
 
+func TestSQLChecks(t *testing.T) {
+	st := stateWith(&state.Azure{SQLServers: []state.SQLServer{
+		{Name: "exposed", Subscription: "s1", PublicNetworkAccess: true, MinTLSVersion: "1.0",
+			FirewallRules: []state.SQLFirewallRule{
+				{Name: "AllowAll", StartIP: "0.0.0.0", EndIP: "255.255.255.255"},
+				{Name: "office", StartIP: "203.0.113.0", EndIP: "203.0.113.255"},
+			}},
+	}})
+	if fs := evalCheck(t, sqlPublicNetwork{}, st); len(fs) != 1 || fs[0].Severity != findings.SeverityHigh {
+		t.Fatalf("expected one high public-network finding, got %+v", fs)
+	}
+	if fs := evalCheck(t, sqlFirewallAllowAll{}, st); len(fs) != 1 || !strings.Contains(fs[0].Description, "AllowAll") {
+		t.Fatalf("expected the allow-all rule flagged, got %+v", fs)
+	}
+	if fs := evalCheck(t, sqlMinTLS{}, st); len(fs) != 1 {
+		t.Fatalf("expected one min-tls finding, got %d", len(fs))
+	}
+	// A hardened server (private, scoped firewall, TLS 1.2) produces none.
+	hardened := stateWith(&state.Azure{SQLServers: []state.SQLServer{
+		{Name: "ok", PublicNetworkAccess: false, MinTLSVersion: "1.2",
+			FirewallRules: []state.SQLFirewallRule{{Name: "office", StartIP: "203.0.113.0", EndIP: "203.0.113.255"}}},
+	}})
+	for _, c := range []engine.Check{sqlPublicNetwork{}, sqlFirewallAllowAll{}, sqlMinTLS{}} {
+		if fs := evalCheck(t, c, hardened); len(fs) != 0 {
+			t.Fatalf("%s: hardened SQL server should not be flagged, got %d", c.Spec().ID, len(fs))
+		}
+	}
+	// The "allow all Azure services" rule (0.0.0.0-0.0.0.0) is not the
+	// internet-wide range and must not trip the allow-all check.
+	azureSvc := stateWith(&state.Azure{SQLServers: []state.SQLServer{
+		{Name: "svc", FirewallRules: []state.SQLFirewallRule{{Name: "AllowAllAzure", StartIP: "0.0.0.0", EndIP: "0.0.0.0"}}},
+	}})
+	if fs := evalCheck(t, sqlFirewallAllowAll{}, azureSvc); len(fs) != 0 {
+		t.Fatalf("the 0.0.0.0-0.0.0.0 Azure-services rule must not be read as internet-wide, got %d", len(fs))
+	}
+}
+
 func TestNSGOpenIngressSensitivePort(t *testing.T) {
 	st := stateWith(&state.Azure{NSGs: []state.NetworkSecurityGroup{
 		{Name: "web", Subscription: "s1", Rules: []state.NSGRule{
@@ -219,6 +256,7 @@ func TestNilAzureStateNoPanic(t *testing.T) {
 		storageBlobPublic{}, storageNotHTTPSOnly{}, storageNetworkOpen{}, storageMinTLS{}, storageSharedKeyAccess{},
 		nsgOpenIngress{}, kvSoftDelete{}, kvPurgeProtection{}, kvNetworkOpen{},
 		appServiceNotHTTPSOnly{}, appServiceMinTLS{}, appServiceFTPSInsecure{},
+		sqlPublicNetwork{}, sqlFirewallAllowAll{}, sqlMinTLS{},
 	} {
 		if fs := evalCheck(t, c, st); len(fs) != 0 {
 			t.Fatalf("%s on nil azure state should yield nothing, got %d", c.Spec().ID, len(fs))

@@ -19,6 +19,9 @@ var nubicustosAzureActions = []string{
 	"Microsoft.Network/networkSecurityGroups/read",
 	// key vault posture
 	"Microsoft.KeyVault/vaults/read",
+	// SQL posture (server config + firewall rules)
+	"Microsoft.Sql/servers/read",
+	"Microsoft.Sql/servers/firewallRules/read",
 	// App Service posture + control-plane secrets (Function/Web apps)
 	"Microsoft.Web/sites/Read",
 	"Microsoft.Web/sites/config/Read",       // GetConfiguration: min TLS, FTPS state (Reader-granted)

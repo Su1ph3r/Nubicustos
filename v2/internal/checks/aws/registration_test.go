@@ -41,20 +41,20 @@ func TestAllChecksUnique(t *testing.T) {
 	// + SecretsManager(1) + ELB(3) + ACM(2) + Route53 dangling(1)
 	// + exposed-secret(1) + IAM trust/privilege umbrella(1) = 35.
 	// Azure catalog: storage(5) + NSG(1) + key vault(3) + app service(3)
-	// + exposed-secret(1) = 13.
+	// + SQL(3) + exposed-secret(1) = 16.
 	// GCP catalog: storage(3) + firewall(1) + IAM(2) = 6.
 	// K8s catalog: pods(4) + RBAC(2) = 6.
-	// Plus the policy-as-code rules umbrella check = 1. Total = 61.
-	const wantChecks = 61
+	// Plus the policy-as-code rules umbrella check = 1. Total = 64.
+	const wantChecks = 64
 	if len(checks) != wantChecks {
 		t.Errorf("registered checks = %d, want %d", len(checks), wantChecks)
 	}
 
 	// Collectors: AWS s3, iam, ec2, rds, cloudtrail, kms, config, guardduty,
 	// vpc, snapshots, secretsmanager, elbv2, acm, route53, secrets-scan = 15;
-	// Azure storage, nsg, keyvault, appservice, secrets-scan = 5; GCP storage,
-	// firewall, iam = 3; K8s pods, rbac = 2. Total = 25.
-	const wantCollectors = 25
+	// Azure storage, nsg, keyvault, appservice, sql, secrets-scan = 6; GCP
+	// storage, firewall, iam = 3; K8s pods, rbac = 2. Total = 26.
+	const wantCollectors = 26
 	if got := len(engine.Collectors()); got != wantCollectors {
 		t.Errorf("registered collectors = %d, want %d", got, wantCollectors)
 	}
