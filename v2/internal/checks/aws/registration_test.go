@@ -41,12 +41,12 @@ func TestAllChecksUnique(t *testing.T) {
 	// + SecretsManager(1) + ELB(3) + ACM(2) + Route53 dangling(1)
 	// + Lambda(2) + exposed-secret(1) + IAM trust/privilege umbrella(1) = 37.
 	// Azure catalog: storage(5) + NSG(1) + key vault(3) + app service(3)
-	// + SQL(3) + Cosmos(2) + Defender(1) + RBAC(1) + exposed-secret(1) = 20.
+	// + SQL(3) + Cosmos(2) + Defender(1) + RBAC(1) + Entra(3) + exposed-secret(1) = 23.
 	// GCP catalog: storage(3) + firewall(1) + IAM(2) + exposed-secret(1)
 	// + Cloud SQL(4) + compute(3) + KMS(2) + GKE(3) + logging(1) = 20.
 	// K8s catalog: pods(4) + RBAC(2) + exposed-secret(1) = 7.
-	// Plus the policy-as-code rules umbrella check = 1. Total = 85.
-	const wantChecks = 85
+	// Plus the policy-as-code rules umbrella check = 1. Total = 88.
+	const wantChecks = 88
 	if len(checks) != wantChecks {
 		t.Errorf("registered checks = %d, want %d", len(checks), wantChecks)
 	}
@@ -54,9 +54,9 @@ func TestAllChecksUnique(t *testing.T) {
 	// Collectors: AWS s3, iam, ec2, rds, cloudtrail, kms, config, guardduty,
 	// vpc, snapshots, secretsmanager, elbv2, acm, route53, lambda, secrets-scan = 16;
 	// Azure storage, nsg, keyvault, appservice, sql, cosmos, defender, rbac,
-	// secrets-scan = 9; GCP storage, firewall, iam, secrets-scan, cloudsql,
-	// compute, kms, gke = 8; K8s pods, rbac, secrets-scan = 3. Total = 36.
-	const wantCollectors = 36
+	// entra, secrets-scan = 10; GCP storage, firewall, iam, secrets-scan, cloudsql,
+	// compute, kms, gke = 8; K8s pods, rbac, secrets-scan = 3. Total = 37.
+	const wantCollectors = 37
 	if got := len(engine.Collectors()); got != wantCollectors {
 		t.Errorf("registered collectors = %d, want %d", got, wantCollectors)
 	}

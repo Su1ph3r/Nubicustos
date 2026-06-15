@@ -494,17 +494,36 @@ type AzureCustomRole struct {
 	WildcardAction bool // an Actions entry is "*" (grants every control-plane action)
 }
 
+// AzureFederatedCred is one workload-identity federated credential on an app
+// registration: an external OIDC issuer trusted to obtain tokens as the app.
+type AzureFederatedCred struct {
+	Name    string
+	Issuer  string
+	Subject string
+}
+
+// AzureAppRegistration is the collected Entra ID (Azure AD) app-registration
+// posture relevant to the trust surface (plan §9.3).
+type AzureAppRegistration struct {
+	DisplayName          string
+	AppID                string
+	MultiTenant          bool // signInAudience admits accounts outside this tenant
+	HasExpiredCredential bool // a password/key credential's expiry is in the past
+	FederatedCreds       []AzureFederatedCred
+}
+
 // Azure is the collected Azure-side state for one or more subscriptions.
 type Azure struct {
-	StorageAccounts []StorageAccount
-	NSGs            []NetworkSecurityGroup
-	KeyVaults       []KeyVault
-	WebApps         []WebApp
-	SQLServers      []SQLServer
-	CosmosAccounts  []CosmosAccount
-	DefenderPlans   []DefenderPlan
-	CustomRoles     []AzureCustomRole
-	SecretHits      []SecretHit
+	StorageAccounts  []StorageAccount
+	NSGs             []NetworkSecurityGroup
+	KeyVaults        []KeyVault
+	WebApps          []WebApp
+	SQLServers       []SQLServer
+	CosmosAccounts   []CosmosAccount
+	DefenderPlans    []DefenderPlan
+	CustomRoles      []AzureCustomRole
+	AppRegistrations []AzureAppRegistration
+	SecretHits       []SecretHit
 }
 
 // --- GCP --------------------------------------------------------------------
@@ -801,6 +820,13 @@ func (s *State) AddKeyVault(v KeyVault) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Azure.KeyVaults = append(s.Azure.KeyVaults, v)
+}
+
+// AddAzureAppRegistration appends a collected Entra app registration under lock.
+func (s *State) AddAzureAppRegistration(a AzureAppRegistration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Azure.AppRegistrations = append(s.Azure.AppRegistrations, a)
 }
 
 // AddAzureCustomRole appends a collected custom RBAC role under lock.

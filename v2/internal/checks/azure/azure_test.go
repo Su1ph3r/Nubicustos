@@ -297,6 +297,25 @@ func TestRBACCustomRoleWildcard(t *testing.T) {
 	}
 }
 
+func TestEntraChecks(t *testing.T) {
+	st := stateWith(&state.Azure{AppRegistrations: []state.AzureAppRegistration{
+		{DisplayName: "ci-deploy", AppID: "app-1", MultiTenant: true, HasExpiredCredential: true,
+			FederatedCreds: []state.AzureFederatedCred{
+				{Name: "gh", Issuer: "https://token.actions.githubusercontent.com", Subject: "repo:org/repo:ref:refs/heads/main"},
+			}},
+		{DisplayName: "internal", AppID: "app-2", MultiTenant: false, HasExpiredCredential: false},
+	}})
+	if fs := evalCheck(t, entraFederatedCredential{}, st); len(fs) != 1 || fs[0].Resource.ID != "app-1" {
+		t.Fatalf("only the app with a federated credential should be flagged, got %+v", fs)
+	}
+	if fs := evalCheck(t, entraMultiTenantApp{}, st); len(fs) != 1 || fs[0].Resource.ID != "app-1" {
+		t.Fatalf("only the multi-tenant app should be flagged, got %+v", fs)
+	}
+	if fs := evalCheck(t, entraExpiredCredential{}, st); len(fs) != 1 || fs[0].Resource.ID != "app-1" {
+		t.Fatalf("only the app with an expired credential should be flagged, got %+v", fs)
+	}
+}
+
 func TestNilAzureStateNoPanic(t *testing.T) {
 	st := state.New()
 	st.Azure = nil
@@ -306,6 +325,7 @@ func TestNilAzureStateNoPanic(t *testing.T) {
 		appServiceNotHTTPSOnly{}, appServiceMinTLS{}, appServiceFTPSInsecure{},
 		sqlPublicNetwork{}, sqlFirewallAllowAll{}, sqlMinTLS{},
 		cosmosPublicNetwork{}, cosmosLocalAuth{}, defenderPlanFree{}, rbacCustomRoleWildcard{},
+		entraFederatedCredential{}, entraMultiTenantApp{}, entraExpiredCredential{},
 	} {
 		if fs := evalCheck(t, c, st); len(fs) != 0 {
 			t.Fatalf("%s on nil azure state should yield nothing, got %d", c.Spec().ID, len(fs))
