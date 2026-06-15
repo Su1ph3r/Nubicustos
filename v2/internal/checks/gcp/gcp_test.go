@@ -248,6 +248,18 @@ func TestGKEChecks(t *testing.T) {
 	}
 }
 
+func TestAuditLoggingCheck(t *testing.T) {
+	st := stateWith(&state.GCP{AuditConfig: []state.GCPAuditLogging{
+		{Project: "p1", Collected: true, DataReadAll: false, DataWriteAll: false}, // flagged
+		{Project: "p2", Collected: true, DataReadAll: true, DataWriteAll: true},   // fully logged
+		{Project: "p3", Collected: false},                                         // denied → not judged
+	}})
+	fs := evalCheck(t, auditLoggingNotConfigured{}, st)
+	if len(fs) != 1 || fs[0].Resource.ID != "p1" {
+		t.Fatalf("only the under-logged, collected project should be flagged, got %+v", fs)
+	}
+}
+
 func TestNilGCPStateNoPanic(t *testing.T) {
 	st := state.New()
 	st.GCP = nil
@@ -257,6 +269,7 @@ func TestNilGCPStateNoPanic(t *testing.T) {
 		cloudSQLPublicIP{}, cloudSQLNoSSL{}, cloudSQLAuthorizedAll{}, cloudSQLNoBackup{},
 		computeDefaultSAFullAPI{}, computeShieldedDisabled{}, computeSerialPort{},
 		kmsRotationDisabled{}, kmsPublicIAM{}, gkeLegacyABAC{}, gkeNetworkPolicyDisabled{}, gkeMasterNetworksOpen{},
+		auditLoggingNotConfigured{},
 	} {
 		if fs := evalCheck(t, c, st); len(fs) != 0 {
 			t.Fatalf("%s on nil gcp state should yield nothing, got %d", c.Spec().ID, len(fs))

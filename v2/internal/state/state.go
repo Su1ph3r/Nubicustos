@@ -553,6 +553,15 @@ type GKECluster struct {
 	MasterAuthorizedNetworks bool // control-plane access restricted to allowed CIDRs
 }
 
+// GCPAuditLogging is a project's Cloud Audit Logging posture, derived from the
+// allServices audit config on the project IAM policy.
+type GCPAuditLogging struct {
+	Project      string
+	Collected    bool // the project IAM policy was read (so absence != "not logged" on a denied project)
+	DataReadAll  bool // allServices DATA_READ logging enabled
+	DataWriteAll bool // allServices DATA_WRITE logging enabled
+}
+
 // GCP is the collected GCP-side state for one or more projects.
 type GCP struct {
 	Buckets     []GCSBucket
@@ -562,6 +571,7 @@ type GCP struct {
 	ComputeVMs  []ComputeInstance
 	KMSKeys     []KMSCryptoKey
 	GKEClusters []GKECluster
+	AuditConfig []GCPAuditLogging
 	SecretHits  []SecretHit
 }
 
@@ -696,6 +706,13 @@ func (s *State) AddComputeInstance(i ComputeInstance) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.GCP.ComputeVMs = append(s.GCP.ComputeVMs, i)
+}
+
+// AddGCPAuditLogging records a project's audit-logging posture under lock.
+func (s *State) AddGCPAuditLogging(a GCPAuditLogging) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.GCP.AuditConfig = append(s.GCP.AuditConfig, a)
 }
 
 // AddKMSCryptoKey appends a collected Cloud KMS key under lock.

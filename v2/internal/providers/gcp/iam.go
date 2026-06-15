@@ -43,6 +43,31 @@ func (iamCollector) Collect(sc *engine.ScanContext, st *state.State) error {
 				Members: b.Members,
 			})
 		}
+		st.AddGCPAuditLogging(auditLogging(project, policy))
 	}
 	return errors.Join(errs...)
+}
+
+// auditLogging derives a project's Cloud Audit Logging posture from the
+// allServices audit config: whether DATA_READ and DATA_WRITE are logged across
+// every service (the CIS-recommended baseline).
+func auditLogging(project string, policy *cloudresourcemanager.Policy) state.GCPAuditLogging {
+	a := state.GCPAuditLogging{Project: project, Collected: true}
+	for _, ac := range policy.AuditConfigs {
+		if ac == nil || ac.Service != "allServices" {
+			continue
+		}
+		for _, lc := range ac.AuditLogConfigs {
+			if lc == nil {
+				continue
+			}
+			switch lc.LogType {
+			case "DATA_READ":
+				a.DataReadAll = true
+			case "DATA_WRITE":
+				a.DataWriteAll = true
+			}
+		}
+	}
+	return a
 }

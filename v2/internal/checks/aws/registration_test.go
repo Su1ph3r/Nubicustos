@@ -43,10 +43,10 @@ func TestAllChecksUnique(t *testing.T) {
 	// Azure catalog: storage(5) + NSG(1) + key vault(3) + app service(3)
 	// + SQL(3) + exposed-secret(1) = 16.
 	// GCP catalog: storage(3) + firewall(1) + IAM(2) + exposed-secret(1)
-	// + Cloud SQL(4) + compute(3) + KMS(2) + GKE(3) = 19.
+	// + Cloud SQL(4) + compute(3) + KMS(2) + GKE(3) + logging(1) = 20.
 	// K8s catalog: pods(4) + RBAC(2) + exposed-secret(1) = 7.
-	// Plus the policy-as-code rules umbrella check = 1. Total = 78.
-	const wantChecks = 78
+	// Plus the policy-as-code rules umbrella check = 1. Total = 79.
+	const wantChecks = 79
 	if len(checks) != wantChecks {
 		t.Errorf("registered checks = %d, want %d", len(checks), wantChecks)
 	}
