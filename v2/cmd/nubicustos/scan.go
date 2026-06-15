@@ -22,7 +22,6 @@ import (
 	"github.com/Su1ph3r/nubicustos/internal/findings"
 	"github.com/Su1ph3r/nubicustos/internal/progress"
 	awsprovider "github.com/Su1ph3r/nubicustos/internal/providers/aws"
-	gcpprovider "github.com/Su1ph3r/nubicustos/internal/providers/gcp"
 	"github.com/Su1ph3r/nubicustos/internal/secrets"
 	"github.com/Su1ph3r/nubicustos/internal/store"
 	"github.com/Su1ph3r/nubicustos/internal/validate"
@@ -97,7 +96,7 @@ func newScanCmd() *cobra.Command {
 	pf.StringSliceVar(&f.projects, "project", nil, "GCP project id(s) to scan (repeatable; default: all active)")
 	pf.StringSliceVar(&f.contexts, "context", nil, "Kubernetes context(s) to scan (repeatable; default: current context)")
 
-	pf.BoolVar(&f.org, "org", false, "AWS: enumerate the organization and scan every member account")
+	pf.BoolVar(&f.org, "org", false, "estate mode: AWS enumerate the organization and scan every member account; K8s scan every kubeconfig context")
 	pf.StringSliceVar(&f.accounts, "accounts", nil, "AWS: explicit member account id(s) to scan (implies org mode; skips org enumeration)")
 	pf.StringSliceVar(&f.excludeAccts, "exclude", nil, "account/subscription id(s) to skip (AWS org members or Azure subscriptions)")
 	pf.StringSliceVar(&f.ous, "ou", nil, "AWS org: restrict to accounts under these OU id(s), recursively (implies org mode)")
@@ -200,25 +199,49 @@ func runScan(ctx context.Context, f *scanFlags) error {
 		if err != nil {
 			return err
 		}
-		projects := f.projects
-		if len(projects) == 0 {
-			projects, err = gcpprovider.EnabledProjects(ctx, creds)
-			if err != nil {
-				return fmt.Errorf("enumerating projects: %w", err)
-			}
+		// Discover the projects in scope (§9.4): enumerate, apply the allowlist /
+		// exclude, and drop non-active ones (with a reason printed so a partial run
+		// never reads as full coverage).
+		disc, err := discovery.GCPProjects(ctx, creds, discovery.GCPOptions{
+			Projects: f.projects,
+			Exclude:  f.excludeAccts,
+		})
+		if err != nil {
+			return fmt.Errorf("enumerating projects: %w", err)
 		}
+		for _, s := range disc.Skipped {
+			fmt.Fprintf(os.Stderr, "  skip %s (%s): %s\n", s.ID, s.Name, s.Reason)
+		}
+		projects := disc.IDs()
 		if len(projects) == 0 {
-			return fmt.Errorf("no active GCP projects visible to this identity (use --project to specify one)")
+			return fmt.Errorf("no active GCP projects in scope (%d skipped; use --project to specify one)", len(disc.Skipped))
 		}
 		sc.GCP = engine.GCPSession{Credentials: creds, Projects: projects}
 		sc.Account = strings.Join(projects, ",")
 		account = sc.Account
-		fmt.Fprintf(os.Stderr, "authenticated to GCP; scanning %d project(s)\n", len(projects))
+		fmt.Fprintf(os.Stderr, "authenticated to GCP; scanning %d project(s) (%d skipped)\n", len(projects), len(disc.Skipped))
 
 	case "k8s":
-		clusters, err := auth.ResolveK8s(f.contexts)
-		if err != nil {
-			return err
+		// Estate mode (--org): scan every kubeconfig context, tolerating
+		// unreachable ones. Otherwise scan the requested contexts (or current).
+		var clusters []auth.K8sCluster
+		if f.org {
+			ok, failures, rerr := auth.ResolveK8sAll()
+			if rerr != nil {
+				return rerr
+			}
+			for _, fa := range failures {
+				fmt.Fprintf(os.Stderr, "  skip context %s: %s\n", fa.Context, fa.Reason)
+			}
+			if len(ok) == 0 {
+				return fmt.Errorf("no reachable kubeconfig context to scan (%d skipped)", len(failures))
+			}
+			clusters = ok
+		} else {
+			var err error
+			if clusters, err = auth.ResolveK8s(f.contexts); err != nil {
+				return err
+			}
 		}
 		ctxNames := make([]string, len(clusters))
 		engineClusters := make([]engine.K8sCluster, len(clusters))
