@@ -47,8 +47,14 @@ func (v *rdsPublicReachable) Validate(ctx context.Context, _ Env, f findings.Fin
 	if _, _, err := net.SplitHostPort(addr); err != nil {
 		return nil, nil // not a dial-ready host:port; skip rather than guess
 	}
+	return probeTCP(ctx, v.dial, addr), nil
+}
 
-	dial := v.dial
+// probeTCP performs the read-only TCP reachability proof shared by the database
+// reachability validators: connect, passively read any banner (never send a
+// byte), and classify into confirmed / unconfirmed / blocked. dial may be nil
+// (a default TCP dialer is used); addr must be a dial-ready host:port.
+func probeTCP(ctx context.Context, dial func(ctx context.Context, network, addr string) (net.Conn, error), addr string) *findings.Evidence {
 	if dial == nil {
 		var d net.Dialer
 		dial = d.DialContext
@@ -75,7 +81,7 @@ func (v *rdsPublicReachable) Validate(ctx context.Context, _ Env, f findings.Fin
 			ev.Response = "dial error (" + err.Error() + "); not reachable from this vantage — does not refute config-level public access"
 			ev.Verdict = VerdictUnconfirmed
 		}
-		return ev, nil
+		return ev
 	}
 	defer conn.Close()
 
@@ -92,21 +98,21 @@ func (v *rdsPublicReachable) Validate(ctx context.Context, _ Env, f findings.Fin
 	switch {
 	case n > 0:
 		// A banner proves a live service answered — reachability confirmed.
-		return tcpEvidence(reqDesc, "TCP connection established; banner="+strconv.Quote(printable(buf[:n])), VerdictConfirmed), nil
+		return tcpEvidence(reqDesc, "TCP connection established; banner="+strconv.Quote(printable(buf[:n])), VerdictConfirmed)
 	case rerr == nil || isTimeout(rerr):
 		// The connection stayed open with no banner: a client-speaks-first engine
 		// (e.g. PostgreSQL) awaiting the startup packet. Reachability is proven.
-		return tcpEvidence(reqDesc, "TCP connection established; no banner within read window (server awaits client)", VerdictConfirmed), nil
+		return tcpEvidence(reqDesc, "TCP connection established; no banner within read window (server awaits client)", VerdictConfirmed)
 	default:
 		// The peer accepted the handshake then closed/reset before sending a byte.
 		// This can be a real server hanging up, but also a SYN-proxy or scrubbing
 		// middlebox that is not the database — so reachability of the service
 		// itself is not proven. Do not report this as confirmed.
-		return tcpEvidence(reqDesc, "TCP handshake completed but the peer closed/reset before any banner ("+rerr.Error()+"); service reachability inconclusive (possible middlebox)", VerdictUnconfirmed), nil
+		return tcpEvidence(reqDesc, "TCP handshake completed but the peer closed/reset before any banner ("+rerr.Error()+"); service reachability inconclusive (possible middlebox)", VerdictUnconfirmed)
 	}
 }
 
-// tcpEvidence builds an external-vantage evidence record for the TCP validator.
+// tcpEvidence builds an external-vantage evidence record for a TCP reachability proof.
 func tcpEvidence(req, resp, verdict string) *findings.Evidence {
 	return &findings.Evidence{
 		Vantage:    findings.VantageExternal,
