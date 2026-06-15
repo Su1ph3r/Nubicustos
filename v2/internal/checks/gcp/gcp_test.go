@@ -151,10 +151,68 @@ func TestGCPExposedSecret(t *testing.T) {
 	}
 }
 
+func TestCloudSQLChecks(t *testing.T) {
+	st := stateWith(&state.GCP{CloudSQL: []state.CloudSQLInstance{
+		{Name: "db1", Project: "p1", PublicIP: true, RequireSSL: false, BackupEnabled: false,
+			AuthorizedNetworks: []string{"0.0.0.0/0"}},
+	}})
+	if fs := evalCheck(t, cloudSQLPublicIP{}, st); len(fs) != 1 {
+		t.Fatalf("expected public-ip finding, got %d", len(fs))
+	}
+	if fs := evalCheck(t, cloudSQLNoSSL{}, st); len(fs) != 1 {
+		t.Fatalf("expected no-ssl finding, got %d", len(fs))
+	}
+	if fs := evalCheck(t, cloudSQLAuthorizedAll{}, st); len(fs) != 1 || fs[0].Severity != findings.SeverityHigh {
+		t.Fatalf("expected one high authorized-all finding, got %+v", fs)
+	}
+	if fs := evalCheck(t, cloudSQLNoBackup{}, st); len(fs) != 1 {
+		t.Fatalf("expected backup-disabled finding, got %d", len(fs))
+	}
+	// A hardened instance produces none.
+	hardened := stateWith(&state.GCP{CloudSQL: []state.CloudSQLInstance{
+		{Name: "db2", PublicIP: false, RequireSSL: true, BackupEnabled: true, AuthorizedNetworks: []string{"203.0.113.0/24"}},
+	}})
+	for _, c := range []engine.Check{cloudSQLPublicIP{}, cloudSQLNoSSL{}, cloudSQLAuthorizedAll{}, cloudSQLNoBackup{}} {
+		if fs := evalCheck(t, c, hardened); len(fs) != 0 {
+			t.Fatalf("%s: hardened instance should not be flagged, got %d", c.Spec().ID, len(fs))
+		}
+	}
+}
+
+func TestComputeChecks(t *testing.T) {
+	st := stateWith(&state.GCP{ComputeVMs: []state.ComputeInstance{
+		{Name: "vm1", Project: "p1", Zone: "us-central1-a", HasPublicIP: true, ShieldedVM: false,
+			DefaultSAFullAPI: true, SerialPortEnabled: true},
+	}})
+	if fs := evalCheck(t, computeDefaultSAFullAPI{}, st); len(fs) != 1 || fs[0].Severity != findings.SeverityHigh {
+		t.Fatalf("expected one high default-SA finding, got %+v", fs)
+	}
+	if fs := evalCheck(t, computeShieldedDisabled{}, st); len(fs) != 1 {
+		t.Fatalf("expected shielded-disabled finding, got %d", len(fs))
+	}
+	if fs := evalCheck(t, computeSerialPort{}, st); len(fs) != 1 {
+		t.Fatalf("expected serial-port finding, got %d", len(fs))
+	}
+	// A hardened VM produces none.
+	hardened := stateWith(&state.GCP{ComputeVMs: []state.ComputeInstance{
+		{Name: "vm2", ShieldedVM: true, DefaultSAFullAPI: false, SerialPortEnabled: false},
+	}})
+	for _, c := range []engine.Check{computeDefaultSAFullAPI{}, computeShieldedDisabled{}, computeSerialPort{}} {
+		if fs := evalCheck(t, c, hardened); len(fs) != 0 {
+			t.Fatalf("%s: hardened VM should not be flagged, got %d", c.Spec().ID, len(fs))
+		}
+	}
+}
+
 func TestNilGCPStateNoPanic(t *testing.T) {
 	st := state.New()
 	st.GCP = nil
-	for _, c := range []engine.Check{bucketPublic{}, bucketUniformAccess{}, bucketPublicAccessPrevention{}, firewallOpenIngress{}, iamPublicMember{}, iamPrimitiveRole{}, exposedSecret{}} {
+	for _, c := range []engine.Check{
+		bucketPublic{}, bucketUniformAccess{}, bucketPublicAccessPrevention{}, firewallOpenIngress{},
+		iamPublicMember{}, iamPrimitiveRole{}, exposedSecret{},
+		cloudSQLPublicIP{}, cloudSQLNoSSL{}, cloudSQLAuthorizedAll{}, cloudSQLNoBackup{},
+		computeDefaultSAFullAPI{}, computeShieldedDisabled{}, computeSerialPort{},
+	} {
 		if fs := evalCheck(t, c, st); len(fs) != 0 {
 			t.Fatalf("%s on nil gcp state should yield nothing, got %d", c.Spec().ID, len(fs))
 		}

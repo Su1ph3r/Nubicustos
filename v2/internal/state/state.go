@@ -349,10 +349,10 @@ type AWS struct {
 
 // StorageAccount is the collected posture of an Azure storage account.
 type StorageAccount struct {
-	Name                  string
-	ResourceGroup         string
-	Subscription          string
-	Location              string
+	Name                   string
+	ResourceGroup          string
+	Subscription           string
+	Location               string
 	AllowBlobPublicAccess  bool   // account permits anonymous blob/container access
 	HTTPSOnly              bool   // EnableHTTPSTrafficOnly
 	MinTLSVersion          string // e.g. "TLS1_2"
@@ -498,11 +498,47 @@ type GCPIAMBinding struct {
 	Members []string // e.g. allUsers, allAuthenticatedUsers, user:..., serviceAccount:...
 }
 
+// CloudSQLInstance is the collected posture of a Cloud SQL database instance.
+type CloudSQLInstance struct {
+	Name               string
+	Project            string
+	Region             string
+	Version            string
+	PublicIP           bool     // an IPv4 (public) address is enabled
+	RequireSSL         bool     // connections must use SSL/TLS
+	BackupEnabled      bool     // automated backups configured
+	AuthorizedNetworks []string // CIDRs allowed to connect (0.0.0.0/0 = whole internet)
+}
+
+// OpenToInternet reports whether any authorized network spans the whole internet.
+func (i CloudSQLInstance) OpenToInternet() bool {
+	for _, n := range i.AuthorizedNetworks {
+		if n == "0.0.0.0/0" {
+			return true
+		}
+	}
+	return false
+}
+
+// ComputeInstance is the collected posture of a Compute Engine VM.
+type ComputeInstance struct {
+	Name              string
+	Project           string
+	Zone              string
+	HasPublicIP       bool // a NIC has an external (NAT) IP
+	ShieldedVM        bool // secure boot + vTPM + integrity monitoring all on
+	DefaultSAFullAPI  bool // uses the default compute SA with the cloud-platform scope
+	SerialPortEnabled bool // metadata serial-port-enable=true (interactive serial console)
+	CanIPForward      bool // IP forwarding enabled (can act as a router)
+}
+
 // GCP is the collected GCP-side state for one or more projects.
 type GCP struct {
 	Buckets     []GCSBucket
 	Firewalls   []FirewallRule
 	IAMBindings []GCPIAMBinding
+	CloudSQL    []CloudSQLInstance
+	ComputeVMs  []ComputeInstance
 	SecretHits  []SecretHit
 }
 
@@ -623,6 +659,20 @@ func (s *State) AddK8sSecretHit(h SecretHit) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.K8s.SecretHits = append(s.K8s.SecretHits, h)
+}
+
+// AddCloudSQLInstance appends a collected Cloud SQL instance under lock.
+func (s *State) AddCloudSQLInstance(i CloudSQLInstance) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.GCP.CloudSQL = append(s.GCP.CloudSQL, i)
+}
+
+// AddComputeInstance appends a collected Compute Engine VM under lock.
+func (s *State) AddComputeInstance(i ComputeInstance) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.GCP.ComputeVMs = append(s.GCP.ComputeVMs, i)
 }
 
 // AddGCPSecretHit appends a detected GCP control-plane secret under lock.

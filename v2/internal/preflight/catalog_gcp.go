@@ -20,6 +20,8 @@ var nubicustosGCPPermissions = []string{
 	// control-plane secrets (§9.2): Cloud Function env vars + instance metadata
 	"cloudfunctions.functions.list",
 	"compute.instances.list",
+	// Cloud SQL posture
+	"cloudsql.instances.list",
 }
 
 // GCPTools is the requirement catalog for GCP scanning. RequiredManagedPolicies
