@@ -27,6 +27,9 @@ reports/
 remediation-scripts/
 logs/
 data/
+# Built-in policy rules are go:embed source, not data output — keep tracked.
+!v2/internal/rules/data/
+!v2/internal/rules/data/**
 *.log
 *.html
 *.csv
@@ -67,6 +70,9 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+# The embedded web UI is source (go:embed), not build output — keep it tracked.
+!v2/internal/web/dist/
+!v2/internal/web/dist/**
 downloads/
 eggs/
 .eggs/
@@ -141,6 +147,9 @@ Thumbs.db
 secrets/
 .secrets/
 *.secret
+# ...but the v2 Go secrets-detection source package is code, not a credentials dir
+!v2/internal/secrets/
+!v2/internal/secrets/**
 
 # Local configuration overrides
 config/local/

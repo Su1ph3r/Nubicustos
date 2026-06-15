@@ -1,0 +1,13 @@
+# Build artifacts
+/nubicustos
+/nubicustos.exe
+/dist/
+
+# Local scan databases and exports
+*.db
+*.db-shm
+*.db-wal
+*.cairn.json
+
+# Go
+/vendor/

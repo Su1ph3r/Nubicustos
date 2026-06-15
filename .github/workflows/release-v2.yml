@@ -1,0 +1,50 @@
+# Builds and publishes the single-binary nubicustos v2 on a v2.* tag.
+# Cross-compiles via goreleaser (config in v2/.goreleaser.yaml) and produces a
+# draft release with archives, checksums, and SBOMs in the private staging repo.
+name: release-v2
+
+on:
+  push:
+    tags:
+      - "v2.*"
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    # Least-privilege, scoped to this job (not the whole workflow) so any future
+    # job added here does not inherit write access. contents:write is all
+    # goreleaser needs to create the release.
+    permissions:
+      contents: write
+    steps:
+      # Hardening note: these actions are pinned to moving major tags for
+      # readability. For stronger supply-chain guarantees, pin to commit SHAs
+      # (e.g. actions/checkout@<sha> # v4) and keep them current with Dependabot.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags for the changelog/version
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      # syft provides the SBOM that goreleaser attaches to each archive. It is
+      # installed before goreleaser; an absent syft makes the sbom step fail
+      # loudly rather than silently dropping the SBOM.
+      - uses: anchore/sbom-action/download-syft@v0
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+          workdir: v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Surface the (draft) release so a green run is never a silent "where did
+      # my release go" — it prints the URL and draft state.
+      - name: Show release
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release view "${GITHUB_REF_NAME}" --json url,isDraft,name || true

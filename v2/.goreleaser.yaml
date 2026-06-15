@@ -1,0 +1,67 @@
+# goreleaser config for the single-binary nubicustos v2.
+#
+# Produces static, cross-platform binaries (no CGO — the SQLite driver is pure
+# Go), archives, checksums, and an SBOM. Distribution channels are deliberately
+# limited: there are NO Homebrew/Scoop/apt/yum publishers — per the project's
+# distribution policy, the CLI ships via internal channels (Azure Artifacts and
+# per-customer-deployment-hosted install), not public package managers.
+version: 2
+
+project_name: nubicustos
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: nubicustos
+    main: ./cmd/nubicustos
+    binary: nubicustos
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    # Windows users expect a zip.
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+# Software bill of materials per archive (requires syft on the release runner).
+sboms:
+  - artifacts: archive
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+# Internal staging release. The target repo is auto-detected from the runner's
+# origin (the private staging repo this workflow runs in), so the workflow
+# GITHUB_TOKEN always has the right scope — no hardcoded cross-repo target.
+# Customer distribution is handled out of band via the sanctioned channels
+# (Azure Artifacts + per-customer-hosted), not from a public release feed.
+release:
+  draft: true
+  prerelease: auto
