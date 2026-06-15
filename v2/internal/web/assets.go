@@ -7,9 +7,8 @@ import (
 	"strings"
 )
 
-// dist holds the built single-page UI, embedded into the binary. It currently
-// contains a placeholder; the production build output is dropped in here and
-// embedded at compile time (no external assets, no network at runtime).
+// dist holds the single-page UI (dependency-free vanilla JS/CSS), embedded into
+// the binary at compile time — no external assets, no network at runtime.
 //
 //go:embed all:dist
 var dist embed.FS

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Su1ph3r/nubicustos/internal/compliance"
+	"github.com/Su1ph3r/nubicustos/internal/engine"
 	"github.com/Su1ph3r/nubicustos/internal/export"
 	"github.com/Su1ph3r/nubicustos/internal/findings"
 	"github.com/Su1ph3r/nubicustos/internal/plugins"
@@ -119,6 +121,34 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 		"top_paths": top,
 		"total":     len(fs),
 	})
+}
+
+// handleCompliance maps the scan's findings onto the requested compliance
+// framework's controls (soc2|pci|nist, default soc2). The control coverage comes
+// from the registered check catalog; the scan's open findings mark pass/fail.
+func (s *Server) handleCompliance(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.resolveScan(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	framework := strings.ToLower(r.URL.Query().Get("framework"))
+	if framework == "" {
+		framework = compliance.FrameworkSOC2
+	}
+	if !compliance.ValidFramework(framework) {
+		writeError(w, http.StatusBadRequest, "bad_request", "framework must be soc2 | pci | nist")
+		return
+	}
+	fs, err := s.store.LoadFindings(r.Context(), id, store.FindingFilter{})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "store_error", err.Error())
+		return
+	}
+	var specs []findings.CheckSpec
+	for _, c := range engine.Checks() {
+		specs = append(specs, c.Spec())
+	}
+	writeJSON(w, http.StatusOK, compliance.Build(framework, specs, fs))
 }
 
 // handleFindings loads the scan's findings and applies the facet filters, sort,

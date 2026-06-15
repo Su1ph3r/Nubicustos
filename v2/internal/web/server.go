@@ -89,6 +89,7 @@ func (s *Server) routesRead(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/scans/{id}/services", s.handleServices)
 	mux.HandleFunc("GET /api/v1/scans/{id}/paths", s.handlePaths)
 	mux.HandleFunc("GET /api/v1/scans/{id}/paths/{pid}", s.handlePath)
+	mux.HandleFunc("GET /api/v1/scans/{id}/compliance", s.handleCompliance)
 	mux.HandleFunc("GET /api/v1/scans/{id}/export/{format}", s.handleExport)
 	mux.HandleFunc("GET /api/v1/tools", s.handleTools)
 	mux.HandleFunc("GET /api/v1/preflight", s.handlePreflight)

@@ -125,7 +125,7 @@ function screenName() { return (location.hash.replace("#/", "") || "overview"); 
 
 const NAV = [
   ["overview", "Overview"], ["findings", "Findings"], ["paths", "Attack paths"],
-  ["preflight", "Preflight"], ["tools", "Tools"],
+  ["compliance", "Compliance"], ["preflight", "Preflight"], ["tools", "Tools"],
 ];
 
 function renderShell() {
@@ -198,6 +198,7 @@ async function renderScreen() {
     if (s === "overview") await renderOverview(scr);
     else if (s === "findings") await renderFindings(scr);
     else if (s === "paths") await renderPaths(scr);
+    else if (s === "compliance") await renderCompliance(scr);
     else if (s === "tools") await renderTools(scr);
     else if (s === "preflight") await renderPreflight(scr);
     else scr.innerHTML = `<div class="empty">Unknown screen.</div>`;
@@ -338,6 +339,29 @@ async function renderPaths(scr) {
       <div class="section-label">chain</div>${hops}</div></div>`;
 }
 window.selPath = (i) => { state.selPath = i; renderScreen(); };
+
+// --- compliance ------------------------------------------------------------
+async function renderCompliance(scr) {
+  setHeader("Compliance", "control coverage mapped from native checks");
+  const fw = state.compFw || "soc2";
+  const FW = [["soc2", "SOC 2"], ["pci", "PCI-DSS"], ["nist", "NIST 800-53"]];
+  const rep = await api(`/api/v1/scans/${state.scanID}/compliance?framework=${fw}`);
+  const toggle = FW.map(([k, l]) =>
+    `<button class="btn ${k === fw ? "primary" : ""}" type="button" onclick="setCompFw('${k}')">${esc(l)}</button>`).join(" ");
+  const rows = (rep.controls || []).map((c) => {
+    const fail = c.status === "fail";
+    const status = fail
+      ? `<span class="pill" style="border-color:#ff526355;color:#ff5263">FAIL · ${c.open_findings}</span>`
+      : `<span class="muted">covered</span>`;
+    return `<tr><td class="mono">${esc(c.control.id)}</td><td>${esc(c.control.title)}</td>
+      <td class="mono">${(c.check_ids || []).length}</td><td>${status}</td></tr>`;
+  }).join("");
+  scr.innerHTML = `<div class="row" style="gap:8px;margin-bottom:14px">${toggle}</div>
+    <div class="muted" style="margin-bottom:10px">${rep.covered_controls || 0} control(s) covered · ${rep.failing_controls || 0} failing</div>
+    <table class="findings"><thead><tr><th>Control</th><th>Title</th><th>Checks</th><th>Status</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="4" class="muted">No mapped controls.</td></tr>`}</tbody></table>`;
+}
+window.setCompFw = (k) => { state.compFw = k; renderScreen(); };
 
 // --- tools (read-only list; operator run in Pass B) ------------------------
 async function renderTools(scr) {
