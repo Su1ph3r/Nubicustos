@@ -22,6 +22,12 @@ var nubicustosGCPPermissions = []string{
 	"compute.instances.list",
 	// Cloud SQL posture
 	"cloudsql.instances.list",
+	// Cloud KMS posture (key rotation + public IAM)
+	"cloudkms.keyRings.list",
+	"cloudkms.cryptoKeys.list",
+	"cloudkms.cryptoKeys.getIamPolicy",
+	// GKE posture
+	"container.clusters.list",
 }
 
 // GCPTools is the requirement catalog for GCP scanning. RequiredManagedPolicies

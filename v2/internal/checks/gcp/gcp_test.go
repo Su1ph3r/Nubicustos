@@ -204,6 +204,50 @@ func TestComputeChecks(t *testing.T) {
 	}
 }
 
+func TestKMSChecks(t *testing.T) {
+	st := stateWith(&state.GCP{KMSKeys: []state.KMSCryptoKey{
+		{Name: "k1", Project: "p1", KeyRing: "r1", Purpose: "ENCRYPT_DECRYPT", RotationEnabled: false, PublicIAM: true},
+		{Name: "asym", Project: "p1", KeyRing: "r1", Purpose: "ASYMMETRIC_SIGN", RotationEnabled: false}, // not rotatable → not flagged
+	}})
+	if fs := evalCheck(t, kmsRotationDisabled{}, st); len(fs) != 1 || fs[0].Resource.Name != "k1" {
+		t.Fatalf("only the symmetric key without rotation should be flagged, got %+v", fs)
+	}
+	if fs := evalCheck(t, kmsPublicIAM{}, st); len(fs) != 1 || fs[0].Severity != findings.SeverityHigh {
+		t.Fatalf("expected one high public-IAM finding, got %+v", fs)
+	}
+	hardened := stateWith(&state.GCP{KMSKeys: []state.KMSCryptoKey{
+		{Name: "k2", Purpose: "ENCRYPT_DECRYPT", RotationEnabled: true, PublicIAM: false},
+	}})
+	for _, c := range []engine.Check{kmsRotationDisabled{}, kmsPublicIAM{}} {
+		if fs := evalCheck(t, c, hardened); len(fs) != 0 {
+			t.Fatalf("%s: hardened key should not be flagged, got %d", c.Spec().ID, len(fs))
+		}
+	}
+}
+
+func TestGKEChecks(t *testing.T) {
+	st := stateWith(&state.GCP{GKEClusters: []state.GKECluster{
+		{Name: "c1", Project: "p1", LegacyABAC: true, NetworkPolicyEnabled: false, MasterAuthorizedNetworks: false},
+	}})
+	if fs := evalCheck(t, gkeLegacyABAC{}, st); len(fs) != 1 || fs[0].Severity != findings.SeverityHigh {
+		t.Fatalf("expected one high legacy-ABAC finding, got %+v", fs)
+	}
+	if fs := evalCheck(t, gkeNetworkPolicyDisabled{}, st); len(fs) != 1 {
+		t.Fatalf("expected network-policy finding, got %d", len(fs))
+	}
+	if fs := evalCheck(t, gkeMasterNetworksOpen{}, st); len(fs) != 1 {
+		t.Fatalf("expected master-authorized-networks finding, got %d", len(fs))
+	}
+	hardened := stateWith(&state.GCP{GKEClusters: []state.GKECluster{
+		{Name: "c2", LegacyABAC: false, NetworkPolicyEnabled: true, MasterAuthorizedNetworks: true},
+	}})
+	for _, c := range []engine.Check{gkeLegacyABAC{}, gkeNetworkPolicyDisabled{}, gkeMasterNetworksOpen{}} {
+		if fs := evalCheck(t, c, hardened); len(fs) != 0 {
+			t.Fatalf("%s: hardened cluster should not be flagged, got %d", c.Spec().ID, len(fs))
+		}
+	}
+}
+
 func TestNilGCPStateNoPanic(t *testing.T) {
 	st := state.New()
 	st.GCP = nil
@@ -212,6 +256,7 @@ func TestNilGCPStateNoPanic(t *testing.T) {
 		iamPublicMember{}, iamPrimitiveRole{}, exposedSecret{},
 		cloudSQLPublicIP{}, cloudSQLNoSSL{}, cloudSQLAuthorizedAll{}, cloudSQLNoBackup{},
 		computeDefaultSAFullAPI{}, computeShieldedDisabled{}, computeSerialPort{},
+		kmsRotationDisabled{}, kmsPublicIAM{}, gkeLegacyABAC{}, gkeNetworkPolicyDisabled{}, gkeMasterNetworksOpen{},
 	} {
 		if fs := evalCheck(t, c, st); len(fs) != 0 {
 			t.Fatalf("%s on nil gcp state should yield nothing, got %d", c.Spec().ID, len(fs))

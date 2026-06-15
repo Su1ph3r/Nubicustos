@@ -532,6 +532,27 @@ type ComputeInstance struct {
 	CanIPForward      bool // IP forwarding enabled (can act as a router)
 }
 
+// KMSCryptoKey is the collected posture of a Cloud KMS crypto key.
+type KMSCryptoKey struct {
+	Name            string
+	Project         string
+	Location        string
+	KeyRing         string
+	Purpose         string // e.g. ENCRYPT_DECRYPT
+	RotationEnabled bool   // a rotation period is configured
+	PublicIAM       bool   // IAM policy grants allUsers/allAuthenticatedUsers
+}
+
+// GKECluster is the collected posture of a GKE (Kubernetes Engine) cluster.
+type GKECluster struct {
+	Name                     string
+	Project                  string
+	Location                 string
+	LegacyABAC               bool // legacy ABAC authorization enabled
+	NetworkPolicyEnabled     bool // pod-level network policy enforcement on
+	MasterAuthorizedNetworks bool // control-plane access restricted to allowed CIDRs
+}
+
 // GCP is the collected GCP-side state for one or more projects.
 type GCP struct {
 	Buckets     []GCSBucket
@@ -539,6 +560,8 @@ type GCP struct {
 	IAMBindings []GCPIAMBinding
 	CloudSQL    []CloudSQLInstance
 	ComputeVMs  []ComputeInstance
+	KMSKeys     []KMSCryptoKey
+	GKEClusters []GKECluster
 	SecretHits  []SecretHit
 }
 
@@ -673,6 +696,20 @@ func (s *State) AddComputeInstance(i ComputeInstance) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.GCP.ComputeVMs = append(s.GCP.ComputeVMs, i)
+}
+
+// AddKMSCryptoKey appends a collected Cloud KMS key under lock.
+func (s *State) AddKMSCryptoKey(k KMSCryptoKey) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.GCP.KMSKeys = append(s.GCP.KMSKeys, k)
+}
+
+// AddGKECluster appends a collected GKE cluster under lock.
+func (s *State) AddGKECluster(c GKECluster) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.GCP.GKEClusters = append(s.GCP.GKEClusters, c)
 }
 
 // AddGCPSecretHit appends a detected GCP control-plane secret under lock.
