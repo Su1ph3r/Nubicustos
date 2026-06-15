@@ -62,11 +62,12 @@ type scanFlags struct {
 	// Azure estate scoping (§9.4)
 	managementGroup string
 
-	dbPath         string
-	exportPath     string
-	validate       bool
-	captureSecrets bool
-	rulesDir       string
+	dbPath           string
+	exportPath       string
+	exportContainers string
+	validate         bool
+	captureSecrets   bool
+	rulesDir         string
 }
 
 func newScanCmd() *cobra.Command {
@@ -108,6 +109,7 @@ func newScanCmd() *cobra.Command {
 
 	pf.StringVar(&f.dbPath, "db", "nubicustos.db", "path to the SQLite results database")
 	pf.StringVar(&f.exportPath, "export", "", "write Cairn-format findings JSON to this path")
+	pf.StringVar(&f.exportContainers, "export-containers", "", "write the Kubernetes container inventory JSON (for Cepheus) to this path")
 	pf.BoolVar(&f.validate, "validate", false, "opt-in: actively (read-only) confirm findings and capture evidence")
 	pf.BoolVar(&f.captureSecrets, "capture-secrets", false, "AWS: retain raw control-plane secrets in-process so --validate can confirm AWS-key liveness (never written to disk or exported)")
 	pf.StringVar(&f.rulesDir, "rules-dir", "", "directory of user policy-as-code rules to evaluate alongside the built-ins")
@@ -325,6 +327,19 @@ func runScan(ctx context.Context, f *scanFlags) error {
 			return err
 		}
 		fmt.Fprintf(os.Stderr, "exported %d findings to %s\n", len(result.Findings), f.exportPath)
+	}
+
+	// Optional container-inventory export for Cepheus (nubicustos-containers.json).
+	if f.exportContainers != "" {
+		out, err := os.Create(f.exportContainers)
+		if err != nil {
+			return fmt.Errorf("creating container-export file: %w", err)
+		}
+		defer out.Close()
+		if err := export.Containers(out, result.State, finished); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "exported container inventory to %s\n", f.exportContainers)
 	}
 
 	printSummary(result, scanID)

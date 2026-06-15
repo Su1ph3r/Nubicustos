@@ -143,6 +143,7 @@ func Checks() []Check {
 type Result struct {
 	Findings   []findings.Finding
 	Graph      *graph.Graph // attack-path graph derived from the collected state
+	State      *state.State // the collected cloud state (e.g. for container-inventory export)
 	Errors     []error      // non-fatal per-collector/check errors (partial-failure tolerant)
 	Collectors int
 	Checks     int
@@ -222,6 +223,7 @@ func runScan(sc *ScanContext, cs []Collector, cks []Check) *Result {
 	reachability.Annotate(res.Findings, st.AWS, rch)
 	progress.ReportPhase(sc.Progress, progress.PhaseGraph, "")
 	res.Graph = graph.Build(st, rch)
+	res.State = st
 	return res
 }
 

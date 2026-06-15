@@ -60,7 +60,7 @@ func normalizePod(ctxName string, p *corev1.Pod) state.K8sPod {
 }
 
 func normalizeContainer(c *corev1.Container, podRunAsNonRoot *bool, podRunAsUser *int64) state.K8sContainer {
-	out := state.K8sContainer{Name: c.Name}
+	out := state.K8sContainer{Name: c.Name, Image: c.Image}
 	sec := c.SecurityContext
 
 	out.Privileged = sec != nil && boolVal(sec.Privileged)

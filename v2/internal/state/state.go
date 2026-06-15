@@ -667,6 +667,7 @@ type GCP struct {
 // K8sContainer is the collected security posture of one container in a pod.
 type K8sContainer struct {
 	Name                     string
+	Image                    string // container image reference (for the Cepheus container inventory)
 	Privileged               bool
 	AllowPrivilegeEscalation bool // effective value (defaults true when unset, unless privileged)
 	RunAsNonRoot             bool // effective value (container overrides pod)
