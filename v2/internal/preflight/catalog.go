@@ -114,6 +114,11 @@ var nubicustosAWSActions = []string{
 	// Lambda public-exposure posture (function URL + resource policy)
 	"lambda:GetFunctionUrlConfig",
 	"lambda:GetPolicy",
+	// SNS / SQS public resource-policy posture
+	"sns:ListTopics",
+	"sns:GetTopicAttributes",
+	"sqs:ListQueues",
+	"sqs:GetQueueAttributes",
 	"ec2:DescribeInstanceAttribute",
 	"ssm:DescribeParameters",
 	"ssm:GetParameters",

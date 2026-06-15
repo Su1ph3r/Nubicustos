@@ -183,6 +183,16 @@ type LambdaFunction struct {
 	PublicPolicy bool // resource policy allows Principal "*" with no restricting condition
 }
 
+// MessagingResource is the collected public-exposure posture of an SNS topic or
+// SQS queue (both expose access via a resource policy).
+type MessagingResource struct {
+	Service      string // "sns" | "sqs"
+	Name         string
+	ID           string // topic ARN / queue URL
+	Region       string
+	PublicPolicy bool // resource policy allows Principal "*" with no restricting condition
+}
+
 // --- RDS (regional) ---------------------------------------------------------
 
 // RDSInstance is the collected posture of an RDS instance.
@@ -338,6 +348,7 @@ type AWS struct {
 
 	RDSInstances []RDSInstance
 	Lambdas      []LambdaFunction
+	Messaging    []MessagingResource
 	Trails       []CloudTrailTrail
 
 	KMSKeys                  []KMSKey
@@ -940,6 +951,13 @@ func (s *State) AddRDSInstance(r RDSInstance) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.AWS.RDSInstances = append(s.AWS.RDSInstances, r)
+}
+
+// AddMessagingResource appends a collected SNS topic / SQS queue under lock.
+func (s *State) AddMessagingResource(m MessagingResource) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.AWS.Messaging = append(s.AWS.Messaging, m)
 }
 
 // AddLambdaFunction appends a collected Lambda function under lock.
