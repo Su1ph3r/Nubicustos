@@ -6,6 +6,7 @@ package gcp
 
 import (
 	"context"
+	"strings"
 
 	"golang.org/x/oauth2/google"
 	cloudresourcemanager "google.golang.org/api/cloudresourcemanager/v1"
@@ -17,6 +18,34 @@ import (
 func isPublicMember(member string) bool {
 	return member == "allUsers" || member == "allAuthenticatedUsers"
 }
+
+// shortResourceName returns the final path segment of a GCP resource name, e.g.
+// "projects/p/locations/l/functions/fn" -> "fn". Empty input returns "".
+func shortResourceName(full string) string {
+	if i := strings.LastIndex(full, "/"); i >= 0 {
+		return full[i+1:]
+	}
+	return full
+}
+
+// regionFromFunction pulls the location out of a Cloud Functions resource name
+// of the form "projects/<p>/locations/<loc>/functions/<fn>"; "" if absent.
+func regionFromFunction(name string) string {
+	const marker = "/locations/"
+	i := strings.Index(name, marker)
+	if i < 0 {
+		return ""
+	}
+	rest := name[i+len(marker):]
+	if j := strings.IndexByte(rest, '/'); j >= 0 {
+		return rest[:j]
+	}
+	return rest
+}
+
+// zoneShort reduces a compute zone URL (or bare zone) to its short name, e.g.
+// ".../zones/us-central1-a" -> "us-central1-a".
+func zoneShort(zone string) string { return shortResourceName(zone) }
 
 // EnabledProjects enumerates the ACTIVE projects the credential can see (plan
 // §9.4 — GCP discovery), so the scan fans out across the estate.

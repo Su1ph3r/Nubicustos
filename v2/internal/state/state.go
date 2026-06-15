@@ -503,6 +503,7 @@ type GCP struct {
 	Buckets     []GCSBucket
 	Firewalls   []FirewallRule
 	IAMBindings []GCPIAMBinding
+	SecretHits  []SecretHit
 }
 
 // --- Kubernetes -------------------------------------------------------------
@@ -553,9 +554,10 @@ type RBACBinding struct {
 
 // K8s is the collected Kubernetes-side state across one or more contexts.
 type K8s struct {
-	Pods     []K8sPod
-	Roles    []K8sRole
-	Bindings []RBACBinding
+	Pods       []K8sPod
+	Roles      []K8sRole
+	Bindings   []RBACBinding
+	SecretHits []SecretHit
 }
 
 // State is the full collected state for a scan across providers.
@@ -614,6 +616,20 @@ func (s *State) AddFirewallRule(r FirewallRule) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.GCP.Firewalls = append(s.GCP.Firewalls, r)
+}
+
+// AddK8sSecretHit appends a detected Kubernetes control-plane secret under lock.
+func (s *State) AddK8sSecretHit(h SecretHit) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.K8s.SecretHits = append(s.K8s.SecretHits, h)
+}
+
+// AddGCPSecretHit appends a detected GCP control-plane secret under lock.
+func (s *State) AddGCPSecretHit(h SecretHit) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.GCP.SecretHits = append(s.GCP.SecretHits, h)
 }
 
 // AddGCPIAMBinding appends a collected project IAM binding under lock.

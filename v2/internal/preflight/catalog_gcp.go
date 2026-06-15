@@ -17,6 +17,9 @@ var nubicustosGCPPermissions = []string{
 	"storage.buckets.getIamPolicy",
 	// VPC firewall posture
 	"compute.firewalls.list",
+	// control-plane secrets (§9.2): Cloud Function env vars + instance metadata
+	"cloudfunctions.functions.list",
+	"compute.instances.list",
 }
 
 // GCPTools is the requirement catalog for GCP scanning. RequiredManagedPolicies

@@ -15,6 +15,7 @@ type k8sAction struct {
 // Keep in sync when a collector adds an API call.
 var k8sActions = []k8sAction{
 	{Display: "list pods", Verb: "list", Group: "", Resource: "pods"},
+	{Display: "list configmaps", Verb: "list", Group: "", Resource: "configmaps"},
 	{Display: "list roles.rbac.authorization.k8s.io", Verb: "list", Group: "rbac.authorization.k8s.io", Resource: "roles"},
 	{Display: "list clusterroles.rbac.authorization.k8s.io", Verb: "list", Group: "rbac.authorization.k8s.io", Resource: "clusterroles"},
 	{Display: "list rolebindings.rbac.authorization.k8s.io", Verb: "list", Group: "rbac.authorization.k8s.io", Resource: "rolebindings"},

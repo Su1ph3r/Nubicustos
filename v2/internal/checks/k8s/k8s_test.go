@@ -128,10 +128,27 @@ func TestWildcardRole(t *testing.T) {
 	}
 }
 
+func TestK8sExposedSecret(t *testing.T) {
+	st := stateWith(&state.K8s{SecretHits: []state.SecretHit{
+		{Detector: "generic_secret", Kind: "secret", Surface: "k8s_configmap", Resource: "default/app-config", Account: "ctx-a", Locator: "DB_PASSWORD", Masked: "****1234"},
+		{Detector: "aws_access_key_id", Kind: "AWS key", Surface: "k8s_pod_env", Resource: "default/web-0", Account: "ctx-a", Locator: "web:AWS_KEY", Masked: "****abcd"},
+	}})
+	fs := evalCheck(t, exposedSecret{}, st)
+	if len(fs) != 1 { // one aggregate per context
+		t.Fatalf("expected one aggregate finding for ctx-a, got %d: %+v", len(fs), fs)
+	}
+	if fs[0].Severity != findings.SeverityHigh {
+		t.Errorf("exposed-secret should be high severity, got %s", fs[0].Severity)
+	}
+	if got := evalCheck(t, exposedSecret{}, stateWith(&state.K8s{})); len(got) != 0 {
+		t.Fatalf("no secret hits should yield no findings, got %d", len(got))
+	}
+}
+
 func TestNilK8sStateNoPanic(t *testing.T) {
 	st := state.New()
 	st.K8s = nil
-	for _, c := range []engine.Check{privilegedContainer{}, hostNamespaces{}, privilegeEscalation{}, runAsRoot{}, clusterAdminBinding{}, wildcardRole{}} {
+	for _, c := range []engine.Check{privilegedContainer{}, hostNamespaces{}, privilegeEscalation{}, runAsRoot{}, clusterAdminBinding{}, wildcardRole{}, exposedSecret{}} {
 		if fs := evalCheck(t, c, st); len(fs) != 0 {
 			t.Fatalf("%s on nil k8s state should yield nothing, got %d", c.Spec().ID, len(fs))
 		}

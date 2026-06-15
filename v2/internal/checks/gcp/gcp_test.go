@@ -131,10 +131,30 @@ func TestIAMPrimitiveRole(t *testing.T) {
 	}
 }
 
+func TestGCPExposedSecret(t *testing.T) {
+	st := stateWith(&state.GCP{SecretHits: []state.SecretHit{
+		{Detector: "aws_access_key_id", Kind: "AWS key", Surface: "gcp_function_env", Resource: "fn1", Account: "proj-a", Locator: "AWS_KEY", Masked: "****1234"},
+		{Detector: "generic_secret", Kind: "secret", Surface: "gcp_instance_metadata", Resource: "vm1", Account: "proj-a", Locator: "startup-script", Masked: "****abcd"},
+		{Detector: "generic_secret", Kind: "secret", Surface: "gcp_function_env", Resource: "fn2", Account: "proj-b", Locator: "TOKEN", Masked: "****ef01"},
+	}})
+	fs := evalCheck(t, exposedSecret{}, st)
+	if len(fs) != 2 { // one aggregate finding per project (proj-a, proj-b)
+		t.Fatalf("expected one aggregate finding per project, got %d: %+v", len(fs), fs)
+	}
+	for _, f := range fs {
+		if f.Severity != findings.SeverityHigh {
+			t.Errorf("exposed-secret should be high severity, got %s", f.Severity)
+		}
+	}
+	if got := evalCheck(t, exposedSecret{}, stateWith(&state.GCP{})); len(got) != 0 {
+		t.Fatalf("no secret hits should yield no findings, got %d", len(got))
+	}
+}
+
 func TestNilGCPStateNoPanic(t *testing.T) {
 	st := state.New()
 	st.GCP = nil
-	for _, c := range []engine.Check{bucketPublic{}, bucketUniformAccess{}, bucketPublicAccessPrevention{}, firewallOpenIngress{}, iamPublicMember{}, iamPrimitiveRole{}} {
+	for _, c := range []engine.Check{bucketPublic{}, bucketUniformAccess{}, bucketPublicAccessPrevention{}, firewallOpenIngress{}, iamPublicMember{}, iamPrimitiveRole{}, exposedSecret{}} {
 		if fs := evalCheck(t, c, st); len(fs) != 0 {
 			t.Fatalf("%s on nil gcp state should yield nothing, got %d", c.Spec().ID, len(fs))
 		}
