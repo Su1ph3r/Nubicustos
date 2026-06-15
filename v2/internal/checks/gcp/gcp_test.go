@@ -1,6 +1,7 @@
 package gcp
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Su1ph3r/nubicustos/internal/engine"
@@ -260,6 +261,21 @@ func TestAuditLoggingCheck(t *testing.T) {
 	}
 }
 
+func TestCrossProjectSA(t *testing.T) {
+	st := stateWith(&state.GCP{IAMBindings: []state.GCPIAMBinding{
+		{Project: "proj-a", Role: "roles/editor", Members: []string{
+			"serviceAccount:ci@proj-b.iam.gserviceaccount.com",               // cross-project → flag
+			"serviceAccount:local@proj-a.iam.gserviceaccount.com",            // same project → ok
+			"serviceAccount:service-1@gcp-sa-pubsub.iam.gserviceaccount.com", // Google-managed → ok
+			"user:alice@example.com",                                         // not an SA → ok
+		}},
+	}})
+	fs := evalCheck(t, crossProjectSA{}, st)
+	if len(fs) != 1 || !strings.Contains(fs[0].Description, "proj-b") {
+		t.Fatalf("only the cross-project user-managed SA should be flagged, got %+v", fs)
+	}
+}
+
 func TestNilGCPStateNoPanic(t *testing.T) {
 	st := state.New()
 	st.GCP = nil
@@ -269,7 +285,7 @@ func TestNilGCPStateNoPanic(t *testing.T) {
 		cloudSQLPublicIP{}, cloudSQLNoSSL{}, cloudSQLAuthorizedAll{}, cloudSQLNoBackup{},
 		computeDefaultSAFullAPI{}, computeShieldedDisabled{}, computeSerialPort{},
 		kmsRotationDisabled{}, kmsPublicIAM{}, gkeLegacyABAC{}, gkeNetworkPolicyDisabled{}, gkeMasterNetworksOpen{},
-		auditLoggingNotConfigured{},
+		auditLoggingNotConfigured{}, crossProjectSA{},
 	} {
 		if fs := evalCheck(t, c, st); len(fs) != 0 {
 			t.Fatalf("%s on nil gcp state should yield nothing, got %d", c.Spec().ID, len(fs))
