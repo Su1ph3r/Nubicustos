@@ -22,9 +22,13 @@ var nubicustosAzureActions = []string{
 	// SQL posture (server config + firewall rules)
 	"Microsoft.Sql/servers/read",
 	"Microsoft.Sql/servers/firewallRules/read",
+	// Cosmos DB posture
+	"Microsoft.DocumentDB/databaseAccounts/read",
+	// Defender for Cloud plan tiers
+	"Microsoft.Security/pricings/read",
 	// App Service posture + control-plane secrets (Function/Web apps)
 	"Microsoft.Web/sites/Read",
-	"Microsoft.Web/sites/config/Read",       // GetConfiguration: min TLS, FTPS state (Reader-granted)
+	"Microsoft.Web/sites/config/Read",        // GetConfiguration: min TLS, FTPS state (Reader-granted)
 	"Microsoft.Web/sites/config/list/Action", // list app settings / connection strings (needs Website Contributor)
 	// Note: Microsoft.Management/managementGroups/read is required only for the
 	// optional `scan --management-group` subtree scoping, so it is deliberately

@@ -249,6 +249,43 @@ func TestNSGZeroLengthCIDRIsInternet(t *testing.T) {
 	}
 }
 
+func TestCosmosChecks(t *testing.T) {
+	st := stateWith(&state.Azure{CosmosAccounts: []state.CosmosAccount{
+		{Name: "c1", Subscription: "s1", PublicNetworkAccess: true, LocalAuthDisabled: false},
+	}})
+	if fs := evalCheck(t, cosmosPublicNetwork{}, st); len(fs) != 1 || fs[0].Severity != findings.SeverityHigh {
+		t.Fatalf("expected one high public-network finding, got %+v", fs)
+	}
+	if fs := evalCheck(t, cosmosLocalAuth{}, st); len(fs) != 1 {
+		t.Fatalf("expected local-auth finding, got %d", len(fs))
+	}
+	hardened := stateWith(&state.Azure{CosmosAccounts: []state.CosmosAccount{
+		{Name: "c2", PublicNetworkAccess: false, LocalAuthDisabled: true},
+	}})
+	for _, c := range []engine.Check{cosmosPublicNetwork{}, cosmosLocalAuth{}} {
+		if fs := evalCheck(t, c, hardened); len(fs) != 0 {
+			t.Fatalf("%s: hardened account should not be flagged, got %d", c.Spec().ID, len(fs))
+		}
+	}
+}
+
+func TestDefenderPlanFree(t *testing.T) {
+	st := stateWith(&state.Azure{DefenderPlans: []state.DefenderPlan{
+		{Subscription: "s1", Name: "VirtualMachines", Tier: "Free"},
+		{Subscription: "s1", Name: "StorageAccounts", Tier: "Standard"},
+		{Subscription: "s1", Name: "SqlServers", Tier: "Free"},
+	}})
+	fs := evalCheck(t, defenderPlanFree{}, st)
+	if len(fs) != 1 { // one aggregate per subscription
+		t.Fatalf("expected one aggregate finding for s1, got %d: %+v", len(fs), fs)
+	}
+	// No free plans → no finding.
+	allStd := stateWith(&state.Azure{DefenderPlans: []state.DefenderPlan{{Subscription: "s1", Name: "VirtualMachines", Tier: "Standard"}}})
+	if got := evalCheck(t, defenderPlanFree{}, allStd); len(got) != 0 {
+		t.Fatalf("all-Standard should yield no finding, got %d", len(got))
+	}
+}
+
 func TestNilAzureStateNoPanic(t *testing.T) {
 	st := state.New()
 	st.Azure = nil
@@ -257,6 +294,7 @@ func TestNilAzureStateNoPanic(t *testing.T) {
 		nsgOpenIngress{}, kvSoftDelete{}, kvPurgeProtection{}, kvNetworkOpen{},
 		appServiceNotHTTPSOnly{}, appServiceMinTLS{}, appServiceFTPSInsecure{},
 		sqlPublicNetwork{}, sqlFirewallAllowAll{}, sqlMinTLS{},
+		cosmosPublicNetwork{}, cosmosLocalAuth{}, defenderPlanFree{},
 	} {
 		if fs := evalCheck(t, c, st); len(fs) != 0 {
 			t.Fatalf("%s on nil azure state should yield nothing, got %d", c.Spec().ID, len(fs))

@@ -458,6 +458,23 @@ type SQLServer struct {
 	FirewallRules       []SQLFirewallRule
 }
 
+// CosmosAccount is the collected posture of an Azure Cosmos DB account.
+type CosmosAccount struct {
+	Name                string
+	ResourceGroup       string
+	Subscription        string
+	Location            string
+	PublicNetworkAccess bool // public endpoint enabled
+	LocalAuthDisabled   bool // key-based (local) auth disabled — Entra-only is the hardened state
+}
+
+// DefenderPlan is one Microsoft Defender for Cloud plan and its pricing tier.
+type DefenderPlan struct {
+	Subscription string
+	Name         string // resource-type plan, e.g. "VirtualMachines", "StorageAccounts"
+	Tier         string // "Free" | "Standard"
+}
+
 // Azure is the collected Azure-side state for one or more subscriptions.
 type Azure struct {
 	StorageAccounts []StorageAccount
@@ -465,6 +482,8 @@ type Azure struct {
 	KeyVaults       []KeyVault
 	WebApps         []WebApp
 	SQLServers      []SQLServer
+	CosmosAccounts  []CosmosAccount
+	DefenderPlans   []DefenderPlan
 	SecretHits      []SecretHit
 }
 
@@ -762,6 +781,20 @@ func (s *State) AddKeyVault(v KeyVault) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Azure.KeyVaults = append(s.Azure.KeyVaults, v)
+}
+
+// AddCosmosAccount appends a collected Cosmos DB account under lock.
+func (s *State) AddCosmosAccount(a CosmosAccount) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Azure.CosmosAccounts = append(s.Azure.CosmosAccounts, a)
+}
+
+// AddDefenderPlan appends a collected Defender for Cloud plan under lock.
+func (s *State) AddDefenderPlan(p DefenderPlan) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Azure.DefenderPlans = append(s.Azure.DefenderPlans, p)
 }
 
 // AddWebApp appends a collected Azure web app under lock.
