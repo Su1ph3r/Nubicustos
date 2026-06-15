@@ -58,6 +58,58 @@ func TestStorageHTTPSAndNetworkChecks(t *testing.T) {
 	}
 }
 
+func TestStorageMinTLSCheck(t *testing.T) {
+	st := stateWith(&state.Azure{StorageAccounts: []state.StorageAccount{
+		{Name: "old", Subscription: "s1", MinTLSVersion: "TLS1_0"},
+		{Name: "ok", Subscription: "s1", MinTLSVersion: "TLS1_2"},
+		{Name: "unknown", Subscription: "s1", MinTLSVersion: ""}, // undeterminable → not flagged
+	}})
+	fs := evalCheck(t, storageMinTLS{}, st)
+	if len(fs) != 1 || fs[0].Resource.ID != "old" {
+		t.Fatalf("only the sub-1.2 account should be flagged, got %+v", fs)
+	}
+}
+
+func TestStorageSharedKeyAccessCheck(t *testing.T) {
+	st := stateWith(&state.Azure{StorageAccounts: []state.StorageAccount{
+		{Name: "shared", Subscription: "s1", SharedKeyAccessAllowed: true},
+		{Name: "aadonly", Subscription: "s1", SharedKeyAccessAllowed: false},
+	}})
+	fs := evalCheck(t, storageSharedKeyAccess{}, st)
+	if len(fs) != 1 || fs[0].Resource.ID != "shared" {
+		t.Fatalf("only the shared-key account should be flagged, got %+v", fs)
+	}
+}
+
+func TestAppServiceChecks(t *testing.T) {
+	st := stateWith(&state.Azure{WebApps: []state.WebApp{
+		{Name: "weak", Subscription: "s1", HTTPSOnly: false, MinTLSVersion: "1.0", FtpsState: "AllAllowed"},
+	}})
+	if fs := evalCheck(t, appServiceNotHTTPSOnly{}, st); len(fs) != 1 {
+		t.Fatalf("expected https-only finding, got %d", len(fs))
+	}
+	if fs := evalCheck(t, appServiceMinTLS{}, st); len(fs) != 1 {
+		t.Fatalf("expected min-tls finding, got %d", len(fs))
+	}
+	if fs := evalCheck(t, appServiceFTPSInsecure{}, st); len(fs) != 1 {
+		t.Fatalf("expected ftps finding, got %d", len(fs))
+	}
+	// A hardened web app produces none.
+	hardened := stateWith(&state.Azure{WebApps: []state.WebApp{
+		{Name: "good", HTTPSOnly: true, MinTLSVersion: "1.2", FtpsState: "Disabled"},
+	}})
+	for _, c := range []engine.Check{appServiceNotHTTPSOnly{}, appServiceMinTLS{}, appServiceFTPSInsecure{}} {
+		if fs := evalCheck(t, c, hardened); len(fs) != 0 {
+			t.Fatalf("%s: hardened web app should not be flagged, got %d", c.Spec().ID, len(fs))
+		}
+	}
+	// An undeterminable TLS version (empty config read) is not flagged.
+	unknownTLS := stateWith(&state.Azure{WebApps: []state.WebApp{{Name: "x", HTTPSOnly: true, MinTLSVersion: "", FtpsState: ""}}})
+	if fs := evalCheck(t, appServiceMinTLS{}, unknownTLS); len(fs) != 0 {
+		t.Fatalf("empty min-tls should not be flagged, got %d", len(fs))
+	}
+}
+
 func TestNSGOpenIngressSensitivePort(t *testing.T) {
 	st := stateWith(&state.Azure{NSGs: []state.NetworkSecurityGroup{
 		{Name: "web", Subscription: "s1", Rules: []state.NSGRule{
@@ -163,7 +215,11 @@ func TestNSGZeroLengthCIDRIsInternet(t *testing.T) {
 func TestNilAzureStateNoPanic(t *testing.T) {
 	st := state.New()
 	st.Azure = nil
-	for _, c := range []engine.Check{storageBlobPublic{}, storageNotHTTPSOnly{}, storageNetworkOpen{}, nsgOpenIngress{}, kvSoftDelete{}, kvPurgeProtection{}, kvNetworkOpen{}} {
+	for _, c := range []engine.Check{
+		storageBlobPublic{}, storageNotHTTPSOnly{}, storageNetworkOpen{}, storageMinTLS{}, storageSharedKeyAccess{},
+		nsgOpenIngress{}, kvSoftDelete{}, kvPurgeProtection{}, kvNetworkOpen{},
+		appServiceNotHTTPSOnly{}, appServiceMinTLS{}, appServiceFTPSInsecure{},
+	} {
 		if fs := evalCheck(t, c, st); len(fs) != 0 {
 			t.Fatalf("%s on nil azure state should yield nothing, got %d", c.Spec().ID, len(fs))
 		}

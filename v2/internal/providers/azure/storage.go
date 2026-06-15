@@ -17,8 +17,8 @@ type storageCollector struct{}
 func (storageCollector) Name() string { return "azure:storage" }
 
 // Collect gathers storage-account posture across the in-scope subscriptions:
-// anonymous blob access, HTTPS enforcement, minimum TLS, and the network rule
-// default action.
+// anonymous blob access, HTTPS enforcement, minimum TLS, shared-key (account-key)
+// auth, and the network rule default action.
 func (storageCollector) Collect(sc *engine.ScanContext, st *state.State) error {
 	if sc.Provider != "azure" || sc.Azure.Credential == nil {
 		return nil
@@ -56,6 +56,10 @@ func (storageCollector) Collect(sc *engine.ScanContext, st *state.State) error {
 					if nrs := p.NetworkRuleSet; nrs != nil && nrs.DefaultAction != nil {
 						sa.NetworkDefaultAllow = *nrs.DefaultAction == armstorage.DefaultActionAllow
 					}
+					// Azure leaves AllowSharedKeyAccess nil when never configured, and
+					// the platform default is to permit shared-key auth — so nil and
+					// explicit true both mean "allowed".
+					sa.SharedKeyAccessAllowed = p.AllowSharedKeyAccess == nil || *p.AllowSharedKeyAccess
 				}
 				st.AddStorageAccount(sa)
 			}

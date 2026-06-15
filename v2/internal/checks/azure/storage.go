@@ -16,6 +16,8 @@ func init() {
 	engine.RegisterCheck(storageBlobPublic{})
 	engine.RegisterCheck(storageNotHTTPSOnly{})
 	engine.RegisterCheck(storageNetworkOpen{})
+	engine.RegisterCheck(storageMinTLS{})
+	engine.RegisterCheck(storageSharedKeyAccess{})
 }
 
 // storageResource builds the normalized resource for a storage account.
@@ -110,6 +112,68 @@ func (c storageNetworkOpen) Evaluate(_ *engine.ScanContext, st *state.State) ([]
 		}
 		desc := fmt.Sprintf("Storage account %q network rule set defaults to Allow (open to all networks).", a.Name)
 		poc := fmt.Sprintf("az storage account show --name %s --resource-group %s --query networkRuleSet.defaultAction", a.Name, a.ResourceGroup)
+		out = append(out, findings.New(c.Spec(), storageResource(a), desc, poc, now))
+	}
+	return out, nil
+}
+
+type storageMinTLS struct{}
+
+func (storageMinTLS) Spec() findings.CheckSpec {
+	return findings.CheckSpec{
+		ID: "azure_storage_min_tls", Title: "Storage account allows TLS below 1.2",
+		Provider: "azure", Service: "storage", Severity: findings.SeverityMedium,
+		Rationale:   "A minimum TLS version below 1.2 permits clients to negotiate deprecated, weak protocol versions with known cryptographic weaknesses.",
+		Impact:      "Traffic to the account can be negotiated down to TLS 1.0/1.1, exposing data in transit to downgrade and interception attacks.",
+		Remediation: "az storage account update --name <name> --resource-group <rg> --min-tls-version TLS1_2",
+		Compliance:  []findings.ComplianceRef{{Framework: "CIS Azure 2.0", Control: "3.15"}},
+	}
+}
+
+func (c storageMinTLS) Evaluate(_ *engine.ScanContext, st *state.State) ([]findings.Finding, error) {
+	if st.Azure == nil {
+		return nil, nil
+	}
+	now := time.Now().UTC()
+	var out []findings.Finding
+	for _, a := range st.Azure.StorageAccounts {
+		// An empty value means the minimum TLS version could not be determined;
+		// only flag an account that explicitly permits a version below 1.2.
+		if a.MinTLSVersion == "" || a.MinTLSVersion == "TLS1_2" {
+			continue
+		}
+		desc := fmt.Sprintf("Storage account %q sets a minimum TLS version of %s (below TLS1_2).", a.Name, a.MinTLSVersion)
+		poc := fmt.Sprintf("az storage account show --name %s --resource-group %s --query minimumTlsVersion", a.Name, a.ResourceGroup)
+		out = append(out, findings.New(c.Spec(), storageResource(a), desc, poc, now))
+	}
+	return out, nil
+}
+
+type storageSharedKeyAccess struct{}
+
+func (storageSharedKeyAccess) Spec() findings.CheckSpec {
+	return findings.CheckSpec{
+		ID: "azure_storage_shared_key_access", Title: "Storage account permits shared-key (account-key) authorization",
+		Provider: "azure", Service: "storage", Severity: findings.SeverityMedium,
+		Rationale:   "Shared-key access lets anyone holding the account key act as the account with full data-plane control, bypassing Azure AD identity, RBAC, and conditional access.",
+		Impact:      "A leaked account key grants complete, unattributable access to all data in the account; rotating it disrupts every legitimate consumer.",
+		Remediation: "Disable shared-key auth and require Azure AD: az storage account update --name <name> --resource-group <rg> --allow-shared-key-access false",
+		Compliance:  []findings.ComplianceRef{{Framework: "CIS Azure 2.0", Control: "3.8"}},
+	}
+}
+
+func (c storageSharedKeyAccess) Evaluate(_ *engine.ScanContext, st *state.State) ([]findings.Finding, error) {
+	if st.Azure == nil {
+		return nil, nil
+	}
+	now := time.Now().UTC()
+	var out []findings.Finding
+	for _, a := range st.Azure.StorageAccounts {
+		if !a.SharedKeyAccessAllowed {
+			continue
+		}
+		desc := fmt.Sprintf("Storage account %q permits shared-key (account-key) authorization.", a.Name)
+		poc := fmt.Sprintf("az storage account show --name %s --resource-group %s --query allowSharedKeyAccess", a.Name, a.ResourceGroup)
 		out = append(out, findings.New(c.Spec(), storageResource(a), desc, poc, now))
 	}
 	return out, nil

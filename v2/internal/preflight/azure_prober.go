@@ -123,6 +123,27 @@ func liveAzureReads(cred azcore.TokenCredential, subscription string) map[string
 			}
 			return drainFirst(ctx, c.NewListPager(nil))
 		},
+		"Microsoft.Web/sites/config/Read": func(ctx context.Context) error {
+			// Reading a web app's configuration needs an actual app; find one first.
+			c, err := armappservice.NewWebAppsClient(subscription, cred, nil)
+			if err != nil {
+				return err
+			}
+			pager := c.NewListPager(nil)
+			if !pager.More() {
+				return errNoResource
+			}
+			page, err := pager.NextPage(ctx)
+			if err != nil {
+				return err
+			}
+			if len(page.Value) == 0 || page.Value[0] == nil || page.Value[0].Name == nil {
+				return errNoResource
+			}
+			site := page.Value[0]
+			_, err = c.GetConfiguration(ctx, rgFromID(deref(site.ID)), deref(site.Name), nil)
+			return err
+		},
 		"Microsoft.Web/sites/config/list/Action": func(ctx context.Context) error {
 			// Listing a web app's settings needs an actual app; find one first.
 			c, err := armappservice.NewWebAppsClient(subscription, cred, nil)

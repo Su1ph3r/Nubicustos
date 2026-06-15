@@ -19,9 +19,10 @@ var nubicustosAzureActions = []string{
 	"Microsoft.Network/networkSecurityGroups/read",
 	// key vault posture
 	"Microsoft.KeyVault/vaults/read",
-	// control-plane secrets (App Service / Function apps)
+	// App Service posture + control-plane secrets (Function/Web apps)
 	"Microsoft.Web/sites/Read",
-	"Microsoft.Web/sites/config/list/Action",
+	"Microsoft.Web/sites/config/Read",       // GetConfiguration: min TLS, FTPS state (Reader-granted)
+	"Microsoft.Web/sites/config/list/Action", // list app settings / connection strings (needs Website Contributor)
 	// Note: Microsoft.Management/managementGroups/read is required only for the
 	// optional `scan --management-group` subtree scoping, so it is deliberately
 	// left out of the always-required set — a subscription-scoped operator would

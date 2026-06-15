@@ -353,10 +353,11 @@ type StorageAccount struct {
 	ResourceGroup         string
 	Subscription          string
 	Location              string
-	AllowBlobPublicAccess bool   // account permits anonymous blob/container access
-	HTTPSOnly             bool   // EnableHTTPSTrafficOnly
-	MinTLSVersion         string // e.g. "TLS1_2"
-	NetworkDefaultAllow   bool   // network rule set default action == Allow (open to all networks)
+	AllowBlobPublicAccess  bool   // account permits anonymous blob/container access
+	HTTPSOnly              bool   // EnableHTTPSTrafficOnly
+	MinTLSVersion          string // e.g. "TLS1_2"
+	NetworkDefaultAllow    bool   // network rule set default action == Allow (open to all networks)
+	SharedKeyAccessAllowed bool   // shared-key (account-key) auth permitted; nil from Azure means allowed
 }
 
 // NSGRule is a single inbound/outbound security rule on a network security group.
@@ -420,11 +421,23 @@ type KeyVault struct {
 	NetworkDefaultAllow bool // network ACL default action == Allow
 }
 
+// WebApp is the collected posture of an Azure App Service / Function web app.
+type WebApp struct {
+	Name          string
+	ResourceGroup string
+	Subscription  string
+	Location      string
+	HTTPSOnly     bool   // configures the site to accept only HTTPS requests
+	MinTLSVersion string // SiteConfig minimum TLS version, e.g. "1.0", "1.1", "1.2"
+	FtpsState     string // "AllAllowed" (plain FTP permitted) | "FtpsOnly" | "Disabled"
+}
+
 // Azure is the collected Azure-side state for one or more subscriptions.
 type Azure struct {
 	StorageAccounts []StorageAccount
 	NSGs            []NetworkSecurityGroup
 	KeyVaults       []KeyVault
+	WebApps         []WebApp
 	SecretHits      []SecretHit
 }
 
@@ -602,6 +615,13 @@ func (s *State) AddKeyVault(v KeyVault) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Azure.KeyVaults = append(s.Azure.KeyVaults, v)
+}
+
+// AddWebApp appends a collected Azure web app under lock.
+func (s *State) AddWebApp(w WebApp) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Azure.WebApps = append(s.Azure.WebApps, w)
 }
 
 // AddAzureSecretHit appends a detected Azure control-plane secret under lock.
