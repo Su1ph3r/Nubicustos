@@ -173,6 +173,16 @@ type EBSVolume struct {
 	Encrypted bool
 }
 
+// --- Lambda (regional) ------------------------------------------------------
+
+// LambdaFunction is the collected public-exposure posture of a Lambda function.
+type LambdaFunction struct {
+	Name         string
+	Region       string
+	PublicURL    bool // a function URL with AuthType NONE (anonymous invoke over HTTPS)
+	PublicPolicy bool // resource policy allows Principal "*" with no restricting condition
+}
+
 // --- RDS (regional) ---------------------------------------------------------
 
 // RDSInstance is the collected posture of an RDS instance.
@@ -327,6 +337,7 @@ type AWS struct {
 	EBSEncryptionByDefault map[string]bool // region -> enabled
 
 	RDSInstances []RDSInstance
+	Lambdas      []LambdaFunction
 	Trails       []CloudTrailTrail
 
 	KMSKeys                  []KMSKey
@@ -903,6 +914,13 @@ func (s *State) AddRDSInstance(r RDSInstance) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.AWS.RDSInstances = append(s.AWS.RDSInstances, r)
+}
+
+// AddLambdaFunction appends a collected Lambda function under lock.
+func (s *State) AddLambdaFunction(f LambdaFunction) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.AWS.Lambdas = append(s.AWS.Lambdas, f)
 }
 
 // AddTrail appends a collected CloudTrail trail under lock.

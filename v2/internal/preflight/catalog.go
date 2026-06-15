@@ -111,6 +111,9 @@ var nubicustosAWSActions = []string{
 	"route53:ListResourceRecordSets",
 	// Cloud-side secrets detection (§9.2 — Lambda env, EC2 userdata, SSM plaintext)
 	"lambda:ListFunctions",
+	// Lambda public-exposure posture (function URL + resource policy)
+	"lambda:GetFunctionUrlConfig",
+	"lambda:GetPolicy",
 	"ec2:DescribeInstanceAttribute",
 	"ssm:DescribeParameters",
 	"ssm:GetParameters",
