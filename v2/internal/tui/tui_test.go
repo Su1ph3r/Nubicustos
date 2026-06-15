@@ -80,7 +80,7 @@ func TestSwitchToFindingsByNumber(t *testing.T) {
 
 func TestTabCyclesViews(t *testing.T) {
 	m := New(sampleData(), nil)
-	for _, want := range []viewKind{viewFindings, viewPaths, viewTools, viewDashboard} {
+	for _, want := range []viewKind{viewFindings, viewPaths, viewCompliance, viewTools, viewDashboard} {
 		m = send(m, key("tab"))
 		if m.view != want {
 			t.Fatalf("tab should advance to view %d, got %d", want, m.view)

@@ -43,7 +43,7 @@ func (f *fakeActions) Preflight() ([]ToolReadiness, error) {
 
 func toolsModel(a Actions) Model {
 	m := New(sampleData(), a)
-	return send(m, key("4")) // switch to Tools view
+	return send(m, key("5")) // switch to Tools view
 }
 
 func TestToolsViewListsToolsWithStatus(t *testing.T) {
@@ -64,7 +64,7 @@ func TestToolsViewListsToolsWithStatus(t *testing.T) {
 }
 
 func TestToolsViewNilActionsIsReadOnly(t *testing.T) {
-	out := send(New(sampleData(), nil), key("4")).View()
+	out := send(New(sampleData(), nil), key("5")).View()
 	if !strings.Contains(out, "unavailable") {
 		t.Fatalf("a nil Actions should render the Tools view as unavailable:\n%s", out)
 	}

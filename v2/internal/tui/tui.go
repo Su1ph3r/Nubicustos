@@ -36,12 +36,13 @@ const (
 	viewDashboard viewKind = iota
 	viewFindings
 	viewPaths
+	viewCompliance
 	viewTools
 )
 
-const viewCount = 4
+const viewCount = 5
 
-var viewNames = []string{"Dashboard", "Findings", "Attack Paths", "Tools"}
+var viewNames = []string{"Dashboard", "Findings", "Attack Paths", "Compliance", "Tools"}
 
 // Model is the root bubbletea model.
 type Model struct {
@@ -195,6 +196,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.view, m.showDetail = viewPaths, false
 			return m, nil
 		case "4":
+			m.view, m.showDetail = viewCompliance, false
+			return m, nil
+		case "5":
 			m.view, m.showDetail = viewTools, false
 			return m, nil
 		case "tab":
@@ -258,6 +262,8 @@ func (m Model) View() string {
 		b.WriteString(m.findingsView())
 	case viewPaths:
 		b.WriteString(m.pathsView())
+	case viewCompliance:
+		b.WriteString(m.complianceView())
 	case viewTools:
 		b.WriteString(m.toolsView())
 	}
@@ -284,7 +290,7 @@ func (m Model) footer() string {
 	if m.editing {
 		return theme.Muted.Render("type a target · enter/esc: done")
 	}
-	keys := "1/2/3/4 or tab: switch · q: quit"
+	keys := "1-5 or tab: switch · q: quit"
 	switch m.view {
 	case viewFindings:
 		keys = "↑/↓: move · enter: detail · esc: back · " + keys
