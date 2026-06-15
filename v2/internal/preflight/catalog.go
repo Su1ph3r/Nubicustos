@@ -1,7 +1,7 @@
 // Package preflight answers, for a given credential, "does this identity have
 // the access each scanning tool needs?" — before a scan is run. It verifies the
 // required IAM actions per tool (Nubicustos's own native checks plus optional
-// external tools like Prowler and ScoutSuite) and produces a client-ready
+// external tools like Prowler) and produces a client-ready
 // report of exactly what is missing and an attachable least-privilege policy to
 // grant it.
 //
@@ -191,24 +191,6 @@ var AWSTools = []Tool{
 			"wellarchitected:ListWorkloads",
 		},
 		RemediationPolicyName: "ProwlerAdditionsPolicy",
-	},
-	{
-		Key: "scoutsuite", Name: "ScoutSuite",
-		Description:             "Multi-cloud security auditing",
-		RequiredManagedPolicies: []string{"ReadOnlyAccess", "SecurityAudit"},
-		RequiredActions: []string{
-			"s3:GetBucketPublicAccessBlock",
-			"s3:GetBucketAcl",
-			"s3:GetBucketPolicy",
-			"ec2:DescribeInstances",
-			"ec2:DescribeSecurityGroups",
-			"iam:ListUsers",
-			"iam:ListRoles",
-			"iam:GetAccountPasswordPolicy",
-			"cloudtrail:DescribeTrails",
-			"rds:DescribeDBInstances",
-		},
-		RemediationPolicyName: "ScoutSuiteReadOnlyPolicy",
 	},
 	{
 		Key: "cloudsploit", Name: "CloudSploit",

@@ -339,7 +339,7 @@ resource types today: `aws_s3_bucket`, `aws_rds_instance`, `aws_iam_user`,
 
 `preflight` answers, before a scan runs, whether the identity behind a
 credential holds the permissions each tool requires — Nubicustos's own native
-checks plus the optional external tools (Prowler, ScoutSuite, CloudSploit) — and
+checks plus the optional external tools (Prowler, CloudSploit) — and
 produces a client-ready report of exactly what is missing and how to grant it.
 It supports all four providers (`--provider aws | azure | gcp | k8s`).
 
@@ -473,7 +473,7 @@ request. Four views (`1`/`2`/`3`/`4` or `tab` to switch):
   a spinner, and on completion the views refresh to the new scan's findings.
   Started with `tui --preflight` (plus a credential), this view also shows a
   **cloud access** group — `p` runs the access preflight and annotates each
-  cloud-posture tool (Nubicustos / Prowler / ScoutSuite / CloudSploit) with its
+  cloud-posture tool (Nubicustos / Prowler / CloudSploit) with its
   `ready`/`partial`/`failed` readiness for the active credential.
 
 Severity is color-coded throughout (critical/high/medium/low/info).

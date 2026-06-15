@@ -61,7 +61,7 @@ func newPreflightCmd() *cobra.Command {
 		Short: "Check whether a credential has the access each scanning tool needs",
 		Long: "Verify, read-only and before any scan, that the identity behind a\n" +
 			"credential holds the permissions Nubicustos's own checks and the optional\n" +
-			"external tools (Prowler, ScoutSuite, CloudSploit) require. Leads with IAM\n" +
+			"external tools (Prowler, CloudSploit) require. Leads with IAM\n" +
 			"policy simulation for exact per-action allow/deny and cross-checks with a\n" +
 			"thin live read-probe (catching SCP/boundary denials simulation cannot see).\n" +
 			"Reports exactly what is missing and emits an attachable least-privilege\n" +
@@ -365,7 +365,7 @@ func selectTools(keys []string, org bool) ([]preflight.Tool, error) {
 	for _, k := range keys {
 		t, ok := preflight.AWSToolByKey(strings.TrimSpace(k))
 		if !ok {
-			return nil, fmt.Errorf("unknown tool %q (known: nubicustos, prowler, scoutsuite, cloudsploit)", k)
+			return nil, fmt.Errorf("unknown tool %q (known: nubicustos, prowler, cloudsploit)", k)
 		}
 		out = append(out, preflight.AWSToolWithOrg(t, org))
 	}

@@ -253,7 +253,7 @@ func TestCatalogNativeAndExternalPresent(t *testing.T) {
 	if _, ok := AWSToolByKey("nubicustos"); !ok {
 		t.Fatal("native nubicustos tool must be in the catalog")
 	}
-	for _, k := range []string{"prowler", "scoutsuite", "cloudsploit"} {
+	for _, k := range []string{"prowler", "cloudsploit"} {
 		if _, ok := AWSToolByKey(k); !ok {
 			t.Fatalf("external tool %q must be in the catalog", k)
 		}
