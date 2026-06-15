@@ -475,6 +475,14 @@ type DefenderPlan struct {
 	Tier         string // "Free" | "Standard"
 }
 
+// AzureCustomRole is a custom RBAC role definition and whether its permissions
+// include a wildcard action.
+type AzureCustomRole struct {
+	Name           string
+	Subscription   string
+	WildcardAction bool // an Actions entry is "*" (grants every control-plane action)
+}
+
 // Azure is the collected Azure-side state for one or more subscriptions.
 type Azure struct {
 	StorageAccounts []StorageAccount
@@ -484,6 +492,7 @@ type Azure struct {
 	SQLServers      []SQLServer
 	CosmosAccounts  []CosmosAccount
 	DefenderPlans   []DefenderPlan
+	CustomRoles     []AzureCustomRole
 	SecretHits      []SecretHit
 }
 
@@ -781,6 +790,13 @@ func (s *State) AddKeyVault(v KeyVault) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Azure.KeyVaults = append(s.Azure.KeyVaults, v)
+}
+
+// AddAzureCustomRole appends a collected custom RBAC role under lock.
+func (s *State) AddAzureCustomRole(r AzureCustomRole) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Azure.CustomRoles = append(s.Azure.CustomRoles, r)
 }
 
 // AddCosmosAccount appends a collected Cosmos DB account under lock.

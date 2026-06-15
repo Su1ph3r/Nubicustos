@@ -286,6 +286,17 @@ func TestDefenderPlanFree(t *testing.T) {
 	}
 }
 
+func TestRBACCustomRoleWildcard(t *testing.T) {
+	st := stateWith(&state.Azure{CustomRoles: []state.AzureCustomRole{
+		{Name: "superops", Subscription: "s1", WildcardAction: true},
+		{Name: "scoped", Subscription: "s1", WildcardAction: false},
+	}})
+	fs := evalCheck(t, rbacCustomRoleWildcard{}, st)
+	if len(fs) != 1 || fs[0].Resource.Name != "superops" || fs[0].Severity != findings.SeverityHigh {
+		t.Fatalf("only the wildcard custom role should be flagged (high), got %+v", fs)
+	}
+}
+
 func TestNilAzureStateNoPanic(t *testing.T) {
 	st := state.New()
 	st.Azure = nil
@@ -294,7 +305,7 @@ func TestNilAzureStateNoPanic(t *testing.T) {
 		nsgOpenIngress{}, kvSoftDelete{}, kvPurgeProtection{}, kvNetworkOpen{},
 		appServiceNotHTTPSOnly{}, appServiceMinTLS{}, appServiceFTPSInsecure{},
 		sqlPublicNetwork{}, sqlFirewallAllowAll{}, sqlMinTLS{},
-		cosmosPublicNetwork{}, cosmosLocalAuth{}, defenderPlanFree{},
+		cosmosPublicNetwork{}, cosmosLocalAuth{}, defenderPlanFree{}, rbacCustomRoleWildcard{},
 	} {
 		if fs := evalCheck(t, c, st); len(fs) != 0 {
 			t.Fatalf("%s on nil azure state should yield nothing, got %d", c.Spec().ID, len(fs))

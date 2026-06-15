@@ -26,6 +26,8 @@ var nubicustosAzureActions = []string{
 	"Microsoft.DocumentDB/databaseAccounts/read",
 	// Defender for Cloud plan tiers
 	"Microsoft.Security/pricings/read",
+	// RBAC custom role definitions
+	"Microsoft.Authorization/roleDefinitions/read",
 	// App Service posture + control-plane secrets (Function/Web apps)
 	"Microsoft.Web/sites/Read",
 	"Microsoft.Web/sites/config/Read",        // GetConfiguration: min TLS, FTPS state (Reader-granted)
