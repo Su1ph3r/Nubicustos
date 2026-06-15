@@ -119,6 +119,11 @@ var nubicustosAWSActions = []string{
 	"sns:GetTopicAttributes",
 	"sqs:ListQueues",
 	"sqs:GetQueueAttributes",
+	// Redshift posture
+	"redshift:DescribeClusters",
+	// ECR posture (scan-on-push + repository policy)
+	"ecr:DescribeRepositories",
+	"ecr:GetRepositoryPolicy",
 	"ec2:DescribeInstanceAttribute",
 	"ssm:DescribeParameters",
 	"ssm:GetParameters",

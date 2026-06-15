@@ -193,6 +193,22 @@ type MessagingResource struct {
 	PublicPolicy bool // resource policy allows Principal "*" with no restricting condition
 }
 
+// RedshiftCluster is the collected posture of a Redshift cluster.
+type RedshiftCluster struct {
+	ID        string
+	Region    string
+	Public    bool // publicly accessible (reachable outside the VPC)
+	Encrypted bool // data at rest encrypted
+}
+
+// ECRRepository is the collected posture of an Elastic Container Registry repo.
+type ECRRepository struct {
+	Name         string
+	Region       string
+	ScanOnPush   bool // image vulnerability scanning on push enabled
+	PublicPolicy bool // repository policy allows Principal "*" with no condition
+}
+
 // --- RDS (regional) ---------------------------------------------------------
 
 // RDSInstance is the collected posture of an RDS instance.
@@ -349,6 +365,8 @@ type AWS struct {
 	RDSInstances []RDSInstance
 	Lambdas      []LambdaFunction
 	Messaging    []MessagingResource
+	Redshift     []RedshiftCluster
+	ECRRepos     []ECRRepository
 	Trails       []CloudTrailTrail
 
 	KMSKeys                  []KMSKey
@@ -951,6 +969,20 @@ func (s *State) AddRDSInstance(r RDSInstance) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.AWS.RDSInstances = append(s.AWS.RDSInstances, r)
+}
+
+// AddRedshiftCluster appends a collected Redshift cluster under lock.
+func (s *State) AddRedshiftCluster(c RedshiftCluster) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.AWS.Redshift = append(s.AWS.Redshift, c)
+}
+
+// AddECRRepository appends a collected ECR repository under lock.
+func (s *State) AddECRRepository(r ECRRepository) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.AWS.ECRRepos = append(s.AWS.ECRRepos, r)
 }
 
 // AddMessagingResource appends a collected SNS topic / SQS queue under lock.
