@@ -14,6 +14,9 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/Su1ph3r/nubicustos/internal/compliance"
+	"github.com/Su1ph3r/nubicustos/internal/engine"
+	"github.com/Su1ph3r/nubicustos/internal/findings"
 	"github.com/Su1ph3r/nubicustos/internal/store"
 )
 
@@ -48,7 +51,33 @@ func NewServer(st *store.Store, version string) *server.MCPServer {
 		mcp.WithString("scan", mcp.Description("Scan id, or \"latest\" (default)."), mcp.DefaultString("latest"))),
 		listAttackPaths(st))
 
+	s.AddTool(mcp.NewTool("compliance_report",
+		mcp.WithDescription("Map the native check catalog (and a scan's open findings) onto a compliance framework's controls. Each control lists the checks that assess it and is marked pass/fail by the scan."),
+		mcp.WithString("framework", mcp.Description("Framework: soc2 | pci | nist."), mcp.Required()),
+		mcp.WithString("scan", mcp.Description("Scan id, or \"latest\" (default)."), mcp.DefaultString("latest"))),
+		complianceReport(st))
+
 	return s
+}
+
+func complianceReport(st *store.Store) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		framework := req.GetString("framework", "")
+		if !compliance.ValidFramework(framework) {
+			return mcp.NewToolResultError("framework must be soc2 | pci | nist"), nil
+		}
+		var specs []findings.CheckSpec
+		for _, c := range engine.Checks() {
+			specs = append(specs, c.Spec())
+		}
+		// Overlay a scan's findings for pass/fail when a scan exists; otherwise
+		// return the pure coverage matrix.
+		var fs []findings.Finding
+		if scanID, err := resolveScan(ctx, st, req.GetString("scan", "latest")); err == nil {
+			fs, _ = st.LoadFindings(ctx, scanID, store.FindingFilter{})
+		}
+		return jsonResult(compliance.Build(framework, specs, fs))
+	}
 }
 
 // resolveScan maps a "scan" argument ("" or "latest" → most recent) to a scan id.
