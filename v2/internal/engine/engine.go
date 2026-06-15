@@ -221,6 +221,10 @@ func runScan(sc *ScanContext, cs []Collector, cks []Check) *Result {
 	progress.ReportPhase(sc.Progress, progress.PhaseReachability, "")
 	rch := reachability.Solve(st.AWS)
 	reachability.Annotate(res.Findings, st.AWS, rch)
+	// Azure exposure findings get the same false-positive reduction: an NSG open
+	// to the internet only matters if it governs a NIC with a public IP (§9.5).
+	arch := reachability.SolveAzure(st.Azure)
+	reachability.AnnotateAzure(res.Findings, st.Azure, arch)
 	progress.ReportPhase(sc.Progress, progress.PhaseGraph, "")
 	res.Graph = graph.Build(st, rch)
 	res.State = st

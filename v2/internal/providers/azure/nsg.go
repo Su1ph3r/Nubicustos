@@ -41,6 +41,7 @@ func (nsgCollector) Collect(sc *engine.ScanContext, st *state.State) error {
 					continue
 				}
 				nsg := state.NetworkSecurityGroup{
+					ID:            str(g.ID),
 					Name:          str(g.Name),
 					ResourceGroup: resourceGroupFromID(str(g.ID)),
 					Subscription:  sub,

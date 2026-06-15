@@ -113,6 +113,20 @@ func liveAzureReads(cred azcore.TokenCredential, subscription string) map[string
 			}
 			return drainFirst(ctx, c.NewListAllPager(nil))
 		},
+		"Microsoft.Network/networkInterfaces/read": func(ctx context.Context) error {
+			c, err := armnetwork.NewInterfacesClient(subscription, cred, nil)
+			if err != nil {
+				return err
+			}
+			return drainFirst(ctx, c.NewListAllPager(nil))
+		},
+		"Microsoft.Network/virtualNetworks/read": func(ctx context.Context) error {
+			c, err := armnetwork.NewVirtualNetworksClient(subscription, cred, nil)
+			if err != nil {
+				return err
+			}
+			return drainFirst(ctx, c.NewListAllPager(nil))
+		},
 		"Microsoft.KeyVault/vaults/read": func(ctx context.Context) error {
 			c, err := armkeyvault.NewVaultsClient(subscription, cred, nil)
 			if err != nil {

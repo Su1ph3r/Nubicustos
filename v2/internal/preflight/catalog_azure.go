@@ -15,8 +15,10 @@ var nubicustosAzureActions = []string{
 	"Microsoft.Resources/subscriptions/read",
 	// storage posture
 	"Microsoft.Storage/storageAccounts/read",
-	// network posture (NSG rules)
+	// network posture (NSG rules) + reachability topology (NICs, VNets/subnets)
 	"Microsoft.Network/networkSecurityGroups/read",
+	"Microsoft.Network/networkInterfaces/read",
+	"Microsoft.Network/virtualNetworks/read",
 	// key vault posture
 	"Microsoft.KeyVault/vaults/read",
 	// SQL posture (server config + firewall rules)

@@ -56,9 +56,9 @@ func TestAllChecksUnique(t *testing.T) {
 	// vpc, snapshots, secretsmanager, elbv2, acm, route53, lambda, messaging,
 	// redshift, ecr, secrets-scan = 19;
 	// Azure storage, nsg, keyvault, appservice, sql, cosmos, defender, rbac,
-	// entra, secrets-scan = 10; GCP storage, firewall, iam, secrets-scan, cloudsql,
-	// compute, kms, gke = 8; K8s pods, rbac, secrets-scan = 3. Total = 40.
-	const wantCollectors = 40
+	// entra, network, secrets-scan = 11; GCP storage, firewall, iam, secrets-scan,
+	// cloudsql, compute, kms, gke = 8; K8s pods, rbac, secrets-scan = 3. Total = 41.
+	const wantCollectors = 41
 	if got := len(engine.Collectors()); got != wantCollectors {
 		t.Errorf("registered collectors = %d, want %d", got, wantCollectors)
 	}

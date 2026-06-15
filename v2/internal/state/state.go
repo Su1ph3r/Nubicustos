@@ -443,11 +443,29 @@ func sourceIsInternet(s string) bool {
 
 // NetworkSecurityGroup is the collected rule posture of an Azure NSG.
 type NetworkSecurityGroup struct {
+	ID            string // ARM resource id (for NIC/subnet association in reachability)
 	Name          string
 	ResourceGroup string
 	Subscription  string
 	Location      string
 	Rules         []NSGRule
+}
+
+// AzureNIC is a network interface's reachability-relevant attachment: whether it
+// has a public IP, the NSG bound directly to it, and the subnet it sits in
+// (whose NSG also applies). Used by the Azure reachability solver (§9.5).
+type AzureNIC struct {
+	Name        string
+	HasPublicIP bool
+	NSGID       string // NIC-level NSG (empty if none)
+	SubnetID    string
+}
+
+// AzureSubnetNSG maps a subnet to the NSG bound to it (subnet-level NSGs apply to
+// every NIC in the subnet).
+type AzureSubnetNSG struct {
+	SubnetID string
+	NSGID    string
 }
 
 // KeyVault is the collected posture of an Azure key vault.
@@ -552,6 +570,8 @@ type Azure struct {
 	DefenderPlans    []DefenderPlan
 	CustomRoles      []AzureCustomRole
 	AppRegistrations []AzureAppRegistration
+	NICs             []AzureNIC
+	SubnetNSGs       []AzureSubnetNSG
 	SecretHits       []SecretHit
 }
 
@@ -843,6 +863,20 @@ func (s *State) AddNSG(g NetworkSecurityGroup) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Azure.NSGs = append(s.Azure.NSGs, g)
+}
+
+// AddAzureNIC appends a collected network interface under lock.
+func (s *State) AddAzureNIC(n AzureNIC) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Azure.NICs = append(s.Azure.NICs, n)
+}
+
+// AddAzureSubnetNSG appends a collected subnet→NSG association under lock.
+func (s *State) AddAzureSubnetNSG(n AzureSubnetNSG) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Azure.SubnetNSGs = append(s.Azure.SubnetNSGs, n)
 }
 
 // AddKeyVault appends a collected key vault under lock.
