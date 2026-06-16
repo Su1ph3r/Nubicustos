@@ -119,6 +119,9 @@ var nubicustosAWSActions = []string{
 	"sns:GetTopicAttributes",
 	"sqs:ListQueues",
 	"sqs:GetQueueAttributes",
+	// CloudWatch monitoring (CIS log-metric-filter + alarm coverage)
+	"logs:DescribeMetricFilters",
+	"cloudwatch:DescribeAlarms",
 	// Redshift posture
 	"redshift:DescribeClusters",
 	// ECR posture (scan-on-push + repository policy)

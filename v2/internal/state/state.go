@@ -224,6 +224,17 @@ type RDSInstance struct {
 	Port               int    // engine port (0 if unknown)
 }
 
+// --- CloudWatch monitoring (CIS log-metric-filter + alarm) ------------------
+
+// LogMetricFilter is a CloudWatch Logs metric filter and the metric names it
+// emits, used to verify CIS monitoring coverage (a filter for a sensitive event
+// plus an alarm on its metric).
+type LogMetricFilter struct {
+	Pattern     string
+	MetricNames []string
+	Region      string
+}
+
 // --- CloudTrail (regional, account-derived) ---------------------------------
 
 // CloudTrailTrail is the collected posture of a trail (deduped by ARN).
@@ -362,12 +373,14 @@ type AWS struct {
 	RouteTables            []RouteTable
 	EBSEncryptionByDefault map[string]bool // region -> enabled
 
-	RDSInstances []RDSInstance
-	Lambdas      []LambdaFunction
-	Messaging    []MessagingResource
-	Redshift     []RedshiftCluster
-	ECRRepos     []ECRRepository
-	Trails       []CloudTrailTrail
+	RDSInstances     []RDSInstance
+	Lambdas          []LambdaFunction
+	Messaging        []MessagingResource
+	Redshift         []RedshiftCluster
+	ECRRepos         []ECRRepository
+	LogMetricFilters []LogMetricFilter
+	AlarmedMetrics   []string // CloudWatch metric names that have an alarm
+	Trails           []CloudTrailTrail
 
 	KMSKeys                  []KMSKey
 	ConfigByRegion           map[string]ConfigStatus // region -> recorder status
@@ -1025,6 +1038,20 @@ func (s *State) AddMessagingResource(m MessagingResource) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.AWS.Messaging = append(s.AWS.Messaging, m)
+}
+
+// AddLogMetricFilter appends a collected CloudWatch Logs metric filter under lock.
+func (s *State) AddLogMetricFilter(f LogMetricFilter) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.AWS.LogMetricFilters = append(s.AWS.LogMetricFilters, f)
+}
+
+// AddAlarmedMetric records a CloudWatch metric name that has an alarm, under lock.
+func (s *State) AddAlarmedMetric(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.AWS.AlarmedMetrics = append(s.AWS.AlarmedMetrics, name)
 }
 
 // AddLambdaFunction appends a collected Lambda function under lock.
