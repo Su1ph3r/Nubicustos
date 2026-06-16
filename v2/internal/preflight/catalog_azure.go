@@ -32,6 +32,9 @@ var nubicustosAzureActions = []string{
 	"Microsoft.Authorization/roleDefinitions/read",
 	// Monitor: activity-log alerts (CIS 5.2)
 	"Microsoft.Insights/activityLogAlerts/read",
+	// Database flexible servers (MySQL + PostgreSQL)
+	"Microsoft.DBforMySQL/flexibleServers/read",
+	"Microsoft.DBforPostgreSQL/flexibleServers/read",
 	// App Service posture + control-plane secrets (Function/Web apps)
 	"Microsoft.Web/sites/Read",
 	"Microsoft.Web/sites/config/Read",        // GetConfiguration: min TLS, FTPS state (Reader-granted)

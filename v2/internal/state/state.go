@@ -606,6 +606,17 @@ type AzureMonitor struct {
 	AlertedOperations []string // operationName values covered by enabled alerts
 }
 
+// AzureDBFlexServer is the collected posture of an Azure Database flexible
+// server (MySQL or PostgreSQL).
+type AzureDBFlexServer struct {
+	Engine              string // "mysql" | "postgresql"
+	Name                string
+	ResourceGroup       string
+	Subscription        string
+	Location            string
+	PublicNetworkAccess bool
+}
+
 // Azure is the collected Azure-side state for one or more subscriptions.
 type Azure struct {
 	StorageAccounts  []StorageAccount
@@ -620,6 +631,7 @@ type Azure struct {
 	NICs             []AzureNIC
 	SubnetNSGs       []AzureSubnetNSG
 	Monitors         []AzureMonitor
+	DBFlexServers    []AzureDBFlexServer
 	SecretHits       []SecretHit
 }
 
@@ -955,6 +967,13 @@ func (s *State) AddKeyVault(v KeyVault) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Azure.KeyVaults = append(s.Azure.KeyVaults, v)
+}
+
+// AddAzureDBFlexServer appends a collected MySQL/PostgreSQL flexible server under lock.
+func (s *State) AddAzureDBFlexServer(d AzureDBFlexServer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Azure.DBFlexServers = append(s.Azure.DBFlexServers, d)
 }
 
 // AddAzureMonitor appends a subscription's monitoring posture under lock.

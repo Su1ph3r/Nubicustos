@@ -14,7 +14,9 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/keyvault/armkeyvault"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/managementgroups/armmanagementgroups"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/monitor/armmonitor"
+	armmysql "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/mysql/armmysqlflexibleservers"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
+	armpostgres "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/postgresql/armpostgresqlflexibleservers"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armsubscriptions"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/security/armsecurity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/sql/armsql"
@@ -170,6 +172,20 @@ func liveAzureReads(cred azcore.TokenCredential, subscription string) map[string
 				return err
 			}
 			return drainFirst(ctx, c.NewListBySubscriptionIDPager(nil))
+		},
+		"Microsoft.DBforMySQL/flexibleServers/read": func(ctx context.Context) error {
+			c, err := armmysql.NewServersClient(subscription, cred, nil)
+			if err != nil {
+				return err
+			}
+			return drainFirst(ctx, c.NewListPager(nil))
+		},
+		"Microsoft.DBforPostgreSQL/flexibleServers/read": func(ctx context.Context) error {
+			c, err := armpostgres.NewServersClient(subscription, cred, nil)
+			if err != nil {
+				return err
+			}
+			return drainFirst(ctx, c.NewListPager(nil))
 		},
 		"Microsoft.Sql/servers/firewallRules/read": func(ctx context.Context) error {
 			// Listing firewall rules needs an actual server; find one first.

@@ -340,6 +340,17 @@ func TestMonitorActivityAlertMissing(t *testing.T) {
 	}
 }
 
+func TestDBFlexPublicNetwork(t *testing.T) {
+	st := stateWith(&state.Azure{DBFlexServers: []state.AzureDBFlexServer{
+		{Engine: "mysql", Name: "db1", Subscription: "s1", PublicNetworkAccess: true},
+		{Engine: "postgresql", Name: "db2", Subscription: "s1", PublicNetworkAccess: false},
+	}})
+	fs := evalCheck(t, dbFlexPublicNetwork{}, st)
+	if len(fs) != 1 || fs[0].Resource.Name != "db1" || fs[0].Severity != findings.SeverityHigh {
+		t.Fatalf("only the public MySQL server should be flagged (high), got %+v", fs)
+	}
+}
+
 func TestNilAzureStateNoPanic(t *testing.T) {
 	st := state.New()
 	st.Azure = nil
@@ -350,7 +361,7 @@ func TestNilAzureStateNoPanic(t *testing.T) {
 		sqlPublicNetwork{}, sqlFirewallAllowAll{}, sqlMinTLS{},
 		cosmosPublicNetwork{}, cosmosLocalAuth{}, defenderPlanFree{}, rbacCustomRoleWildcard{},
 		entraFederatedCredential{}, entraMultiTenantApp{}, entraExpiredCredential{},
-		monitorActivityAlertMissing{},
+		monitorActivityAlertMissing{}, dbFlexPublicNetwork{},
 	} {
 		if fs := evalCheck(t, c, st); len(fs) != 0 {
 			t.Fatalf("%s on nil azure state should yield nothing, got %d", c.Spec().ID, len(fs))
