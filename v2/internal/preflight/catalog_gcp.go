@@ -31,6 +31,9 @@ var nubicustosGCPPermissions = []string{
 	// Monitoring (CIS 2.x: log metrics + alert policies)
 	"logging.logMetrics.list",
 	"monitoring.alertPolicies.list",
+	// Workload-identity federation (cross-cloud trust): pools + their providers
+	"iam.workloadIdentityPools.list",
+	"iam.workloadIdentityPoolProviders.list",
 }
 
 // GCPTools is the requirement catalog for GCP scanning. RequiredManagedPolicies

@@ -276,6 +276,26 @@ func TestCrossProjectSA(t *testing.T) {
 	}
 }
 
+func TestGCPCrossCloudFederation(t *testing.T) {
+	st := stateWith(&state.GCP{WIFProviders: []state.GCPWorkloadIdentityProvider{
+		{Project: "p1", Pool: "pool-aws", Provider: "aws-prov", Kind: "aws", AWSAccount: "111122223333"},
+		{Project: "p1", Pool: "pool-az", Provider: "az-prov", Kind: "oidc", Issuer: "https://sts.windows.net/tenant-guid/"},
+		{Project: "p1", Pool: "pool-gh", Provider: "gh-prov", Kind: "oidc", Issuer: "https://token.actions.githubusercontent.com"}, // CI, not a cloud
+		{Project: "p1", Pool: "pool-dis", Provider: "aws-off", Kind: "aws", AWSAccount: "999", Disabled: true},                     // disabled
+	}})
+	fs := evalCheck(t, crossCloudFederation{}, st)
+	if len(fs) != 2 {
+		t.Fatalf("expected 2 cross-cloud findings (AWS, Azure), got %d: %+v", len(fs), fs)
+	}
+	got := map[string]bool{}
+	for _, f := range fs {
+		got[f.Resource.Name] = true
+	}
+	if !got["aws-prov"] || !got["az-prov"] || got["gh-prov"] || got["aws-off"] {
+		t.Fatalf("expected aws-prov + az-prov flagged, not gh-prov/aws-off: %v", got)
+	}
+}
+
 func TestGCPMonitoringAlertMissing(t *testing.T) {
 	st := stateWith(&state.GCP{Monitoring: []state.GCPMonitoring{
 		{Project: "p1", ReadOK: true,

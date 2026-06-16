@@ -48,11 +48,11 @@ func TestAllChecksUnique(t *testing.T) {
 	// + rdbms(1) + VM(1) + Redis(1) + exposed-secret(1)
 	// + cross-cloud federation(1) = 28.
 	// GCP catalog: storage(3) + firewall(1) + IAM(2) + exposed-secret(1)
-	// + Cloud SQL(4) + compute(3) + KMS(2) + GKE(3) + logging(1) + trust(1)
-	// + monitoring(1) = 22.
+	// + Cloud SQL(4) + compute(3) + KMS(2) + GKE(3) + logging(1) + trust(2)
+	// + monitoring(1) = 23.
 	// K8s catalog: pods(4) + RBAC(2) + exposed-secret(1) = 7.
-	// Plus the policy-as-code rules umbrella check = 1. Total = 109.
-	const wantChecks = 109
+	// Plus the policy-as-code rules umbrella check = 1. Total = 110.
+	const wantChecks = 110
 	if len(checks) != wantChecks {
 		t.Errorf("registered checks = %d, want %d", len(checks), wantChecks)
 	}
@@ -62,9 +62,9 @@ func TestAllChecksUnique(t *testing.T) {
 	// redshift, ecr, cloudwatch, datastores, elb-classic, secrets-scan = 22;
 	// Azure storage, nsg, keyvault, appservice, sql, cosmos, defender, rbac,
 	// entra, network, monitor, rdbms, vm, redis, secrets-scan = 15; GCP storage, firewall, iam,
-	// secrets-scan, cloudsql, compute, kms, gke, monitoring = 9; K8s pods, rbac,
-	// secrets-scan = 3. Total = 49.
-	const wantCollectors = 49
+	// secrets-scan, cloudsql, compute, kms, gke, monitoring, wif = 10; K8s pods, rbac,
+	// secrets-scan = 3. Total = 50.
+	const wantCollectors = 50
 	if got := len(engine.Collectors()); got != wantCollectors {
 		t.Errorf("registered collectors = %d, want %d", got, wantCollectors)
 	}

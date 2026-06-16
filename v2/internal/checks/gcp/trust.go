@@ -6,11 +6,72 @@ import (
 	"time"
 
 	"github.com/Su1ph3r/nubicustos/internal/engine"
+	"github.com/Su1ph3r/nubicustos/internal/fedmap"
 	"github.com/Su1ph3r/nubicustos/internal/findings"
 	"github.com/Su1ph3r/nubicustos/internal/state"
 )
 
-func init() { engine.RegisterCheck(crossProjectSA{}) }
+func init() {
+	engine.RegisterCheck(crossProjectSA{})
+	engine.RegisterCheck(crossCloudFederation{})
+}
+
+// crossCloudFederation flags a workload-identity provider whose external issuer
+// belongs to a different cloud (an AWS account, or an OIDC issuer that is Azure
+// AD/Entra). Such a provider lets a workload in that cloud federate into GCP and
+// impersonate the service accounts the pool is bound to: a trust edge that
+// crosses a cloud boundary, invisible to a scan that looks at one provider.
+type crossCloudFederation struct{}
+
+func (crossCloudFederation) Spec() findings.CheckSpec {
+	return findings.CheckSpec{
+		ID: "gcp_cross_cloud_federation", Title: "Workload-identity provider federates another cloud into GCP",
+		Provider: "gcp", Service: "iam", Severity: findings.SeverityHigh,
+		Rationale:   "A workload-identity pool provider configured with an AWS account or an Azure AD OIDC issuer lets a workload in that cloud exchange its native token for GCP credentials and impersonate the service accounts the pool grants access to. The trust spans two clouds, and a single-provider scan never connects the far side.",
+		Impact:      "A workload (or attacker foothold) in the peer cloud that satisfies the provider's attribute condition can impersonate the bound service accounts and act with their GCP permissions.",
+		Remediation: "Confirm the cross-cloud federation is intended; tighten the provider's attribute condition to the exact external identity, scope the service-account bindings to least privilege, and disable or delete unused providers: gcloud iam workload-identity-pools providers list --workload-identity-pool=<pool> --location=global",
+		References:  []string{"https://cloud.google.com/iam/docs/workload-identity-federation"},
+	}
+}
+
+func (c crossCloudFederation) Evaluate(_ *engine.ScanContext, st *state.State) ([]findings.Finding, error) {
+	if st.GCP == nil {
+		return nil, nil
+	}
+	now := time.Now().UTC()
+	var out []findings.Finding
+	for _, p := range st.GCP.WIFProviders {
+		if p.Disabled {
+			continue // a disabled provider/pool cannot federate
+		}
+		peer, detail := wifPeer(p)
+		if !fedmap.CrossCloud(fedmap.GCP, peer) {
+			continue
+		}
+		res := findings.Resource{
+			ID: p.Project + "/" + p.Pool + "/" + p.Provider, Name: p.Provider, Type: "gcp_wif_provider", Provider: "gcp", Account: p.Project,
+		}
+		desc := fmt.Sprintf("Workload-identity provider %q in pool %q (project %s) federates %s, so a workload in %s can exchange its token for GCP credentials and impersonate the pool's service accounts.",
+			p.Provider, p.Pool, p.Project, detail, peer.Label())
+		poc := fmt.Sprintf("gcloud iam workload-identity-pools providers describe %s --workload-identity-pool=%s --location=global --project=%s", p.Provider, p.Pool, p.Project)
+		out = append(out, findings.New(c.Spec(), res, desc, poc, now))
+	}
+	return out, nil
+}
+
+// wifPeer maps a workload-identity provider to its peer cloud and a human detail
+// of the external source. An AWS provider is always cross-cloud; an OIDC provider
+// is classified by its issuer URI (cross-cloud only when it is Azure AD).
+func wifPeer(p state.GCPWorkloadIdentityProvider) (fedmap.Cloud, string) {
+	switch p.Kind {
+	case "aws":
+		return fedmap.AWS, fmt.Sprintf("AWS account %s", p.AWSAccount)
+	case "oidc":
+		return fedmap.Classify(p.Issuer), fmt.Sprintf("the %s OIDC issuer %q", fedmap.Classify(p.Issuer).Label(), p.Issuer)
+	default:
+		return fedmap.Other, ""
+	}
+}
 
 // crossProjectSA flags project IAM bindings that grant a role to a user-managed
 // service account belonging to a *different* project — the GCP external-trust

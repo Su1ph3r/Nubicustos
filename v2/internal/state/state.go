@@ -793,16 +793,31 @@ type GCPMonitoring struct {
 
 // GCP is the collected GCP-side state for one or more projects.
 type GCP struct {
-	Buckets     []GCSBucket
-	Firewalls   []FirewallRule
-	IAMBindings []GCPIAMBinding
-	CloudSQL    []CloudSQLInstance
-	ComputeVMs  []ComputeInstance
-	KMSKeys     []KMSCryptoKey
-	GKEClusters []GKECluster
-	AuditConfig []GCPAuditLogging
-	Monitoring  []GCPMonitoring
-	SecretHits  []SecretHit
+	Buckets      []GCSBucket
+	Firewalls    []FirewallRule
+	IAMBindings  []GCPIAMBinding
+	CloudSQL     []CloudSQLInstance
+	ComputeVMs   []ComputeInstance
+	KMSKeys      []KMSCryptoKey
+	GKEClusters  []GKECluster
+	AuditConfig  []GCPAuditLogging
+	Monitoring   []GCPMonitoring
+	WIFProviders []GCPWorkloadIdentityProvider
+	SecretHits   []SecretHit
+}
+
+// GCPWorkloadIdentityProvider is one provider inside a workload-identity pool:
+// an external identity source (an AWS account, an OIDC issuer such as Azure AD,
+// or a SAML IdP) configured to federate into GCP and impersonate service
+// accounts. It is the GCP side of cross-cloud federation.
+type GCPWorkloadIdentityProvider struct {
+	Project    string
+	Pool       string // pool id (short)
+	Provider   string // provider id (short)
+	Kind       string // "aws" | "oidc" | "saml"
+	AWSAccount string // AWS account id, for an aws provider
+	Issuer     string // issuer URI, for an oidc provider
+	Disabled   bool   // the provider or its pool is disabled/not active
 }
 
 // --- Kubernetes -------------------------------------------------------------
@@ -979,6 +994,13 @@ func (s *State) AddGCPIAMBinding(b GCPIAMBinding) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.GCP.IAMBindings = append(s.GCP.IAMBindings, b)
+}
+
+// AddGCPWorkloadIdentityProvider appends a collected workload-identity provider.
+func (s *State) AddGCPWorkloadIdentityProvider(p GCPWorkloadIdentityProvider) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.GCP.WIFProviders = append(s.GCP.WIFProviders, p)
 }
 
 // AddStorageAccount appends a collected Azure storage account under lock.

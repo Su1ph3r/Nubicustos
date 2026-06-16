@@ -22,8 +22,9 @@ runtime-proven findings.
 > indirect exposure (a private VPC reachable from an internet-facing one across
 > peering). Federation/trust analysis (AWS IAM, Azure RBAC + Entra
 > workload-identity federation, GCP cross-project service accounts), including
-> cross-cloud federation (an AWS role assumable from Azure/GCP, or an Entra app
-> impersonable from AWS/GCP), and an opt-in,
+> cross-cloud federation (an AWS role assumable from Azure/GCP, an Entra app
+> impersonable from AWS/GCP, or a GCP workload-identity provider that federates
+> AWS/Azure into GCP), and an opt-in,
 > read-only active-validation pass (AWS + Azure) confirm findings with evidence.
 > Compliance mapping onto SOC 2 / PCI-DSS / NIST 800-53 (on top of per-check
 > CIS / Well-Architected references). A terminal UI browses a scan; optional
@@ -228,7 +229,7 @@ Credentials (or `--project <id>`):
 | Cloud SQL | public IP, SSL/TLS not required, authorized networks include `0.0.0.0/0`, automated backups disabled |
 | KMS | symmetric key with no rotation configured, key IAM grants public access |
 | GKE | legacy ABAC enabled, network policy not enforced, control plane not restricted to authorized networks |
-| IAM | project binding grants a role to all users, broad primitive role (owner/editor) in use, role granted to a service account from another project (cross-project trust) |
+| IAM | project binding grants a role to all users, broad primitive role (owner/editor) in use, role granted to a service account from another project (cross-project trust), workload-identity provider federating another cloud into GCP (cross-cloud) |
 | Logging / Monitoring | data-access audit logging not configured for all services; no log-based metric + alert for sensitive changes (ownership/audit-config/custom-role/firewall/route/network/storage-IAM/SQL changes) |
 | Secrets | credential material embedded in the control plane (Cloud Function env / instance metadata) |
 
