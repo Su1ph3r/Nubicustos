@@ -165,6 +165,30 @@ func (s *Store) LatestScanID(ctx context.Context) (string, error) {
 	return id, nil
 }
 
+// PreviousScanID returns the id of the scan started most recently before the
+// given scan, matching the newest-first ordering used everywhere else
+// (started_at DESC, then id DESC as a stable tie-break). It returns an error
+// wrapping sql.ErrNoRows when the given scan is the earliest one on record, so a
+// caller can distinguish "no baseline to diff against" from a real query error.
+func (s *Store) PreviousScanID(ctx context.Context, scanID string) (string, error) {
+	var startedAt string
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT started_at FROM scans WHERE id = ?`, scanID).Scan(&startedAt); err != nil {
+		return "", fmt.Errorf("looking up scan %s: %w", scanID, err)
+	}
+	var prev string
+	// Row-value comparison gives the same total order as ORDER BY started_at,
+	// id, so the "previous" scan is well-defined even when two scans share a
+	// started_at timestamp.
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT id FROM scans WHERE (started_at, id) < (?, ?)
+		 ORDER BY started_at DESC, id DESC LIMIT 1`,
+		startedAt, scanID).Scan(&prev); err != nil {
+		return "", fmt.Errorf("finding scan before %s: %w", scanID, err)
+	}
+	return prev, nil
+}
+
 // GetScan returns the metadata for one scan.
 func (s *Store) GetScan(ctx context.Context, id string) (ScanMeta, error) {
 	row := s.db.QueryRowContext(ctx,

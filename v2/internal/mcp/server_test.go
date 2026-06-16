@@ -9,6 +9,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
+	"github.com/Su1ph3r/nubicustos/internal/diff"
 	"github.com/Su1ph3r/nubicustos/internal/findings"
 	"github.com/Su1ph3r/nubicustos/internal/graph"
 	"github.com/Su1ph3r/nubicustos/internal/store"
@@ -39,6 +40,41 @@ func seed(t *testing.T) (*store.Store, context.Context) {
 		t.Fatalf("SaveGraph: %v", err)
 	}
 	return st, ctx
+}
+
+func TestScanDiff(t *testing.T) {
+	st, ctx := seed(t)
+
+	// A single scan has no baseline to diff against.
+	res, _ := scanDiff(st)(ctx, call(map[string]any{"to": "latest"}))
+	if !res.IsError {
+		t.Fatal("expected error diffing the only scan")
+	}
+
+	// Add a newer scan: f-high resolved, a new critical appears.
+	later := time.Date(2026, 6, 12, 9, 0, 0, 0, time.UTC)
+	if err := st.CreateScan(ctx, "s2", "aws", "111122223333", "arn:auditor", later); err != nil {
+		t.Fatalf("CreateScan s2: %v", err)
+	}
+	if err := st.SaveFindings(ctx, "s2", []findings.Finding{
+		{ID: "f-crit", CheckID: "aws_iam_root_mfa_disabled", Severity: findings.SeverityCritical, Status: findings.StatusOpen, Provider: "aws", Service: "iam", Resource: findings.Resource{ID: "account:1"}},
+		{ID: "f-new", CheckID: "aws_rds_public", Severity: findings.SeverityCritical, Status: findings.StatusOpen, Provider: "aws", Service: "rds", Resource: findings.Resource{ID: "db1"}},
+	}, later); err != nil {
+		t.Fatalf("SaveFindings s2: %v", err)
+	}
+
+	res, _ = scanDiff(st)(ctx, call(map[string]any{"to": "latest"}))
+	var out diff.Result
+	decode(t, res, &out)
+	if out.FromScanID != "s1" || out.ToScanID != "s2" {
+		t.Fatalf("scan ids = %s -> %s, want s1 -> s2", out.FromScanID, out.ToScanID)
+	}
+	if len(out.Added) != 1 || out.Added[0].ID != "f-new" {
+		t.Fatalf("Added = %+v, want [f-new]", out.Added)
+	}
+	if len(out.Resolved) != 1 || out.Resolved[0].ID != "f-high" {
+		t.Fatalf("Resolved = %+v, want [f-high]", out.Resolved)
+	}
 }
 
 func call(args map[string]any) mcp.CallToolRequest {

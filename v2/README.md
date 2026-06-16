@@ -312,6 +312,14 @@ nubicustos export html  --out report.html     # self-contained shareable report
 nubicustos paths
 nubicustos paths --format json
 
+# Posture drift: compare two stored scans of the same estate. Reports findings
+# added/resolved, exposures that opened (a finding that became internet-
+# reachable), severity shifts, and attack paths gained/lost. Computed locally
+# over the scan history, so it is exact — point-in-time scanners cannot do this.
+nubicustos diff                              # latest scan vs the one before it
+nubicustos diff --from <id> --to <id>        # compare two specific scans
+nubicustos diff --fail-on reachable          # exit non-zero in CI when an exposure opens
+
 # Active validation (opt-in, read-only): confirm findings and capture evidence
 nubicustos scan --provider aws --validate   # validate inline with the scan
 nubicustos validate                          # re-validate the latest stored scan
@@ -325,8 +333,9 @@ nubicustos tui --scan <id>
 
 `mcp` runs a Model Context Protocol server over stdio, exposing **read-only**
 tools so an LLM can explore stored results: `list_scans`, `scan_summary`,
-`list_findings` (severity/service filters), `get_finding`, and
-`list_attack_paths`. It performs no cloud calls and never triggers a scan — it
+`list_findings` (severity/service filters), `get_finding`, `list_attack_paths`,
+`scan_diff` (posture drift between two scans), and `compliance_report` (control
+coverage for soc2/pci/nist). It performs no cloud calls and never triggers a scan — it
 reads the local results database — so connecting an MCP client cannot launch a
 cloud scan with live credentials.
 

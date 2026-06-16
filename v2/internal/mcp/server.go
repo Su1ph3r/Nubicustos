@@ -15,6 +15,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/Su1ph3r/nubicustos/internal/compliance"
+	"github.com/Su1ph3r/nubicustos/internal/diff"
 	"github.com/Su1ph3r/nubicustos/internal/engine"
 	"github.com/Su1ph3r/nubicustos/internal/findings"
 	"github.com/Su1ph3r/nubicustos/internal/store"
@@ -51,6 +52,12 @@ func NewServer(st *store.Store, version string) *server.MCPServer {
 		mcp.WithString("scan", mcp.Description("Scan id, or \"latest\" (default)."), mcp.DefaultString("latest"))),
 		listAttackPaths(st))
 
+	s.AddTool(mcp.NewTool("scan_diff",
+		mcp.WithDescription("Compare two scans of the same estate and report posture drift: findings added or resolved, exposures that opened (a finding that became internet-reachable), severity shifts, and attack paths gained or lost. Defaults to the latest scan against the one before it."),
+		mcp.WithString("to", mcp.Description("Newer scan id, or \"latest\" (default)."), mcp.DefaultString("latest")),
+		mcp.WithString("from", mcp.Description("Baseline scan id. Defaults to the scan immediately before \"to\"."))),
+		scanDiff(st))
+
 	s.AddTool(mcp.NewTool("compliance_report",
 		mcp.WithDescription("Map the native check catalog (and a scan's open findings) onto a compliance framework's controls. Each control lists the checks that assess it and is marked pass/fail by the scan."),
 		mcp.WithString("framework", mcp.Description("Framework: soc2 | pci | nist."), mcp.Required()),
@@ -58,6 +65,58 @@ func NewServer(st *store.Store, version string) *server.MCPServer {
 		complianceReport(st))
 
 	return s
+}
+
+func scanDiff(st *store.Store) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		toID, err := resolveScan(ctx, st, req.GetString("to", "latest"))
+		if err != nil {
+			return mcp.NewToolResultErrorFromErr("resolving \"to\" scan", err), nil
+		}
+		fromArg := req.GetString("from", "")
+		var fromID string
+		if fromArg == "" {
+			fromID, err = st.PreviousScanID(ctx, toID)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return mcp.NewToolResultError(fmt.Sprintf("scan %s is the earliest scan; need at least two scans to diff (or pass \"from\")", toID)), nil
+				}
+				return mcp.NewToolResultErrorFromErr("finding baseline scan", err), nil
+			}
+		} else if fromID, err = resolveScan(ctx, st, fromArg); err != nil {
+			return mcp.NewToolResultErrorFromErr("resolving \"from\" scan", err), nil
+		}
+		if fromID == toID {
+			return mcp.NewToolResultError(fmt.Sprintf("\"from\" and \"to\" resolve to the same scan (%s)", toID)), nil
+		}
+
+		fromSnap, err := loadDiffSnapshot(ctx, st, fromID)
+		if err != nil {
+			return mcp.NewToolResultErrorFromErr("loading baseline scan", err), nil
+		}
+		toSnap, err := loadDiffSnapshot(ctx, st, toID)
+		if err != nil {
+			return mcp.NewToolResultErrorFromErr("loading current scan", err), nil
+		}
+		return jsonResult(diff.Compute(fromSnap, toSnap))
+	}
+}
+
+// loadDiffSnapshot reads a scan's findings and attack paths into a diff.Snapshot.
+func loadDiffSnapshot(ctx context.Context, st *store.Store, scanID string) (diff.Snapshot, error) {
+	meta, err := st.GetScan(ctx, scanID)
+	if err != nil {
+		return diff.Snapshot{}, err
+	}
+	fs, err := st.LoadFindings(ctx, scanID, store.FindingFilter{})
+	if err != nil {
+		return diff.Snapshot{}, err
+	}
+	paths, err := st.LoadAttackPaths(ctx, scanID)
+	if err != nil {
+		return diff.Snapshot{}, err
+	}
+	return diff.Snapshot{ScanID: scanID, StartedAt: meta.StartedAt, Findings: fs, Paths: paths}, nil
 }
 
 func complianceReport(st *store.Store) server.ToolHandlerFunc {

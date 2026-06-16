@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -66,6 +68,23 @@ func TestLatestScanIDEmpty(t *testing.T) {
 	defer st.Close()
 	if _, err := st.LatestScanID(ctx); err == nil {
 		t.Fatal("expected error on empty database")
+	}
+}
+
+func TestPreviousScanID(t *testing.T) {
+	st, ctx := seedStore(t)
+
+	prev, err := st.PreviousScanID(ctx, "s2")
+	if err != nil {
+		t.Fatalf("PreviousScanID(s2): %v", err)
+	}
+	if prev != "s1" {
+		t.Fatalf("expected s1 before s2, got %q", prev)
+	}
+
+	// s1 is the earliest scan: no baseline, must surface ErrNoRows.
+	if _, err := st.PreviousScanID(ctx, "s1"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("PreviousScanID(s1) err = %v, want sql.ErrNoRows", err)
 	}
 }
 
