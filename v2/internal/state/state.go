@@ -691,6 +691,21 @@ type GCPAuditLogging struct {
 	DataWriteAll bool // allServices DATA_WRITE logging enabled
 }
 
+// GCPLogMetric is a log-based metric and its filter, for CIS monitoring checks.
+type GCPLogMetric struct {
+	Name   string
+	Filter string
+}
+
+// GCPMonitoring is a project's monitoring posture (CIS GCP section 2): its
+// log-based metrics and the metric names referenced by alert policies.
+type GCPMonitoring struct {
+	Project            string
+	ReadOK             bool // both the metrics and alert-policies reads succeeded
+	Metrics            []GCPLogMetric
+	AlertedMetricNames []string
+}
+
 // GCP is the collected GCP-side state for one or more projects.
 type GCP struct {
 	Buckets     []GCSBucket
@@ -701,6 +716,7 @@ type GCP struct {
 	KMSKeys     []KMSCryptoKey
 	GKEClusters []GKECluster
 	AuditConfig []GCPAuditLogging
+	Monitoring  []GCPMonitoring
 	SecretHits  []SecretHit
 }
 
@@ -836,6 +852,13 @@ func (s *State) AddComputeInstance(i ComputeInstance) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.GCP.ComputeVMs = append(s.GCP.ComputeVMs, i)
+}
+
+// AddGCPMonitoring records a project's monitoring posture under lock.
+func (s *State) AddGCPMonitoring(m GCPMonitoring) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.GCP.Monitoring = append(s.GCP.Monitoring, m)
 }
 
 // AddGCPAuditLogging records a project's audit-logging posture under lock.

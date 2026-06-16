@@ -28,6 +28,9 @@ var nubicustosGCPPermissions = []string{
 	"cloudkms.cryptoKeys.getIamPolicy",
 	// GKE posture
 	"container.clusters.list",
+	// Monitoring (CIS 2.x: log metrics + alert policies)
+	"logging.logMetrics.list",
+	"monitoring.alertPolicies.list",
 }
 
 // GCPTools is the requirement catalog for GCP scanning. RequiredManagedPolicies

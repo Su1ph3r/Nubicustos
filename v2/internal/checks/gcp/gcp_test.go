@@ -276,6 +276,40 @@ func TestCrossProjectSA(t *testing.T) {
 	}
 }
 
+func TestGCPMonitoringAlertMissing(t *testing.T) {
+	st := stateWith(&state.GCP{Monitoring: []state.GCPMonitoring{
+		{Project: "p1", ReadOK: true,
+			Metrics: []state.GCPLogMetric{
+				// firewall (2.7) covered: metric matches + alerted.
+				{Name: "projects/p1/metrics/fw-changes", Filter: `resource.type="gce_firewall_rule"`},
+				// audit config (2.5) has a metric but NO alert.
+				{Name: "projects/p1/metrics/audit", Filter: `protoPayload.methodName="SetIamPolicy" AND auditConfigDeltas:*`},
+			},
+			AlertedMetricNames: []string{"fw-changes"},
+		},
+	}})
+	fs := evalCheck(t, monitoringAlertMissing{}, st)
+	flagged := map[string]bool{}
+	for _, f := range fs {
+		flagged[f.Resource.Name] = true
+	}
+	if flagged["CIS 2.7"] {
+		t.Error("firewall (2.7) is metric+alert covered and must not be flagged")
+	}
+	if !flagged["CIS 2.5"] {
+		t.Error("audit-config (2.5) has a metric but no alert and must be flagged")
+	}
+	// 8 controls, 1 covered → 7 missing.
+	if len(fs) != 7 {
+		t.Fatalf("expected 7 missing-monitoring findings, got %d", len(fs))
+	}
+	// Unread project is not judged.
+	notRead := stateWith(&state.GCP{Monitoring: []state.GCPMonitoring{{Project: "p2", ReadOK: false}}})
+	if got := evalCheck(t, monitoringAlertMissing{}, notRead); len(got) != 0 {
+		t.Fatalf("unread project must not be judged, got %d", len(got))
+	}
+}
+
 func TestNilGCPStateNoPanic(t *testing.T) {
 	st := state.New()
 	st.GCP = nil
@@ -285,7 +319,7 @@ func TestNilGCPStateNoPanic(t *testing.T) {
 		cloudSQLPublicIP{}, cloudSQLNoSSL{}, cloudSQLAuthorizedAll{}, cloudSQLNoBackup{},
 		computeDefaultSAFullAPI{}, computeShieldedDisabled{}, computeSerialPort{},
 		kmsRotationDisabled{}, kmsPublicIAM{}, gkeLegacyABAC{}, gkeNetworkPolicyDisabled{}, gkeMasterNetworksOpen{},
-		auditLoggingNotConfigured{}, crossProjectSA{},
+		auditLoggingNotConfigured{}, crossProjectSA{}, monitoringAlertMissing{},
 	} {
 		if fs := evalCheck(t, c, st); len(fs) != 0 {
 			t.Fatalf("%s on nil gcp state should yield nothing, got %d", c.Spec().ID, len(fs))
