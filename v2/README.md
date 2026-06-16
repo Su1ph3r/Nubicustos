@@ -1,28 +1,33 @@
 # Nubicustos v2
 
-The single-binary rewrite. A native cloud-posture engine — no Docker, no
-external scanners, no Postgres/Neo4j — that scans cloud accounts and exports
-runtime-proven findings. See [`../REFACTOR-PLAN.md`](../REFACTOR-PLAN.md) for the
-full design.
+The single-binary rewrite. A native cloud-posture engine (no Docker, no
+external scanners, no Postgres/Neo4j) that scans cloud accounts and exports
+runtime-proven findings.
 
 > Status: **native multi-cloud posture engine.** Up-front auth/MFA across AWS
 > (SSO/AssumeRole+MFA/GetSessionToken/default chain), Azure (CLI/browser/device-
 > code/SP/MI), GCP (ADC), and Kubernetes (kubeconfig contexts), with AWS
 > Organization-wide scanning that fans out across member accounts off a single
 > MFA-satisfied session and Azure management-group/subscription estate scoping.
-> Native checks for
-> AWS (S3/IAM/EC2/VPC/RDS/CloudTrail/KMS/Config/GuardDuty/Secrets Manager/ELB/ACM/Route53/control-plane secrets),
-> Azure (storage/NSG/key vault/control-plane secrets), GCP (storage/firewall/IAM), and Kubernetes
-> (pod-security/RBAC), persisted to SQLite, queryable offline, and exportable as
-> Cairn / SARIF / CSV / HTML. An in-process attack-path graph derives scored
-> internet-exposure, privilege-escalation, and assume-role/trust paths with
-> chained PoCs, gated by a local network-reachability solver. An opt-in,
-> read-only active-validation pass confirms findings with evidence; a terminal UI
-> browses a scan; optional plugins integrate trivy/grype/checkov/terrascan/
-> kube-bench when present; a CEL/YAML policy-as-code engine evaluates built-in and
-> user rules at runtime; a read-only MCP server exposes results to an LLM; and an
-> optional embedded web UI (REST + SPA over SSE) browses and drives scans.
-> Distributed as a single static cross-platform binary.
+> 100+ native checks across
+> AWS (S3/IAM/EC2/VPC/RDS/CloudTrail/KMS/Config/GuardDuty/Secrets Manager/ELB/classic ELB/ACM/Route53/Lambda/SNS/SQS/Redshift/ECR/EFS/ElastiCache/DynamoDB/CloudWatch monitoring/control-plane secrets),
+> Azure (storage/NSG/Key Vault/SQL/Cosmos DB/MySQL+PostgreSQL/App Service/VMs/Redis/RBAC/Entra ID/Defender for Cloud/activity-log alerts/control-plane secrets),
+> GCP (Cloud Storage/firewall/IAM/Cloud SQL/Compute/KMS/GKE/audit logging/log-metric alerts/control-plane secrets), and
+> Kubernetes (pod-security/RBAC/control-plane secrets), persisted to SQLite,
+> queryable offline, and exportable as Cairn / SARIF / CSV / HTML plus a
+> container inventory for downstream container-escape analysis. An in-process
+> attack-path graph derives scored internet-exposure, privilege-escalation, and
+> assume-role/trust paths with chained PoCs, gated by a local network-reachability
+> solver (AWS + Azure). Federation/trust analysis (AWS IAM, Azure RBAC + Entra
+> workload-identity federation, GCP cross-project service accounts) and an opt-in,
+> read-only active-validation pass (AWS + Azure) confirm findings with evidence.
+> Compliance mapping onto SOC 2 / PCI-DSS / NIST 800-53 (on top of per-check
+> CIS / Well-Architected references). A terminal UI browses a scan; optional
+> plugins integrate trivy/grype/checkov/terrascan/kube-bench when present; a
+> CEL/YAML policy-as-code engine evaluates built-in and user rules at runtime; a
+> read-only MCP server exposes results (and compliance) to an LLM; and an optional
+> embedded web UI (REST + SPA over SSE) browses and drives scans. Distributed as a
+> single static cross-platform binary.
 
 ### Finding shapes
 
@@ -31,12 +36,12 @@ Two shapes, chosen per check:
 - **Per-resource** — one finding per misconfigured resource (bucket, instance, DB, user, key, trail). Independently trackable across scans.
 - **Aggregate** — one finding with an `affected` list, for control-level posture (e.g. "Config not recording in N of M regions", "these security groups expose sensitive ports", "these snapshots are public"). The `affected` array carries each region/rule/ARN.
 
-### Check catalog (Phase 1)
+### Check catalog (AWS)
 
 | Service | Checks |
 |---------|--------|
 | S3 | public access (ACL/policy) |
-| IAM | root MFA, root access keys, weak password policy, access-key rotation, console user without MFA, directly-attached AdministratorAccess |
+| IAM | root MFA, root access keys, weak password policy, access-key rotation, console user without MFA, directly-attached AdministratorAccess; trust/privilege-escalation analysis |
 | EC2 | open ingress on sensitive ports*, IMDSv2 not enforced, public IP, unencrypted EBS volume, EBS default encryption disabled* |
 | VPC | flow logs disabled* |
 | RDS | publicly accessible, unencrypted storage, backups disabled, deletion protection disabled, public snapshot* |
@@ -44,9 +49,17 @@ Two shapes, chosen per check:
 | KMS | customer-managed key rotation disabled |
 | Config | not recording all resources* |
 | GuardDuty | not enabled* |
+| CloudWatch | missing log metric filter + alarm for sensitive events (CIS monitoring: root usage, unauthorized calls, IAM/CloudTrail/Config/S3/CMK/SG/NACL/gateway/route/VPC/org changes) |
 | Exposure | public EBS snapshot*, public AMI* |
 | Secrets Manager | rotation disabled* |
-| ELB | internet-facing HTTP listener, weak TLS policy, access logs disabled |
+| Lambda | public function URL (AuthType NONE), resource policy grants public invoke |
+| SNS / SQS | resource policy grants public access |
+| Redshift | publicly accessible, not encrypted at rest |
+| ECR | repository policy grants public access, image scan-on-push disabled |
+| EFS | not encrypted at rest |
+| ElastiCache | at-rest encryption disabled, in-transit encryption disabled |
+| DynamoDB | point-in-time recovery disabled |
+| ELB | internet-facing HTTP listener, weak TLS policy, access logs disabled; classic-ELB cleartext (HTTP/TCP) listener |
 | ACM | certificate expired, certificate expiring (<30d) |
 | Route53 | record delegates to a takeover-prone target (dangling DNS / subdomain takeover) |
 | Secrets | credential material embedded in the control plane (Lambda env / EC2 userdata / SSM plaintext) |
@@ -107,7 +120,7 @@ secret-safe locator — the raw value is dropped at the detector boundary, so
 nothing downstream (findings, the SQLite store, the Cairn export, logs) can leak
 it. Hits roll up into one `aws_exposed_secret` finding.
 
-Liveness is confirmed on demand via the §9.1 cross-link: `scan --capture-secrets
+Liveness is confirmed on demand: `scan --capture-secrets
 --validate` retains the raw AWS key material **in-process only** (never written
 to disk, the store, or any export — discarded when the command returns) and the
 active-validation pass probes each captured key with `sts:GetCallerIdentity`. A
@@ -129,9 +142,19 @@ Native Azure checks run across the subscriptions discovered from the credential
 
 | Service | Checks |
 |---------|--------|
-| Storage | anonymous blob public access, HTTPS-only not enforced, network rules default to Allow |
-| Network | NSG exposes sensitive ports to the internet (inbound Allow from `*`/`Internet`/`0.0.0.0/0`) |
+| Storage | anonymous blob public access, HTTPS-only not enforced, network rules default to Allow, minimum TLS below 1.2, shared-key (account-key) auth permitted |
+| Network | NSG exposes sensitive ports to the internet (inbound Allow from `*`/`Internet`/`0.0.0.0/0`), gated by reachability (NSG governs a public-IP NIC) |
 | Key Vault | soft-delete disabled, purge protection disabled, network rules default to Allow |
+| SQL | public network access enabled, firewall allows the whole internet, minimum TLS below 1.2 |
+| Cosmos DB | public network access enabled, key-based (local) auth permitted |
+| MySQL / PostgreSQL | flexible server public network access enabled |
+| App Service | HTTPS-only not enforced, minimum TLS below 1.2, plaintext FTP allowed |
+| Virtual Machines | encryption at host disabled |
+| Redis | non-TLS port enabled |
+| RBAC | custom role grants a wildcard (`*`) action |
+| Entra ID | app registration with an external workload-identity federated credential, multi-tenant app, expired credential still configured |
+| Defender for Cloud | plans on the Free tier |
+| Monitor | no activity-log alert for sensitive operations (policy/NSG/SQL-firewall/security-solution/public-IP changes) |
 | Secrets | credential material embedded in the control plane (App Service settings / connection strings) |
 
 ```bash
@@ -143,7 +166,7 @@ nubicustos scan --provider azure --subscription 00000000-0000-0000-0000-00000000
 nubicustos scan --provider azure --management-group mg-prod --exclude 11111111-1111-1111-1111-111111111111
 ```
 
-**Estate scoping (§9.4).** One Azure credential already spans every subscription
+**Estate scoping.** One Azure credential already spans every subscription
 the identity can see, so Azure "discovery" is about *scoping and classification*
 rather than cross-account role assumption: it enumerates the visible
 subscriptions, optionally restricts to a `--management-group` subtree
@@ -151,7 +174,7 @@ subscriptions, optionally restricts to a `--management-group` subtree
 reason so a partial run never reads as full coverage — and scans the in-scope
 set. `--subscription` remains an explicit allowlist.
 
-**Cloud-side secrets (§9.2).** The same detector that sweeps AWS surfaces runs
+**Cloud-side secrets.** The same detector that sweeps AWS surfaces runs
 over Azure App Service (and Function app) **application settings** and
 **connection strings** — the richest Azure secrets surface, where storage keys,
 database passwords, and API tokens routinely sit in plaintext. Application
@@ -159,8 +182,9 @@ settings go through the pattern + entropy detector; connection strings are
 credentials by construction and each is flagged directly. Output is masked
 (last four only); hits roll up into one `azure_exposed_secret` finding per
 subscription. Reading these settings needs `Microsoft.Web/sites/config/list`
-(granted by Website Contributor / Contributor, not by Reader). Liveness
-validation is currently AWS-only.
+(granted by Website Contributor / Contributor, not by Reader). Secret-liveness
+validation is AWS-only; Azure active validation currently covers public-SQL
+reachability.
 
 ### Check catalog (GCP)
 
@@ -170,8 +194,14 @@ Credentials (or `--project <id>`):
 | Service | Checks |
 |---------|--------|
 | Cloud Storage | public IAM (allUsers/allAuthenticatedUsers), uniform bucket-level access disabled, public access prevention not enforced |
-| Compute | firewall ingress exposes sensitive ports to `0.0.0.0/0` |
-| IAM | project binding grants a role to all users, broad primitive role (owner/editor) in use |
+| Compute Engine | default service account with full cloud-platform API access, Shielded VM not fully enabled, interactive serial console enabled |
+| VPC firewall | ingress exposes sensitive ports to `0.0.0.0/0` |
+| Cloud SQL | public IP, SSL/TLS not required, authorized networks include `0.0.0.0/0`, automated backups disabled |
+| KMS | symmetric key with no rotation configured, key IAM grants public access |
+| GKE | legacy ABAC enabled, network policy not enforced, control plane not restricted to authorized networks |
+| IAM | project binding grants a role to all users, broad primitive role (owner/editor) in use, role granted to a service account from another project (cross-project trust) |
+| Logging / Monitoring | data-access audit logging not configured for all services; no log-based metric + alert for sensitive changes (ownership/audit-config/custom-role/firewall/route/network/storage-IAM/SQL changes) |
+| Secrets | credential material embedded in the control plane (Cloud Function env / instance metadata) |
 
 ```bash
 # GCP — scan all active projects (uses ADC; or pick one with --project)
@@ -188,6 +218,7 @@ Native Kubernetes checks run across the kubeconfig contexts requested with
 |------|--------|
 | Workload | privileged container, shares a host namespace (hostNetwork/PID/IPC), privilege escalation not disabled, may run as root |
 | RBAC | cluster-admin bound to a broad subject (anonymous / all-authenticated / all-service-accounts), role grants verb `*` on resource `*` |
+| Secrets | credential material embedded in the control plane (ConfigMap data / literal pod env) |
 
 ```bash
 # Kubernetes — scan the current context (or named contexts)
@@ -334,6 +365,29 @@ rules cover simple config assertions and field-velocity additions. Supported
 resource types today: `aws_s3_bucket`, `aws_rds_instance`, `aws_iam_user`,
 `aws_security_group`, `azure_storage_account`, `azure_key_vault`,
 `gcp_storage_bucket`, `k8s_pod` (extended by surfacing more of the state model).
+
+### Compliance mapping (SOC 2 / PCI-DSS / NIST 800-53)
+
+On top of the per-check CIS and AWS Well-Architected references, `compliance`
+maps the native check catalog onto external control frameworks. Each check is
+classified into a control category (encryption at rest/in transit, public
+exposure, network, access control, MFA, logging, secrets, backup, threat
+detection) and each category maps to the equivalent SOC 2 Trust Services
+Criterion, PCI-DSS v4.0 requirement, and NIST 800-53 Rev.5 control, so new
+checks are covered automatically once classified.
+
+```bash
+# Control coverage matrix for a framework (which checks assess each control)
+nubicustos compliance --framework soc2
+nubicustos compliance --framework pci  --format json
+
+# Overlay a scan's open findings to mark each control pass/fail
+nubicustos compliance --framework nist --db nubicustos.db
+```
+
+Without a results database it is a pure coverage matrix; with one, a scan's open
+findings mark controls pass/fail. The same report is available through the MCP
+server (`compliance_report` tool) and as a screen in the terminal and web UIs.
 
 ### Preflight: confirm a credential has the access the tooling needs
 
@@ -625,7 +679,7 @@ The framework registers validators by check id. A loose-OIDC `AssumeRole` test
 is the next candidate, though an honest active confirmation is constrained: STS
 validates a web-identity token's signature before evaluating the trust policy, so
 a crafted token cannot prove broad trust from the scanner's vantage — the static
-trust analysis (§9.3) remains the primary signal there.
+trust analysis remains the primary signal there.
 
 ### Attack-path graph
 
@@ -649,14 +703,14 @@ resource-specific proof of concept. Edges modelled:
   scored paths for risky trust: a wildcard (`Principal: "*"`) trust, an external
   AWS account, or an OIDC provider without a subject (`sub`/`aud`) condition.
 
-Internet-exposure paths are gated by a local **reachability solver** (§9.5):
+Internet-exposure paths are gated by a local **reachability solver**:
 a public resource in a subnet with no internet-gateway route, or with no
 security group admitting inbound traffic, is annotated `not-reachable` and
 **downgraded** (not dropped) rather than presented as live exposure.
 
 ### IAM trust & privilege findings
 
-The trust analyzer (§9.3) also emits standalone findings, surfaced through
+The trust analyzer also emits standalone findings, surfaced through
 `findings`/`export`: `aws_iam_role_trust_wildcard_principal` (critical),
 `aws_iam_role_trust_external_account`, `aws_iam_oidc_trust_no_subject_condition`,
 `aws_iam_admin_via_policy`, and `aws_iam_privilege_escalation`.
@@ -666,7 +720,7 @@ The trust analyzer (§9.3) also emits standalone findings, surfaced through
 | Package | Role |
 |---------|------|
 | `cmd/nubicustos` | cobra CLI entrypoint |
-| `internal/auth` | up-front credential resolution + MFA (all AWS & Azure paths) — plan §8 |
+| `internal/auth` | up-front credential resolution + MFA (all AWS & Azure paths) |
 | `internal/engine` | registry + concurrent collect→check scanner + graph build |
 | `internal/state` | normalized collected cloud state |
 | `internal/providers/aws` | AWS collectors (read-only API gatherers) |
@@ -678,15 +732,15 @@ The trust analyzer (§9.3) also emits standalone findings, surfaced through
 | `internal/checks/gcp` | native GCP posture checks |
 | `internal/checks/k8s` | native Kubernetes posture checks |
 | `internal/portspec` | shared sensitive-port catalog + range parsing |
-| `internal/mcp` | read-only MCP server (LLM integration over stdio) — plan §3.7 |
-| `internal/rules` | policy-as-code engine (CEL/YAML rules + state flattening) — plan §9.6 |
+| `internal/mcp` | read-only MCP server (LLM integration over stdio) |
+| `internal/rules` | policy-as-code engine (CEL/YAML rules + state flattening) |
 | `internal/checks/rules` | rules-engine umbrella check |
-| `internal/plugins` | optional external-tool runner + parsers (trivy/grype/checkov/terrascan/kube-bench) — plan §5 |
-| `internal/trust` | IAM trust & privilege analysis (assume/federation/privesc) — plan §9.3 |
-| `internal/reachability` | network reachability solver for FP reduction — plan §9.5 |
-| `internal/graph` | in-process attack-path graph (nodes, edges, scored paths) — plan §3.2 |
-| `internal/validate` | opt-in read-only active validation + evidence capture — plan §9.1 |
-| `internal/tui` | terminal UI (bubbletea/lipgloss) — dashboard, findings, paths — plan §3.5 |
+| `internal/plugins` | optional external-tool runner + parsers (trivy/grype/checkov/terrascan/kube-bench) |
+| `internal/trust` | IAM trust & privilege analysis (assume/federation/privesc) |
+| `internal/reachability` | network reachability solver for FP reduction |
+| `internal/graph` | in-process attack-path graph (nodes, edges, scored paths) |
+| `internal/validate` | opt-in read-only active validation + evidence capture |
+| `internal/tui` | terminal UI (bubbletea/lipgloss) — dashboard, findings, paths |
 | `internal/findings` | normalized domain model |
 | `internal/store` | embedded SQLite persistence |
 | `internal/export` | Cairn / report serializers |
