@@ -209,6 +209,15 @@ type ECRRepository struct {
 	PublicPolicy bool // repository policy allows Principal "*" with no condition
 }
 
+// ClassicELB is the collected listener posture of a classic (v1) Elastic Load
+// Balancer.
+type ClassicELB struct {
+	Name           string
+	Region         string
+	InternetFacing bool
+	InsecurePorts  []int32 // front-end listener ports using cleartext HTTP/TCP
+}
+
 // EFSFileSystem is the collected encryption posture of an EFS file system.
 type EFSFileSystem struct {
 	ID        string
@@ -406,6 +415,7 @@ type AWS struct {
 	EFS              []EFSFileSystem
 	Elasticache      []ElasticacheGroup
 	DynamoDB         []DynamoDBTable
+	ClassicELBs      []ClassicELB
 	Trails           []CloudTrailTrail
 
 	KMSKeys                  []KMSKey
@@ -1156,6 +1166,13 @@ func (s *State) AddMessagingResource(m MessagingResource) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.AWS.Messaging = append(s.AWS.Messaging, m)
+}
+
+// AddClassicELB appends a collected classic load balancer under lock.
+func (s *State) AddClassicELB(e ClassicELB) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.AWS.ClassicELBs = append(s.AWS.ClassicELBs, e)
 }
 
 // AddEFSFileSystem appends a collected EFS file system under lock.
