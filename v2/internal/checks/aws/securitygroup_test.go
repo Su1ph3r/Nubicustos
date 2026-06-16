@@ -39,6 +39,30 @@ func TestSGTransitiveWorldOpen(t *testing.T) {
 	}
 }
 
+func TestSGPeerReachableExposureCheck(t *testing.T) {
+	st := state.New()
+	st.AddRouteTable(state.RouteTable{ID: "rt-pub", VPCID: "vpc-pub", IGWRoute: true, PeeringIDs: []string{"pcx-1"}})
+	st.AddRouteTable(state.RouteTable{ID: "rt-priv", VPCID: "vpc-priv", PeeringIDs: []string{"pcx-1"}})
+	st.AddVPCPeering(state.VPCPeering{ID: "pcx-1", Region: "us-east-1", VPCA: "vpc-pub", VPCB: "vpc-priv", Active: true})
+	st.AddVPC(state.VPCInfo{ID: "vpc-pub", CIDRs: []string{"10.1.0.0/16"}})
+	st.AddVPC(state.VPCInfo{ID: "vpc-priv", CIDRs: []string{"10.2.0.0/16"}})
+	st.AddSecurityGroup(state.SecurityGroup{
+		ID: "sg-db", Name: "db", Region: "us-east-1", VPCID: "vpc-priv",
+		Ingress: []state.IngressRule{{Protocol: "tcp", FromPort: 5432, ToPort: 5432, IPv4CIDRs: []string{"10.1.0.0/16"}}},
+	})
+
+	fs, err := sgPeerReachableExposure{}.Evaluate(nil, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fs) != 1 || fs[0].Resource.ID != "sg-db" {
+		t.Fatalf("expected sg-db flagged, got %+v", fs)
+	}
+	if !strings.Contains(fs[0].Description, "vpc-pub") || !strings.Contains(fs[0].Description, "10.1.0.0/16") {
+		t.Errorf("description should name the peer VPC and matched CIDR: %q", fs[0].Description)
+	}
+}
+
 func TestSGTransitiveWorldOpenNoneWhenNoWorldOpen(t *testing.T) {
 	st := state.New()
 	st.AddSecurityGroup(state.SecurityGroup{

@@ -11,6 +11,9 @@
 package reachability
 
 import (
+	"fmt"
+	"net"
+
 	"github.com/Su1ph3r/nubicustos/internal/findings"
 	"github.com/Su1ph3r/nubicustos/internal/state"
 )
@@ -168,6 +171,117 @@ func PeeringExposures(a *state.AWS) []PeeringExposure {
 		}
 	}
 	return out
+}
+
+// SGPeerExposure is a security group in a private VPC that admits a CIDR
+// overlapping an internet-exposed peer VPC's range, reachable across an active
+// peering. This is the resource-level refinement of PeeringExposure: the group's
+// own rule looks like ordinary internal access (a 10.x source, not 0.0.0.0/0),
+// but the source range is the internet-facing peer, so a host there can reach
+// this group on the admitted ports.
+type SGPeerExposure struct {
+	SecurityGroup string
+	SGName        string
+	Region        string
+	PrivateVPC    string
+	InternetVPC   string
+	PeeringID     string
+	MatchedCIDR   string // the group's ingress CIDR that overlaps the peer VPC
+	PeerCIDR      string // the internet-exposed peer VPC CIDR it overlaps
+	Ports         string // ports the matching rule admits
+}
+
+// SGPeerReachable finds security groups reachable from an internet-exposed VPC at
+// the rule level: for each private VPC reachable across a peering (PeeringExposures),
+// it returns the groups in that VPC whose non-world ingress admits a CIDR
+// overlapping the internet-exposed peer's VPC range. World-open rules are skipped
+// (covered by the direct-exposure check). Pure and safe on nil state.
+func SGPeerReachable(a *state.AWS) []SGPeerExposure {
+	if a == nil {
+		return nil
+	}
+	exposures := PeeringExposures(a)
+	if len(exposures) == 0 {
+		return nil
+	}
+	vpcCIDR := map[string][]string{}
+	for _, v := range a.VPCs {
+		vpcCIDR[v.ID] = v.CIDRs
+	}
+
+	var out []SGPeerExposure
+	seen := map[string]bool{}
+	for _, ex := range exposures {
+		peerCIDRs := vpcCIDR[ex.InternetVPC]
+		if len(peerCIDRs) == 0 {
+			continue // without the peer's range there is nothing to match against
+		}
+		for _, sg := range a.SecurityGroups {
+			if sg.VPCID != ex.PrivateVPC {
+				continue
+			}
+			for _, r := range sg.Ingress {
+				if r.OpenV4 || r.OpenV6 {
+					continue // world-open is direct exposure, covered elsewhere
+				}
+				ruleCIDRs := append(append([]string{}, r.IPv4CIDRs...), r.IPv6CIDRs...)
+				matched, peer := firstOverlap(ruleCIDRs, peerCIDRs)
+				if matched == "" {
+					continue
+				}
+				key := sg.ID + "|" + ex.PeeringID + "|" + matched + "|" + portRange(r)
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				out = append(out, SGPeerExposure{
+					SecurityGroup: sg.ID, SGName: sg.Name, Region: sg.Region,
+					PrivateVPC: ex.PrivateVPC, InternetVPC: ex.InternetVPC, PeeringID: ex.PeeringID,
+					MatchedCIDR: matched, PeerCIDR: peer, Ports: portRange(r),
+				})
+			}
+		}
+	}
+	return out
+}
+
+// firstOverlap returns the first (ruleCIDR, peerCIDR) pair that overlaps, or
+// ("","") if none do.
+func firstOverlap(ruleCIDRs, peerCIDRs []string) (string, string) {
+	for _, rc := range ruleCIDRs {
+		for _, pc := range peerCIDRs {
+			if cidrsOverlap(rc, pc) {
+				return rc, pc
+			}
+		}
+	}
+	return "", ""
+}
+
+// cidrsOverlap reports whether two CIDRs share any address: either network
+// contains the other's base address. Unparseable or cross-family pairs do not
+// overlap.
+func cidrsOverlap(a, b string) bool {
+	_, na, err := net.ParseCIDR(a)
+	if err != nil {
+		return false
+	}
+	_, nb, err := net.ParseCIDR(b)
+	if err != nil {
+		return false
+	}
+	return na.Contains(nb.IP) || nb.Contains(na.IP)
+}
+
+// portRange renders a rule's admitted ports for evidence.
+func portRange(r state.IngressRule) string {
+	if r.Protocol == "-1" || (r.FromPort == 0 && r.ToPort == 65535) {
+		return "all ports"
+	}
+	if r.FromPort == r.ToPort {
+		return fmt.Sprintf("port %d", r.FromPort)
+	}
+	return fmt.Sprintf("ports %d-%d", r.FromPort, r.ToPort)
 }
 
 // Annotate sets the Reachable field on exposure findings whose reachability can

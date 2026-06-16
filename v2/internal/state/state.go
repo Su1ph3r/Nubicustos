@@ -319,6 +319,7 @@ type VPCInfo struct {
 	ID         string
 	Region     string
 	HasFlowLog bool
+	CIDRs      []string // IPv4/IPv6 CIDR blocks associated with the VPC
 }
 
 // --- KMS (regional) ---------------------------------------------------------

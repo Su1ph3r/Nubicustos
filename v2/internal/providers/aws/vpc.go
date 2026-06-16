@@ -3,6 +3,7 @@ package aws
 import (
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
 	"github.com/Su1ph3r/nubicustos/internal/engine"
 	"github.com/Su1ph3r/nubicustos/internal/state"
@@ -46,9 +47,34 @@ func (vpcCollector) Collect(sc *engine.ScanContext, st *state.State) error {
 			}
 			for _, v := range page.Vpcs {
 				id := awssdk.ToString(v.VpcId)
-				st.AddVPC(state.VPCInfo{ID: id, Region: region, HasFlowLog: flowLogged[id]})
+				st.AddVPC(state.VPCInfo{ID: id, Region: region, HasFlowLog: flowLogged[id], CIDRs: vpcCIDRs(v)})
 			}
 		}
 	}
 	return nil
+}
+
+// vpcCIDRs returns the VPC's associated IPv4 and IPv6 CIDR blocks (the primary
+// CidrBlock plus every association), for cross-VPC reachability matching.
+func vpcCIDRs(v ec2types.Vpc) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	add := func(c string) {
+		if c == "" {
+			return
+		}
+		if _, dup := seen[c]; dup {
+			return
+		}
+		seen[c] = struct{}{}
+		out = append(out, c)
+	}
+	add(awssdk.ToString(v.CidrBlock))
+	for _, a := range v.CidrBlockAssociationSet {
+		add(awssdk.ToString(a.CidrBlock))
+	}
+	for _, a := range v.Ipv6CidrBlockAssociationSet {
+		add(awssdk.ToString(a.Ipv6CidrBlock))
+	}
+	return out
 }

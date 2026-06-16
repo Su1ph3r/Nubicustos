@@ -202,3 +202,76 @@ func TestPeeringExposuresNilSafe(t *testing.T) {
 		t.Fatalf("nil state should yield nil, got %+v", ex)
 	}
 }
+
+func TestCIDRsOverlap(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"10.1.0.0/16", "10.0.0.0/8", true},   // b contains a
+		{"10.0.0.0/8", "10.1.2.0/24", true},   // a contains b
+		{"10.1.0.0/16", "10.1.0.0/16", true},  // equal
+		{"10.1.0.0/16", "10.2.0.0/16", false}, // disjoint
+		{"10.1.0.0/16", "192.168.0.0/16", false},
+		{"10.1.0.0/16", "::/0", false}, // cross-family
+		{"bogus", "10.0.0.0/8", false},
+	}
+	for _, c := range cases {
+		if got := cidrsOverlap(c.a, c.b); got != c.want {
+			t.Errorf("cidrsOverlap(%q,%q) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+func TestSGPeerReachable(t *testing.T) {
+	a := &state.AWS{
+		RouteTables: []state.RouteTable{
+			{ID: "rt-pub", VPCID: "vpc-pub", IGWRoute: true, PeeringIDs: []string{"pcx-1"}},
+			{ID: "rt-priv", VPCID: "vpc-priv", PeeringIDs: []string{"pcx-1"}},
+		},
+		Peerings: []state.VPCPeering{{ID: "pcx-1", Region: "us-east-1", VPCA: "vpc-pub", VPCB: "vpc-priv", Active: true}},
+		VPCs: []state.VPCInfo{
+			{ID: "vpc-pub", CIDRs: []string{"10.1.0.0/16"}},
+			{ID: "vpc-priv", CIDRs: []string{"10.2.0.0/16"}},
+		},
+		SecurityGroups: []state.SecurityGroup{
+			// db-sg in the private VPC admits the whole peer (10.1/16) range on 5432.
+			{ID: "sg-db", Name: "db", Region: "us-east-1", VPCID: "vpc-priv",
+				Ingress: []state.IngressRule{{Protocol: "tcp", FromPort: 5432, ToPort: 5432, IPv4CIDRs: []string{"10.1.0.0/16"}}}},
+			// app-sg admits only its own VPC range (10.2/16) -> not reachable from peer.
+			{ID: "sg-app", Name: "app", Region: "us-east-1", VPCID: "vpc-priv",
+				Ingress: []state.IngressRule{{Protocol: "tcp", FromPort: 443, ToPort: 443, IPv4CIDRs: []string{"10.2.0.0/16"}}}},
+			// pub-sg is in the internet VPC, not the private one -> not considered.
+			{ID: "sg-pub", Name: "pub", Region: "us-east-1", VPCID: "vpc-pub",
+				Ingress: []state.IngressRule{{Protocol: "tcp", FromPort: 22, ToPort: 22, OpenV4: true, IPv4CIDRs: []string{"0.0.0.0/0"}}}},
+		},
+	}
+	ex := SGPeerReachable(a)
+	if len(ex) != 1 {
+		t.Fatalf("expected 1 SG peer exposure, got %d: %+v", len(ex), ex)
+	}
+	if ex[0].SecurityGroup != "sg-db" || ex[0].MatchedCIDR != "10.1.0.0/16" || ex[0].InternetVPC != "vpc-pub" {
+		t.Fatalf("unexpected exposure: %+v", ex[0])
+	}
+	if ex[0].Ports != "port 5432" {
+		t.Errorf("ports = %q, want 'port 5432'", ex[0].Ports)
+	}
+}
+
+func TestSGPeerReachableWorldOpenSkipped(t *testing.T) {
+	a := &state.AWS{
+		RouteTables: []state.RouteTable{
+			{ID: "rt-pub", VPCID: "vpc-pub", IGWRoute: true, PeeringIDs: []string{"pcx-1"}},
+			{ID: "rt-priv", VPCID: "vpc-priv", PeeringIDs: []string{"pcx-1"}},
+		},
+		Peerings: []state.VPCPeering{{ID: "pcx-1", VPCA: "vpc-pub", VPCB: "vpc-priv", Active: true}},
+		VPCs:     []state.VPCInfo{{ID: "vpc-pub", CIDRs: []string{"10.1.0.0/16"}}, {ID: "vpc-priv", CIDRs: []string{"10.2.0.0/16"}}},
+		SecurityGroups: []state.SecurityGroup{
+			{ID: "sg-open", Name: "open", VPCID: "vpc-priv",
+				Ingress: []state.IngressRule{{Protocol: "tcp", FromPort: 5432, ToPort: 5432, OpenV4: true, IPv4CIDRs: []string{"0.0.0.0/0"}}}},
+		},
+	}
+	if ex := SGPeerReachable(a); len(ex) != 0 {
+		t.Fatalf("world-open rule should be skipped (direct exposure), got %+v", ex)
+	}
+}

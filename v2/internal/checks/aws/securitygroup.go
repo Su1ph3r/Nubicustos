@@ -8,10 +8,54 @@ import (
 
 	"github.com/Su1ph3r/nubicustos/internal/engine"
 	"github.com/Su1ph3r/nubicustos/internal/findings"
+	"github.com/Su1ph3r/nubicustos/internal/reachability"
 	"github.com/Su1ph3r/nubicustos/internal/state"
 )
 
-func init() { engine.RegisterCheck(sgTransitiveWorldOpen{}) }
+func init() {
+	engine.RegisterCheck(sgTransitiveWorldOpen{})
+	engine.RegisterCheck(sgPeerReachableExposure{})
+}
+
+// sgPeerReachableExposure flags a security group in a private VPC whose ingress
+// admits a CIDR that overlaps an internet-exposed peer VPC's range, reachable
+// across an active peering. This is the resource-level form of the VPC peering
+// finding: the group's rule looks like ordinary internal access (a private CIDR,
+// not 0.0.0.0/0), but that range is the internet-facing peer, so a host there
+// can reach this group. A per-rule scan treats the private CIDR as benign.
+type sgPeerReachableExposure struct{}
+
+func (sgPeerReachableExposure) Spec() findings.CheckSpec {
+	return findings.CheckSpec{
+		ID:          "aws_sg_peer_reachable_exposure",
+		Title:       "Security group admits a CIDR reachable from an internet-exposed peer VPC",
+		Provider:    "aws",
+		Service:     "ec2",
+		Severity:    findings.SeverityHigh,
+		Rationale:   "An ingress rule allowing a private CIDR reads as benign internal access, but when that CIDR is the range of a peered VPC that itself reaches the internet, the rule is an internet-pivot path: a host in the peer VPC (reachable from outside) can reach this group across the peering. The exposure is only visible once the group's source CIDR is matched against the peer VPC's range and the peering topology.",
+		Impact:      "An attacker who gains a foothold in the internet-exposed peer VPC can reach this group on the admitted ports, despite the group having no world-open rule.",
+		Remediation: "Narrow the ingress to the specific hosts that must communicate rather than the whole peer VPC range, confirm the peering is required, and segment internet-facing peer VPCs from those holding sensitive resources.",
+		References:  []string{"https://docs.aws.amazon.com/vpc/latest/peering/vpc-peering-security-groups.html"},
+	}
+}
+
+func (c sgPeerReachableExposure) Evaluate(_ *engine.ScanContext, st *state.State) ([]findings.Finding, error) {
+	if st.AWS == nil {
+		return nil, nil
+	}
+	now := time.Now().UTC()
+	var out []findings.Finding
+	for _, e := range reachability.SGPeerReachable(st.AWS) {
+		res := findings.Resource{
+			ID: e.SecurityGroup, Name: e.SGName, Type: "aws_security_group", Provider: "aws", Region: e.Region,
+		}
+		desc := fmt.Sprintf("Security group %s (%s) in VPC %s admits %s on %s, which overlaps the range %s of internet-exposed peer VPC %s (across active peering %s). A host in %s can reach this group even though it has no world-open rule.",
+			e.SGName, e.SecurityGroup, e.PrivateVPC, e.MatchedCIDR, e.Ports, e.PeerCIDR, e.InternetVPC, e.PeeringID, e.InternetVPC)
+		poc := fmt.Sprintf("aws ec2 describe-security-groups --group-ids %s --query 'SecurityGroups[].IpPermissions'", e.SecurityGroup)
+		out = append(out, findings.New(c.Spec(), res, desc, poc, now))
+	}
+	return out, nil
+}
 
 // sgTransitiveWorldOpen flags a security group that is not itself world-open but
 // admits a source security group that IS open to the internet. Internet exposure
