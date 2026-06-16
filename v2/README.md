@@ -130,6 +130,18 @@ rejected/expired). Key id and secret are paired within a single surface, and onl
 when unambiguous (exactly one access-key-id present), so a pairing is never
 guessed. Evidence carries only the masked key id and the ARN it resolves to.
 
+**Exposed-key privilege-escalation chains.** When a captured key is proven live,
+its identity is joined to the IAM privilege graph: if the user or role the key
+maps to holds administrator access or a privilege-escalation path, the scan emits
+a single critical finding and a scored attack path that reads end-to-end — "the
+key in function `ingest` is live, maps to `user/deploy`, and `deploy` can escalate
+to admin via `iam:PutUserPolicy`." This joins three signals (a control-plane
+secret, proof it is valid, and the privilege of the identity behind it) that
+single-signal scanners flag, at most, as three unrelated facts. The chain's
+terminal node is the same principal node the trust graph builds, so it slots into
+the existing attack-path view. Produced under `--capture-secrets --validate`;
+appears in `findings`, `paths`, exports, and the MCP/TUI surfaces like any other.
+
 Requires `lambda:ListFunctions`, `ec2:DescribeInstanceAttribute`,
 `ssm:DescribeParameters`, and `ssm:GetParameters`; the last (reading parameter
 values) is not granted by `SecurityAudit`, so `preflight` flags it and emits it

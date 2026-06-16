@@ -101,6 +101,61 @@ func TestLivenessBlockedWhenAllProbesFail(t *testing.T) {
 	}
 }
 
+func TestProbeCapturedKeys(t *testing.T) {
+	prober := &fakeProber{
+		live:    map[string]string{"AKIALIVE000000000001": "arn:aws:iam::111122223333:role/Builder"},
+		blocked: map[string]bool{"AKIABLOCK00000000003": true},
+	}
+	keys := []secrets.AWSKeyCredential{
+		{AccessKeyID: "AKIALIVE000000000001"},
+		{AccessKeyID: "AKIADEAD000000000002"},
+		{AccessKeyID: "AKIABLOCK00000000003"},
+	}
+	got, err := ProbeCapturedKeys(context.Background(), keys, prober)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(got))
+	}
+	if !got[0].Live || got[0].ARN != "arn:aws:iam::111122223333:role/Builder" {
+		t.Errorf("key 0 should be live with its ARN: %+v", got[0])
+	}
+	if got[1].Live || got[1].Blocked {
+		t.Errorf("key 1 should be rejected (not live, not blocked): %+v", got[1])
+	}
+	if !got[2].Blocked || got[2].Live {
+		t.Errorf("key 2 should be blocked: %+v", got[2])
+	}
+}
+
+func TestProbeCapturedKeysNilProber(t *testing.T) {
+	got, err := ProbeCapturedKeys(context.Background(), []secrets.AWSKeyCredential{{AccessKeyID: "x"}}, nil)
+	if err != nil || got != nil {
+		t.Fatalf("nil prober should yield (nil,nil), got (%v,%v)", got, err)
+	}
+}
+
+func TestLivenessReusesPreProbedResults(t *testing.T) {
+	prober := &fakeProber{live: map[string]string{"AKIALIVE000000000001": "arn:aws:iam::111122223333:user/deploy"}}
+	keys := []secrets.AWSKeyCredential{{AccessKeyID: "AKIALIVE000000000001", Surface: "lambda_env", Resource: "fn"}}
+	lv, _ := ProbeCapturedKeys(context.Background(), keys, prober)
+	probesAfter := len(prober.seen)
+
+	// With pre-probed liveness supplied, the validator must NOT probe again.
+	env := Env{CapturedKeyLiveness: lv} // deliberately no prober/keys
+	ev, err := (&exposedSecretLiveness{}).Validate(context.Background(), env, exposedFinding())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev == nil || ev.Verdict != VerdictConfirmed {
+		t.Fatalf("expected confirmed from pre-probed results, got %+v", ev)
+	}
+	if len(prober.seen) != probesAfter {
+		t.Errorf("validator re-probed despite pre-probed liveness (%d extra)", len(prober.seen)-probesAfter)
+	}
+}
+
 func TestLivenessRegisteredAndSafe(t *testing.T) {
 	v := &exposedSecretLiveness{}
 	if v.BlastRadius() != BlastRadiusNone {

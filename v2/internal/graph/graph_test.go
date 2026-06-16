@@ -366,3 +366,43 @@ func TestPathsSortedByScoreDescending(t *testing.T) {
 		}
 	}
 }
+
+func TestMergePathsDedupesNodesAndResorts(t *testing.T) {
+	g := &Graph{
+		Nodes: []Node{{ID: "principal:user/deploy", Kind: NodePrincipal, Label: "deploy"}},
+		Paths: []Path{{ID: "existing", Score: 50}},
+	}
+	// A synthesized path whose terminal node already exists in the graph.
+	chainPath := Path{
+		ID:    "chain",
+		Score: 95,
+		Nodes: []Node{
+			{ID: "resource:aws_lambda_env:fn", Kind: NodeResource},
+			{ID: "principal:user/deploy", Kind: NodePrincipal}, // duplicate of existing
+		},
+		Edges: []Edge{{Src: "resource:aws_lambda_env:fn", Dst: "principal:user/deploy", Kind: EdgeLiveCredential}},
+	}
+	g.MergePaths([]Path{chainPath})
+
+	// The duplicate principal node must not be added twice; the new surface node is.
+	if got := len(g.Nodes); got != 2 {
+		t.Fatalf("node count = %d, want 2 (deduped principal)", got)
+	}
+	if len(g.Edges) != 1 {
+		t.Fatalf("edge count = %d, want 1", len(g.Edges))
+	}
+	// Paths re-sorted most-exploitable first.
+	if g.Paths[0].ID != "chain" || g.Paths[1].ID != "existing" {
+		t.Fatalf("paths not re-sorted by score: %s, %s", g.Paths[0].ID, g.Paths[1].ID)
+	}
+}
+
+func TestMergePathsEmptyAndNilSafe(t *testing.T) {
+	g := &Graph{}
+	g.MergePaths(nil)
+	if len(g.Paths) != 0 {
+		t.Fatal("merging nil should be a no-op")
+	}
+	var nilG *Graph
+	nilG.MergePaths([]Path{{ID: "x"}}) // must not panic on nil receiver
+}

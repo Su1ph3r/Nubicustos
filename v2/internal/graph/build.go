@@ -67,8 +67,16 @@ func (b *builder) addPath(p Path) {
 	b.g.Paths = append(b.g.Paths, p)
 }
 
-func resourceNodeID(rtype, id string) string { return "resource:" + rtype + ":" + id }
-func principalNodeID(id string) string       { return "principal:" + id }
+// ResourceNodeID and PrincipalNodeID build the canonical, kind-scoped node ids.
+// They are exported so post-scan synthesis (e.g. the attack-chain join) can
+// address the very same principal/resource nodes the builder created, letting a
+// synthesized path's terminal node coincide with the trust dimension's
+// holds-admin / can-escalate node rather than duplicating it.
+func ResourceNodeID(rtype, id string) string { return "resource:" + rtype + ":" + id }
+func PrincipalNodeID(id string) string        { return "principal:" + id }
+
+func resourceNodeID(rtype, id string) string { return ResourceNodeID(rtype, id) }
+func principalNodeID(id string) string       { return PrincipalNodeID(id) }
 
 func (b *builder) fromAWS(a *state.AWS) {
 	b.exposedInstances(a)

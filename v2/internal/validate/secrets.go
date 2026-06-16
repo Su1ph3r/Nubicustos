@@ -30,6 +30,50 @@ type AWSKeyProber interface {
 	WhoAmI(ctx context.Context, cred secrets.AWSKeyCredential) (WhoAmIResult, error)
 }
 
+// KeyLiveness is the structured outcome of probing one captured AWS key: whether
+// AWS accepted it (Live), the identity it maps to (ARN/Account, set only when
+// live), or whether the probe could not complete (Blocked). It is the join key
+// the attack-chain synthesis uses to correlate an exposed credential with the
+// privileges of the identity it unlocks.
+type KeyLiveness struct {
+	Cred    secrets.AWSKeyCredential
+	Live    bool
+	Blocked bool
+	ARN     string
+	Account string
+}
+
+// ProbeCapturedKeys confirms each captured key read-only via the prober and
+// returns one KeyLiveness per key (same order). A transport/timeout failure on a
+// key marks it Blocked rather than aborting the batch; only context cancellation
+// stops the run and returns the partial results with the cancellation error.
+// This is the single place captured-key whoami probing happens — both the
+// exposed-secret evidence and the attack-chain synthesis consume its output, so
+// a key is probed exactly once per scan.
+func ProbeCapturedKeys(ctx context.Context, keys []secrets.AWSKeyCredential, prober AWSKeyProber) ([]KeyLiveness, error) {
+	if prober == nil {
+		return nil, nil
+	}
+	out := make([]KeyLiveness, 0, len(keys))
+	for _, c := range keys {
+		if err := ctx.Err(); err != nil {
+			return out, err
+		}
+		res, err := prober.WhoAmI(ctx, c)
+		kl := KeyLiveness{Cred: c}
+		switch {
+		case err != nil:
+			kl.Blocked = true
+		case res.Live:
+			kl.Live = true
+			kl.ARN = res.ARN
+			kl.Account = res.Account
+		}
+		out = append(out, kl)
+	}
+	return out, nil
+}
+
 // exposedSecretLiveness is the §9.2→§9.1 cross-link: it takes the AWS key pairs
 // the secrets collector captured from the control plane (only under
 // --capture-secrets) and proves, read-only, whether each is still live by
@@ -57,9 +101,21 @@ func (*exposedSecretLiveness) BlastRadius() string { return BlastRadiusNone }
 func (*exposedSecretLiveness) Vantage() findings.Vantage { return findings.VantageExternal }
 
 func (v *exposedSecretLiveness) Validate(ctx context.Context, env Env, f findings.Finding) (*findings.Evidence, error) {
-	// Capture is opt-in: with no captured keys (or no prober), there is nothing
-	// to confirm and the masked finding stands on its own.
-	if len(env.CapturedAWSKeys) == 0 || env.AWSKeyProber == nil {
+	// Reuse pre-probed liveness when the caller supplied it (the scan path probes
+	// once and feeds it here); otherwise probe on demand. Capture is opt-in: with
+	// no captured keys (or no prober) there is nothing to confirm and the masked
+	// finding stands on its own.
+	results := env.CapturedKeyLiveness
+	if results == nil {
+		if len(env.CapturedAWSKeys) == 0 || env.AWSKeyProber == nil {
+			return nil, nil
+		}
+		var err error
+		if results, err = ProbeCapturedKeys(ctx, env.CapturedAWSKeys, env.AWSKeyProber); err != nil {
+			return nil, err
+		}
+	}
+	if len(results) == 0 {
 		return nil, nil
 	}
 
@@ -70,19 +126,15 @@ func (v *exposedSecretLiveness) Validate(ctx context.Context, env Env, f finding
 	var lines []line
 	live, blocked := 0, 0
 
-	for _, c := range env.CapturedAWSKeys {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		res, err := env.AWSKeyProber.WhoAmI(ctx, c)
-		l := line{masked: c.Masked(), surface: c.Surface, resource: c.Resource}
+	for _, kl := range results {
+		l := line{masked: kl.Cred.Masked(), surface: kl.Cred.Surface, resource: kl.Cred.Resource}
 		switch {
-		case err != nil:
+		case kl.Blocked:
 			l.blocked = true
 			blocked++
-		case res.Live:
+		case kl.Live:
 			l.live = true
-			l.arn = res.ARN
+			l.arn = kl.ARN
 			live++
 		}
 		lines = append(lines, l)

@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Su1ph3r/nubicustos/internal/auth"
+	"github.com/Su1ph3r/nubicustos/internal/chain"
 	ruleschecks "github.com/Su1ph3r/nubicustos/internal/checks/rules"
 	"github.com/Su1ph3r/nubicustos/internal/discovery"
 	"github.com/Su1ph3r/nubicustos/internal/engine"
@@ -281,11 +282,20 @@ func runScan(ctx context.Context, f *scanFlags) error {
 	if f.validate {
 		progress.ReportPhase(sc.Progress, progress.PhaseValidate, "")
 		var venv validate.Env
+		var keyLiveness []validate.KeyLiveness
 		if provider == "aws" {
 			venv = validate.NewAWSEnv(sc.AWS) // authenticated, MFA-satisfied scan session
 			if capture != nil {
 				venv.CapturedAWSKeys = capture.AWSKeys()
 				venv.AWSKeyProber = validate.NewAWSKeyProber()
+				// Probe captured-key liveness once; both the exposed-secret evidence
+				// and the attack-chain synthesis below consume the same results.
+				if lv, perr := validate.ProbeCapturedKeys(ctx, venv.CapturedAWSKeys, venv.AWSKeyProber); perr != nil {
+					fmt.Fprintf(os.Stderr, "  validation error: %v\n", perr)
+				} else {
+					keyLiveness = lv
+					venv.CapturedKeyLiveness = lv
+				}
 			}
 		}
 		rep := validate.Run(ctx, result.Findings, validate.Options{Env: venv})
@@ -293,6 +303,7 @@ func runScan(ctx context.Context, f *scanFlags) error {
 		for _, e := range rep.Errors {
 			fmt.Fprintf(os.Stderr, "  validation error: %v\n", e)
 		}
+		synthesizeChains(result, keyLiveness)
 	}
 
 	finished := time.Now().UTC()
@@ -468,11 +479,17 @@ func scanOneAccount(ctx context.Context, f *scanFlags, st *store.Store, persistM
 		// Confirm findings read-only against this account's own session; evidence
 		// attaches to the findings before they are persisted/exported.
 		venv := validate.NewAWSEnv(acc.Config)
+		var keyLiveness []validate.KeyLiveness
 		if capture != nil {
 			venv.CapturedAWSKeys = capture.AWSKeys()
 			venv.AWSKeyProber = validate.NewAWSKeyProber()
+			if lv, perr := validate.ProbeCapturedKeys(ctx, venv.CapturedAWSKeys, venv.AWSKeyProber); perr == nil {
+				keyLiveness = lv
+				venv.CapturedKeyLiveness = lv
+			}
 		}
 		validate.Run(ctx, result.Findings, validate.Options{Env: venv})
+		synthesizeChains(result, keyLiveness)
 	}
 	finished := time.Now().UTC()
 
@@ -619,6 +636,39 @@ func printOrgSummary(disc *discovery.AWSResult, summaries []orgAccountSummary) {
 		fmt.Printf("  %s (%s) — %d finding(s), %d path(s)%s [%s]\n",
 			s.id, s.name, s.findings, s.paths, errSuffix(s.scanErrs), s.scanID)
 	}
+}
+
+// synthesizeChains splices the flagship runtime-proven attack chains into a scan
+// result: for each captured AWS key proven live, if the identity it maps to can
+// escalate to admin, it appends a critical finding and merges a scored path into
+// the graph. No-op unless --capture-secrets surfaced live keys for an AWS scan.
+// Result findings are re-sorted so a synthesized critical chain leads the summary.
+func synthesizeChains(result *engine.Result, keyLiveness []validate.KeyLiveness) {
+	if result == nil || result.State == nil || len(keyLiveness) == 0 {
+		return
+	}
+	var live []chain.LiveKey
+	for _, kl := range keyLiveness {
+		if kl.Live {
+			live = append(live, chain.LiveKey{Cred: kl.Cred, ARN: kl.ARN, Account: kl.Account})
+		}
+	}
+	if len(live) == 0 {
+		return
+	}
+	cf, cp := chain.Synthesize(result.State.AWS, live, time.Now().UTC())
+	if len(cf) == 0 {
+		return
+	}
+	result.Findings = append(result.Findings, cf...)
+	sort.SliceStable(result.Findings, func(i, j int) bool {
+		if result.Findings[i].Severity.Rank() != result.Findings[j].Severity.Rank() {
+			return result.Findings[i].Severity.Rank() > result.Findings[j].Severity.Rank()
+		}
+		return result.Findings[i].ID < result.Findings[j].ID
+	})
+	result.Graph.MergePaths(cp)
+	fmt.Fprintf(os.Stderr, "attack-chain synthesis: %d runtime-proven exposed-key privilege-escalation chain(s)\n", len(cf))
 }
 
 // firstRegion returns the first region or "" — STS/global resolution only needs one.

@@ -76,6 +76,12 @@ type Env struct {
 	// AWSKeyProber, when set, confirms a captured AWS credential read-only via
 	// sts:GetCallerIdentity. Built from the SDK in NewAWSKeyProber.
 	AWSKeyProber AWSKeyProber
+	// CapturedKeyLiveness, when set, supplies pre-probed liveness results for the
+	// captured keys so the exposed-secret validator reuses them instead of probing
+	// again. The scan path probes once (ProbeCapturedKeys) and feeds the same
+	// results to both this validator and the attack-chain synthesis, so a captured
+	// key's whoami runs exactly once. Nil means "probe on demand".
+	CapturedKeyLiveness []KeyLiveness
 }
 
 var (

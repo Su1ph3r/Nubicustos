@@ -12,6 +12,8 @@
 package graph
 
 import (
+	"sort"
+
 	"github.com/Su1ph3r/nubicustos/internal/findings"
 )
 
@@ -34,6 +36,12 @@ const (
 	EdgeHoldsAdmin        EdgeKind = "holds-admin"
 	EdgeCanAssume         EdgeKind = "can-assume-role" // reserved (plan §9.3)
 	EdgeCanEscalate       EdgeKind = "can-escalate"    // reserved (plan §9.3)
+	// EdgeExposedSecret links a control-plane surface (a Lambda env, EC2 userdata,
+	// an SSM parameter) to a credential leaked through it.
+	EdgeExposedSecret EdgeKind = "exposed-secret"
+	// EdgeLiveCredential links a leaked credential to the identity it unlocks once
+	// proven live by an sts:GetCallerIdentity whoami — the runtime-proven hop.
+	EdgeLiveCredential EdgeKind = "live-credential"
 )
 
 // InternetNodeID is the stable id of the singleton internet node.
@@ -75,6 +83,34 @@ type Graph struct {
 	Nodes []Node `json:"nodes"`
 	Edges []Edge `json:"edges"`
 	Paths []Path `json:"paths"`
+}
+
+// MergePaths folds post-scan synthesized paths into the graph: it appends each
+// path, unions its nodes into the global node list (deduped by id, so a path
+// whose terminal principal node already exists does not duplicate it), appends
+// its edges, and re-sorts all paths most-exploitable first. Used to splice in
+// the attack-chain paths the validation pass proves, which are only knowable
+// after the graph is first built from static state.
+func (g *Graph) MergePaths(ps []Path) {
+	if g == nil || len(ps) == 0 {
+		return
+	}
+	have := make(map[string]struct{}, len(g.Nodes))
+	for _, n := range g.Nodes {
+		have[n.ID] = struct{}{}
+	}
+	for _, p := range ps {
+		for _, n := range p.Nodes {
+			if _, ok := have[n.ID]; ok {
+				continue
+			}
+			have[n.ID] = struct{}{}
+			g.Nodes = append(g.Nodes, n)
+		}
+		g.Edges = append(g.Edges, p.Edges...)
+		g.Paths = append(g.Paths, p)
+	}
+	sort.SliceStable(g.Paths, func(i, j int) bool { return g.Paths[i].Score > g.Paths[j].Score })
 }
 
 // Principals returns the principal-kind nodes (for persistence to the
