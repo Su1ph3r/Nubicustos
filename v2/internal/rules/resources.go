@@ -68,8 +68,33 @@ func flattenAWS(a *state.AWS) []Resource {
 	}
 	for _, sg := range a.SecurityGroups {
 		out = append(out, res("aws_security_group", sg.ID, sg.Name, sg.Region, a.Account, map[string]any{
-			"id": sg.ID, "name": sg.Name, "region": sg.Region, "world_open": sg.WorldOpen(),
+			"id": sg.ID, "name": sg.Name, "region": sg.Region, "vpc": sg.VPCID,
+			"world_open":   sg.WorldOpen(),
+			"source_cidrs": sgSourceCIDRs(sg),
+			"source_sgs":   sgSourceSGs(sg),
 		}))
+	}
+	return out
+}
+
+// sgSourceCIDRs is the flat set of every source CIDR (v4 and v6) across a
+// security group's ingress rules, for CEL expressions like
+// `"10.0.0.0/8" in resource.source_cidrs`.
+func sgSourceCIDRs(sg state.SecurityGroup) []string {
+	var out []string
+	for _, r := range sg.Ingress {
+		out = append(out, r.IPv4CIDRs...)
+		out = append(out, r.IPv6CIDRs...)
+	}
+	return out
+}
+
+// sgSourceSGs is the flat set of every source security-group id a group's
+// ingress references.
+func sgSourceSGs(sg state.SecurityGroup) []string {
+	var out []string
+	for _, r := range sg.Ingress {
+		out = append(out, r.SourceSGs...)
 	}
 	return out
 }

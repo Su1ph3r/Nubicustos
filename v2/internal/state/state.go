@@ -104,13 +104,20 @@ type IAMState struct {
 
 // --- EC2 (regional) ---------------------------------------------------------
 
-// IngressRule is a single inbound security-group rule.
+// IngressRule is a single inbound security-group rule. OpenV4/OpenV6 are
+// retained as the world-open shortcut every existing consumer uses; the CIDR and
+// source-group lists are the full source set, populated alongside them so
+// resource-level reachability can reason about non-world sources (a peer VPC's
+// CIDR, another security group).
 type IngressRule struct {
-	Protocol string // tcp, udp, icmp, -1 (all)
-	FromPort int
-	ToPort   int
-	OpenV4   bool // contains 0.0.0.0/0
-	OpenV6   bool // contains ::/0
+	Protocol  string // tcp, udp, icmp, -1 (all)
+	FromPort  int
+	ToPort    int
+	OpenV4    bool     // an IPv4 source is 0.0.0.0/0
+	OpenV6    bool     // an IPv6 source is ::/0
+	IPv4CIDRs []string // all IPv4 source CIDRs (includes 0.0.0.0/0 when OpenV4)
+	IPv6CIDRs []string // all IPv6 source CIDRs (includes ::/0 when OpenV6)
+	SourceSGs []string // source security-group ids (UserIdGroupPairs)
 }
 
 // SecurityGroup is the collected ingress posture of a security group.
@@ -118,6 +125,7 @@ type SecurityGroup struct {
 	ID      string
 	Name    string
 	Region  string
+	VPCID   string // owning VPC (for resolving cross-VPC vs intra-VPC source-SG references)
 	Ingress []IngressRule
 }
 

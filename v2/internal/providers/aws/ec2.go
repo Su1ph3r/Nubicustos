@@ -52,6 +52,7 @@ func collectSecurityGroups(sc *engine.ScanContext, client *ec2.Client, region st
 				ID:     awssdk.ToString(g.GroupId),
 				Name:   awssdk.ToString(g.GroupName),
 				Region: region,
+				VPCID:  awssdk.ToString(g.VpcId),
 			}
 			for _, perm := range g.IpPermissions {
 				sg.Ingress = append(sg.Ingress, ingressRule(perm))
@@ -61,7 +62,8 @@ func collectSecurityGroups(sc *engine.ScanContext, client *ec2.Client, region st
 	}
 }
 
-// ingressRule normalizes an IpPermission, flagging open-to-world CIDRs.
+// ingressRule normalizes an IpPermission: every source CIDR and referenced
+// source security group, with the world-open shortcuts derived alongside.
 func ingressRule(perm ec2types.IpPermission) state.IngressRule {
 	r := state.IngressRule{
 		Protocol: awssdk.ToString(perm.IpProtocol),
@@ -69,13 +71,28 @@ func ingressRule(perm ec2types.IpPermission) state.IngressRule {
 		ToPort:   int(awssdk.ToInt32(perm.ToPort)),
 	}
 	for _, ipr := range perm.IpRanges {
-		if awssdk.ToString(ipr.CidrIp) == "0.0.0.0/0" {
+		cidr := awssdk.ToString(ipr.CidrIp)
+		if cidr == "" {
+			continue
+		}
+		r.IPv4CIDRs = append(r.IPv4CIDRs, cidr)
+		if cidr == "0.0.0.0/0" {
 			r.OpenV4 = true
 		}
 	}
 	for _, ipr := range perm.Ipv6Ranges {
-		if awssdk.ToString(ipr.CidrIpv6) == "::/0" {
+		cidr := awssdk.ToString(ipr.CidrIpv6)
+		if cidr == "" {
+			continue
+		}
+		r.IPv6CIDRs = append(r.IPv6CIDRs, cidr)
+		if cidr == "::/0" {
 			r.OpenV6 = true
+		}
+	}
+	for _, pair := range perm.UserIdGroupPairs {
+		if id := awssdk.ToString(pair.GroupId); id != "" {
+			r.SourceSGs = append(r.SourceSGs, id)
 		}
 	}
 	return r

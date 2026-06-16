@@ -42,7 +42,8 @@ func TestAllChecksUnique(t *testing.T) {
 	// + Lambda(2) + SNS(1) + SQS(1) + Redshift(2) + ECR(2) + CloudWatch monitoring(1)
 	// + EFS(1) + ElastiCache(2) + DynamoDB(1) + classic-ELB(1)
 	// + exposed-secret(1) + IAM trust/privilege umbrella(1)
-	// + cross-cloud federation(1) + VPC peering lateral exposure(1) = 51.
+	// + cross-cloud federation(1) + VPC peering lateral exposure(1)
+	// + SG transitive world-open(1) = 52.
 	// Azure catalog: storage(5) + NSG(1) + key vault(3) + app service(3)
 	// + SQL(3) + Cosmos(2) + Defender(1) + RBAC(1) + Entra(3) + Monitor(1)
 	// + rdbms(1) + VM(1) + Redis(1) + exposed-secret(1)
@@ -51,8 +52,8 @@ func TestAllChecksUnique(t *testing.T) {
 	// + Cloud SQL(4) + compute(3) + KMS(2) + GKE(3) + logging(1) + trust(2)
 	// + monitoring(1) = 23.
 	// K8s catalog: pods(4) + RBAC(2) + exposed-secret(1) = 7.
-	// Plus the policy-as-code rules umbrella check = 1. Total = 110.
-	const wantChecks = 110
+	// Plus the policy-as-code rules umbrella check = 1. Total = 111.
+	const wantChecks = 111
 	if len(checks) != wantChecks {
 		t.Errorf("registered checks = %d, want %d", len(checks), wantChecks)
 	}

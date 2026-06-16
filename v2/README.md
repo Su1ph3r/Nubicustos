@@ -47,7 +47,7 @@ Two shapes, chosen per check:
 |---------|--------|
 | S3 | public access (ACL/policy) |
 | IAM | root MFA, root access keys, weak password policy, access-key rotation, console user without MFA, directly-attached AdministratorAccess; trust/privilege-escalation analysis; role assumable from another cloud via OIDC federation (cross-cloud) |
-| EC2 | open ingress on sensitive ports*, IMDSv2 not enforced, public IP, unencrypted EBS volume, EBS default encryption disabled* |
+| EC2 | open ingress on sensitive ports*, security group reachable from the internet via a world-open source group (transitive exposure), IMDSv2 not enforced, public IP, unencrypted EBS volume, EBS default encryption disabled* |
 | VPC | flow logs disabled*; private VPC reachable from an internet-exposed VPC via active peering (lateral exposure discovered by the reachability solver) |
 | RDS | publicly accessible, unencrypted storage, backups disabled, deletion protection disabled, public snapshot* |
 | CloudTrail | no logging multi-region trail, log-file validation disabled, not KMS-encrypted |
