@@ -209,6 +209,29 @@ type ECRRepository struct {
 	PublicPolicy bool // repository policy allows Principal "*" with no condition
 }
 
+// EFSFileSystem is the collected encryption posture of an EFS file system.
+type EFSFileSystem struct {
+	ID        string
+	Region    string
+	Encrypted bool
+}
+
+// ElasticacheGroup is the collected encryption posture of an ElastiCache (Redis)
+// replication group.
+type ElasticacheGroup struct {
+	ID                 string
+	Region             string
+	AtRestEncrypted    bool
+	InTransitEncrypted bool
+}
+
+// DynamoDBTable is the collected backup posture of a DynamoDB table.
+type DynamoDBTable struct {
+	Name        string
+	Region      string
+	PITREnabled bool // point-in-time recovery enabled
+}
+
 // --- RDS (regional) ---------------------------------------------------------
 
 // RDSInstance is the collected posture of an RDS instance.
@@ -380,6 +403,9 @@ type AWS struct {
 	ECRRepos         []ECRRepository
 	LogMetricFilters []LogMetricFilter
 	AlarmedMetrics   []string // CloudWatch metric names that have an alarm
+	EFS              []EFSFileSystem
+	Elasticache      []ElasticacheGroup
+	DynamoDB         []DynamoDBTable
 	Trails           []CloudTrailTrail
 
 	KMSKeys                  []KMSKey
@@ -1077,6 +1103,27 @@ func (s *State) AddMessagingResource(m MessagingResource) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.AWS.Messaging = append(s.AWS.Messaging, m)
+}
+
+// AddEFSFileSystem appends a collected EFS file system under lock.
+func (s *State) AddEFSFileSystem(f EFSFileSystem) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.AWS.EFS = append(s.AWS.EFS, f)
+}
+
+// AddElasticacheGroup appends a collected ElastiCache replication group under lock.
+func (s *State) AddElasticacheGroup(g ElasticacheGroup) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.AWS.Elasticache = append(s.AWS.Elasticache, g)
+}
+
+// AddDynamoDBTable appends a collected DynamoDB table under lock.
+func (s *State) AddDynamoDBTable(t DynamoDBTable) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.AWS.DynamoDB = append(s.AWS.DynamoDB, t)
 }
 
 // AddLogMetricFilter appends a collected CloudWatch Logs metric filter under lock.

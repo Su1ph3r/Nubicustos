@@ -127,6 +127,11 @@ var nubicustosAWSActions = []string{
 	// ECR posture (scan-on-push + repository policy)
 	"ecr:DescribeRepositories",
 	"ecr:GetRepositoryPolicy",
+	// Datastore encryption/backup posture (EFS, ElastiCache, DynamoDB)
+	"elasticfilesystem:DescribeFileSystems",
+	"elasticache:DescribeReplicationGroups",
+	"dynamodb:ListTables",
+	"dynamodb:DescribeContinuousBackups",
 	"ec2:DescribeInstanceAttribute",
 	"ssm:DescribeParameters",
 	"ssm:GetParameters",
