@@ -30,6 +30,8 @@ var nubicustosAzureActions = []string{
 	"Microsoft.Security/pricings/read",
 	// RBAC custom role definitions
 	"Microsoft.Authorization/roleDefinitions/read",
+	// Monitor: activity-log alerts (CIS 5.2)
+	"Microsoft.Insights/activityLogAlerts/read",
 	// App Service posture + control-plane secrets (Function/Web apps)
 	"Microsoft.Web/sites/Read",
 	"Microsoft.Web/sites/config/Read",        // GetConfiguration: min TLS, FTPS state (Reader-granted)

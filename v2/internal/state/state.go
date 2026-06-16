@@ -572,6 +572,14 @@ type AzureAppRegistration struct {
 	FederatedCreds       []AzureFederatedCred
 }
 
+// AzureMonitor is a subscription's monitoring posture: which sensitive
+// operations have an enabled activity-log alert (CIS Azure section 5.2).
+type AzureMonitor struct {
+	Subscription      string
+	AlertsReadOK      bool     // the activity-log-alerts read succeeded (else don't judge)
+	AlertedOperations []string // operationName values covered by enabled alerts
+}
+
 // Azure is the collected Azure-side state for one or more subscriptions.
 type Azure struct {
 	StorageAccounts  []StorageAccount
@@ -585,6 +593,7 @@ type Azure struct {
 	AppRegistrations []AzureAppRegistration
 	NICs             []AzureNIC
 	SubnetNSGs       []AzureSubnetNSG
+	Monitors         []AzureMonitor
 	SecretHits       []SecretHit
 }
 
@@ -897,6 +906,13 @@ func (s *State) AddKeyVault(v KeyVault) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Azure.KeyVaults = append(s.Azure.KeyVaults, v)
+}
+
+// AddAzureMonitor appends a subscription's monitoring posture under lock.
+func (s *State) AddAzureMonitor(m AzureMonitor) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Azure.Monitors = append(s.Azure.Monitors, m)
 }
 
 // AddAzureAppRegistration appends a collected Entra app registration under lock.

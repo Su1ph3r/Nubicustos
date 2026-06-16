@@ -316,6 +316,30 @@ func TestEntraChecks(t *testing.T) {
 	}
 }
 
+func TestMonitorActivityAlertMissing(t *testing.T) {
+	st := stateWith(&state.Azure{Monitors: []state.AzureMonitor{
+		{Subscription: "s1", AlertsReadOK: true, AlertedOperations: []string{
+			"Microsoft.Network/networkSecurityGroups/write",
+			"Microsoft.Network/networkSecurityGroups/delete",
+		}},
+	}})
+	fs := evalCheck(t, monitorActivityAlertMissing{}, st)
+	// 10 CIS ops required, 2 covered → 8 missing.
+	if len(fs) != 8 {
+		t.Fatalf("expected 8 missing-alert findings, got %d", len(fs))
+	}
+	for _, f := range fs {
+		if strings.Contains(f.Description, "networkSecurityGroups/write") || strings.Contains(f.Description, "networkSecurityGroups/delete") {
+			t.Errorf("covered NSG ops must not be flagged: %s", f.Description)
+		}
+	}
+	// Read failure → judged nothing.
+	notRead := stateWith(&state.Azure{Monitors: []state.AzureMonitor{{Subscription: "s2", AlertsReadOK: false}}})
+	if got := evalCheck(t, monitorActivityAlertMissing{}, notRead); len(got) != 0 {
+		t.Fatalf("an unread subscription must not be judged, got %d", len(got))
+	}
+}
+
 func TestNilAzureStateNoPanic(t *testing.T) {
 	st := state.New()
 	st.Azure = nil
@@ -326,6 +350,7 @@ func TestNilAzureStateNoPanic(t *testing.T) {
 		sqlPublicNetwork{}, sqlFirewallAllowAll{}, sqlMinTLS{},
 		cosmosPublicNetwork{}, cosmosLocalAuth{}, defenderPlanFree{}, rbacCustomRoleWildcard{},
 		entraFederatedCredential{}, entraMultiTenantApp{}, entraExpiredCredential{},
+		monitorActivityAlertMissing{},
 	} {
 		if fs := evalCheck(t, c, st); len(fs) != 0 {
 			t.Fatalf("%s on nil azure state should yield nothing, got %d", c.Spec().ID, len(fs))

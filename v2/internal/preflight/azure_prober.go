@@ -13,6 +13,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/cosmos/armcosmos"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/keyvault/armkeyvault"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/managementgroups/armmanagementgroups"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/monitor/armmonitor"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armsubscriptions"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/security/armsecurity"
@@ -162,6 +163,13 @@ func liveAzureReads(cred azcore.TokenCredential, subscription string) map[string
 				return err
 			}
 			return drainFirst(ctx, c.NewListPager("/subscriptions/"+subscription, nil))
+		},
+		"Microsoft.Insights/activityLogAlerts/read": func(ctx context.Context) error {
+			c, err := armmonitor.NewActivityLogAlertsClient(subscription, cred, nil)
+			if err != nil {
+				return err
+			}
+			return drainFirst(ctx, c.NewListBySubscriptionIDPager(nil))
 		},
 		"Microsoft.Sql/servers/firewallRules/read": func(ctx context.Context) error {
 			// Listing firewall rules needs an actual server; find one first.
