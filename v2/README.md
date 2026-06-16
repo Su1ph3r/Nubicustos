@@ -19,7 +19,9 @@ runtime-proven findings.
 > attack-path graph derives scored internet-exposure, privilege-escalation, and
 > assume-role/trust paths with chained PoCs, gated by a local network-reachability
 > solver (AWS + Azure). Federation/trust analysis (AWS IAM, Azure RBAC + Entra
-> workload-identity federation, GCP cross-project service accounts) and an opt-in,
+> workload-identity federation, GCP cross-project service accounts), including
+> cross-cloud federation (an AWS role assumable from Azure/GCP, or an Entra app
+> impersonable from AWS/GCP), and an opt-in,
 > read-only active-validation pass (AWS + Azure) confirm findings with evidence.
 > Compliance mapping onto SOC 2 / PCI-DSS / NIST 800-53 (on top of per-check
 > CIS / Well-Architected references). A terminal UI browses a scan; optional
@@ -41,7 +43,7 @@ Two shapes, chosen per check:
 | Service | Checks |
 |---------|--------|
 | S3 | public access (ACL/policy) |
-| IAM | root MFA, root access keys, weak password policy, access-key rotation, console user without MFA, directly-attached AdministratorAccess; trust/privilege-escalation analysis |
+| IAM | root MFA, root access keys, weak password policy, access-key rotation, console user without MFA, directly-attached AdministratorAccess; trust/privilege-escalation analysis; role assumable from another cloud via OIDC federation (cross-cloud) |
 | EC2 | open ingress on sensitive ports*, IMDSv2 not enforced, public IP, unencrypted EBS volume, EBS default encryption disabled* |
 | VPC | flow logs disabled* |
 | RDS | publicly accessible, unencrypted storage, backups disabled, deletion protection disabled, public snapshot* |
@@ -177,7 +179,7 @@ Native Azure checks run across the subscriptions discovered from the credential
 | Virtual Machines | encryption at host disabled |
 | Redis | non-TLS port enabled |
 | RBAC | custom role grants a wildcard (`*`) action |
-| Entra ID | app registration with an external workload-identity federated credential, multi-tenant app, expired credential still configured |
+| Entra ID | app registration with an external workload-identity federated credential, app impersonable from another cloud via federation (cross-cloud), multi-tenant app, expired credential still configured |
 | Defender for Cloud | plans on the Free tier |
 | Monitor | no activity-log alert for sensitive operations (policy/NSG/SQL-firewall/security-solution/public-IP changes) |
 | Secrets | credential material embedded in the control plane (App Service settings / connection strings) |

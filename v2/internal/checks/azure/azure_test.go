@@ -314,6 +314,35 @@ func TestEntraChecks(t *testing.T) {
 	if fs := evalCheck(t, entraExpiredCredential{}, st); len(fs) != 1 || fs[0].Resource.ID != "app-1" {
 		t.Fatalf("only the app with an expired credential should be flagged, got %+v", fs)
 	}
+	// The GitHub issuer above is not a cross-cloud peer, so nothing is flagged.
+	if fs := evalCheck(t, entraCrossCloudFederation{}, st); len(fs) != 0 {
+		t.Fatalf("a GitHub (CI) federation is not cross-cloud, got %+v", fs)
+	}
+}
+
+func TestEntraCrossCloudFederation(t *testing.T) {
+	st := stateWith(&state.Azure{AppRegistrations: []state.AzureAppRegistration{
+		{DisplayName: "from-aws", AppID: "app-aws", FederatedCreds: []state.AzureFederatedCred{
+			{Name: "eks", Issuer: "https://oidc.eks.us-east-1.amazonaws.com/id/ABC", Subject: "system:serviceaccount:ns:sa"},
+		}},
+		{DisplayName: "from-gcp", AppID: "app-gcp", FederatedCreds: []state.AzureFederatedCred{
+			{Name: "wif", Issuer: "https://accounts.google.com", Subject: "12345"},
+		}},
+		{DisplayName: "ci", AppID: "app-gh", FederatedCreds: []state.AzureFederatedCred{
+			{Name: "gh", Issuer: "https://token.actions.githubusercontent.com", Subject: "repo:o/r:ref:main"},
+		}},
+	}})
+	fs := evalCheck(t, entraCrossCloudFederation{}, st)
+	if len(fs) != 2 {
+		t.Fatalf("expected 2 cross-cloud findings (AWS, GCP), got %d: %+v", len(fs), fs)
+	}
+	ids := map[string]bool{}
+	for _, f := range fs {
+		ids[f.Resource.ID] = true
+	}
+	if !ids["app-aws"] || !ids["app-gcp"] || ids["app-gh"] {
+		t.Fatalf("expected app-aws and app-gcp flagged, not app-gh: %v", ids)
+	}
 }
 
 func TestMonitorActivityAlertMissing(t *testing.T) {

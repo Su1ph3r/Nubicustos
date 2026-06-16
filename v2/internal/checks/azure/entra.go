@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Su1ph3r/nubicustos/internal/engine"
+	"github.com/Su1ph3r/nubicustos/internal/fedmap"
 	"github.com/Su1ph3r/nubicustos/internal/findings"
 	"github.com/Su1ph3r/nubicustos/internal/state"
 )
@@ -13,6 +14,7 @@ func init() {
 	engine.RegisterCheck(entraFederatedCredential{})
 	engine.RegisterCheck(entraMultiTenantApp{})
 	engine.RegisterCheck(entraExpiredCredential{})
+	engine.RegisterCheck(entraCrossCloudFederation{})
 }
 
 func appResource(a state.AzureAppRegistration) findings.Resource {
@@ -44,6 +46,50 @@ func (c entraFederatedCredential) Evaluate(_ *engine.ScanContext, st *state.Stat
 		for _, fc := range a.FederatedCreds {
 			desc := fmt.Sprintf("App registration %q (appId %s) trusts federated issuer %q with subject %q — verify the subject is scoped to a specific external identity.",
 				a.DisplayName, a.AppID, fc.Issuer, fc.Subject)
+			poc := fmt.Sprintf("az ad app federated-credential list --id %s", a.AppID)
+			out = append(out, findings.New(c.Spec(), appResource(a), desc, poc, now))
+		}
+	}
+	return out, nil
+}
+
+// entraCrossCloudFederation flags app registrations whose federated identity
+// credential trusts an issuer belonging to a different cloud (AWS or Google
+// Cloud). A workload in that cloud can obtain Entra tokens as the app, a trust
+// edge that crosses a cloud boundary. It is a sharper, cross-cloud-specific
+// signal layered on the general federated-credential check.
+type entraCrossCloudFederation struct{}
+
+func (entraCrossCloudFederation) Spec() findings.CheckSpec {
+	return findings.CheckSpec{
+		ID: "azure_cross_cloud_federation", Title: "App registration is impersonable from another cloud via federation",
+		Provider: "azure", Service: "entra", Severity: findings.SeverityHigh,
+		Rationale:   "A federated identity credential whose issuer is AWS or Google Cloud lets a workload in that cloud obtain tokens as this Entra app with no stored secret. The trust spans two clouds: a foothold on the other side reaches into this tenant, and a single-provider scan never connects the two ends.",
+		Impact:      "A workload (or attacker foothold) in the peer cloud that satisfies the credential's subject can authenticate as the app and exercise its Entra and Azure permissions.",
+		Remediation: "Confirm the cross-cloud trust is intended; scope the federated credential's subject to the exact external identity and remove it if unused: az ad app federated-credential list --id <appId>",
+		References:  []string{"https://learn.microsoft.com/entra/workload-id/workload-identity-federation"},
+	}
+}
+
+func (c entraCrossCloudFederation) Evaluate(_ *engine.ScanContext, st *state.State) ([]findings.Finding, error) {
+	if st.Azure == nil {
+		return nil, nil
+	}
+	now := time.Now().UTC()
+	var out []findings.Finding
+	for _, a := range st.Azure.AppRegistrations {
+		seen := map[string]struct{}{}
+		for _, fc := range a.FederatedCreds {
+			peer := fedmap.Classify(fc.Issuer)
+			if !fedmap.CrossCloud(fedmap.Azure, peer) {
+				continue
+			}
+			if _, dup := seen[string(peer)+"|"+fc.Issuer]; dup {
+				continue
+			}
+			seen[string(peer)+"|"+fc.Issuer] = struct{}{}
+			desc := fmt.Sprintf("App registration %q (appId %s) federates the %s issuer %q (subject %q), so a workload in %s can obtain tokens as this app.",
+				a.DisplayName, a.AppID, peer.Label(), fc.Issuer, fc.Subject, peer.Label())
 			poc := fmt.Sprintf("az ad app federated-credential list --id %s", a.AppID)
 			out = append(out, findings.New(c.Spec(), appResource(a), desc, poc, now))
 		}
