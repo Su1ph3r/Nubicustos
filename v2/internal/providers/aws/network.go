@@ -17,6 +17,7 @@ import (
 func collectNetworkTopology(sc *engine.ScanContext, client *ec2.Client, region string, st *state.State) {
 	explicit := collectRouteTables(sc, client, region, st)
 	collectSubnets(sc, client, region, st, explicit)
+	collectVPCPeerings(sc, client, region, st)
 }
 
 // collectRouteTables records each route table (main flag + whether it routes a
@@ -42,10 +43,14 @@ func collectRouteTables(sc *engine.ScanContext, client *ec2.Client, region strin
 					explicit[sid] = id
 				}
 			}
+			seenPeer := map[string]bool{}
 			for _, route := range rt.Routes {
 				if routesToIGW(route) {
 					entry.IGWRoute = true
-					break
+				}
+				if pcx := awssdk.ToString(route.VpcPeeringConnectionId); pcx != "" && !seenPeer[pcx] {
+					seenPeer[pcx] = true
+					entry.PeeringIDs = append(entry.PeeringIDs, pcx)
 				}
 			}
 			st.AddRouteTable(entry)
@@ -59,6 +64,41 @@ func routesToIGW(r ec2types.Route) bool {
 	defaultRoute := awssdk.ToString(r.DestinationCidrBlock) == "0.0.0.0/0" ||
 		awssdk.ToString(r.DestinationIpv6CidrBlock) == "::/0"
 	return defaultRoute && strings.HasPrefix(awssdk.ToString(r.GatewayId), "igw-")
+}
+
+// collectVPCPeerings records the active VPC-peering connections in the region:
+// the two VPCs each bridges. Combined with route tables that target a peering,
+// the reachability solver can find a private VPC reachable from an internet-
+// exposed one across the peering.
+func collectVPCPeerings(sc *engine.ScanContext, client *ec2.Client, region string, st *state.State) {
+	pager := ec2.NewDescribeVpcPeeringConnectionsPaginator(client, &ec2.DescribeVpcPeeringConnectionsInput{})
+	for pager.HasMorePages() {
+		page, err := pager.NextPage(sc.Ctx)
+		if err != nil {
+			return
+		}
+		for _, pcx := range page.VpcPeeringConnections {
+			active := false
+			if pcx.Status != nil {
+				active = pcx.Status.Code == ec2types.VpcPeeringConnectionStateReasonCodeActive
+			}
+			st.AddVPCPeering(state.VPCPeering{
+				ID:     awssdk.ToString(pcx.VpcPeeringConnectionId),
+				Region: region,
+				VPCA:   vpcInfoID(pcx.RequesterVpcInfo),
+				VPCB:   vpcInfoID(pcx.AccepterVpcInfo),
+				Active: active,
+			})
+		}
+	}
+}
+
+// vpcInfoID safely reads the VpcId from a peering-connection VPC-info side.
+func vpcInfoID(info *ec2types.VpcPeeringConnectionVpcInfo) string {
+	if info == nil {
+		return ""
+	}
+	return awssdk.ToString(info.VpcId)
 }
 
 // collectSubnets records each subnet's VPC, public-IP-on-launch flag, and the

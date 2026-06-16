@@ -18,7 +18,9 @@ runtime-proven findings.
 > container inventory for downstream container-escape analysis. An in-process
 > attack-path graph derives scored internet-exposure, privilege-escalation, and
 > assume-role/trust paths with chained PoCs, gated by a local network-reachability
-> solver (AWS + Azure). Federation/trust analysis (AWS IAM, Azure RBAC + Entra
+> solver (AWS + Azure) that both suppresses unreachable findings and discovers
+> indirect exposure (a private VPC reachable from an internet-facing one across
+> peering). Federation/trust analysis (AWS IAM, Azure RBAC + Entra
 > workload-identity federation, GCP cross-project service accounts), including
 > cross-cloud federation (an AWS role assumable from Azure/GCP, or an Entra app
 > impersonable from AWS/GCP), and an opt-in,
@@ -45,7 +47,7 @@ Two shapes, chosen per check:
 | S3 | public access (ACL/policy) |
 | IAM | root MFA, root access keys, weak password policy, access-key rotation, console user without MFA, directly-attached AdministratorAccess; trust/privilege-escalation analysis; role assumable from another cloud via OIDC federation (cross-cloud) |
 | EC2 | open ingress on sensitive ports*, IMDSv2 not enforced, public IP, unencrypted EBS volume, EBS default encryption disabled* |
-| VPC | flow logs disabled* |
+| VPC | flow logs disabled*; private VPC reachable from an internet-exposed VPC via active peering (lateral exposure discovered by the reachability solver) |
 | RDS | publicly accessible, unencrypted storage, backups disabled, deletion protection disabled, public snapshot* |
 | CloudTrail | no logging multi-region trail, log-file validation disabled, not KMS-encrypted |
 | KMS | customer-managed key rotation disabled |

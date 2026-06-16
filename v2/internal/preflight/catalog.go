@@ -79,6 +79,7 @@ var nubicustosAWSActions = []string{
 	"ec2:DescribeFlowLogs",
 	"ec2:DescribeSubnets",
 	"ec2:DescribeRouteTables",
+	"ec2:DescribeVpcPeeringConnections",
 	"ec2:GetEbsEncryptionByDefault",
 	// RDS
 	"rds:DescribeDBInstances",

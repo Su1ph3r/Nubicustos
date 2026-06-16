@@ -109,6 +109,67 @@ func (r *Result) effectiveRouteTable(subnetID, vpcID string) string {
 	return r.mainRT[vpcID]
 }
 
+// PeeringExposure is a private VPC reachable from an internet-exposed VPC across
+// an active peering connection. The exposure is topological: each VPC's own
+// config looks fine (the private one has no internet gateway), but a foothold in
+// the internet-exposed VPC can pivot across the peering into the private one. A
+// per-resource or per-VPC config scan misses it because the path spans two VPCs.
+type PeeringExposure struct {
+	PrivateVPC  string // the VPC with no internet gateway of its own
+	InternetVPC string // the peered VPC that does reach the internet
+	PeeringID   string // pcx-...
+	Region      string
+}
+
+// PeeringExposures finds private VPCs reachable from an internet-exposed VPC over
+// an active peering. It requires a route to the peering on BOTH sides (so a
+// bidirectional TCP path genuinely exists, not just a one-way send), and that the
+// private side has no internet gateway of its own (else it is directly exposed
+// and covered elsewhere). Pure and safe on nil state.
+func PeeringExposures(a *state.AWS) []PeeringExposure {
+	if a == nil {
+		return nil
+	}
+	hasIGW := map[string]bool{}                  // vpc -> has its own internet-gateway route
+	routesToPeer := map[string]map[string]bool{} // vpc -> set of pcx it routes to
+	for _, rt := range a.RouteTables {
+		if rt.VPCID == "" {
+			continue
+		}
+		if rt.IGWRoute {
+			hasIGW[rt.VPCID] = true
+		}
+		for _, pcx := range rt.PeeringIDs {
+			if routesToPeer[rt.VPCID] == nil {
+				routesToPeer[rt.VPCID] = map[string]bool{}
+			}
+			routesToPeer[rt.VPCID][pcx] = true
+		}
+	}
+
+	var out []PeeringExposure
+	seen := map[string]bool{}
+	for _, p := range a.Peerings {
+		if !p.Active || p.VPCA == "" || p.VPCB == "" {
+			continue
+		}
+		for _, dir := range [][2]string{{p.VPCA, p.VPCB}, {p.VPCB, p.VPCA}} {
+			src, dst := dir[0], dir[1]
+			if hasIGW[src] && !hasIGW[dst] && routesToPeer[src][p.ID] && routesToPeer[dst][p.ID] {
+				key := p.ID + "|" + dst
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				out = append(out, PeeringExposure{
+					PrivateVPC: dst, InternetVPC: src, PeeringID: p.ID, Region: p.Region,
+				})
+			}
+		}
+	}
+	return out
+}
+
 // Annotate sets the Reachable field on exposure findings whose reachability can
 // be determined from topology. It is conservative: it only annotates per-instance
 // public-IP findings (where instance subnet/SG attachment is fully known) and

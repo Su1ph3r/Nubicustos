@@ -129,3 +129,76 @@ func TestAnnotateSetsReachableOnPublicIPFinding(t *testing.T) {
 		t.Fatalf("non-exposure finding should be untouched, got %s", fs[1].Reachable)
 	}
 }
+
+func TestPeeringExposures(t *testing.T) {
+	a := &state.AWS{
+		RouteTables: []state.RouteTable{
+			// vpc-pub reaches the internet and routes to the peering.
+			{ID: "rt-pub", VPCID: "vpc-pub", IGWRoute: true, PeeringIDs: []string{"pcx-1"}},
+			// vpc-priv has no IGW, but routes back over the peering.
+			{ID: "rt-priv", VPCID: "vpc-priv", PeeringIDs: []string{"pcx-1"}},
+		},
+		Peerings: []state.VPCPeering{
+			{ID: "pcx-1", Region: "us-east-1", VPCA: "vpc-pub", VPCB: "vpc-priv", Active: true},
+		},
+	}
+	ex := PeeringExposures(a)
+	if len(ex) != 1 {
+		t.Fatalf("expected 1 peering exposure, got %d: %+v", len(ex), ex)
+	}
+	if ex[0].PrivateVPC != "vpc-priv" || ex[0].InternetVPC != "vpc-pub" || ex[0].PeeringID != "pcx-1" {
+		t.Fatalf("unexpected exposure: %+v", ex[0])
+	}
+}
+
+func TestPeeringExposuresInactiveSkipped(t *testing.T) {
+	a := &state.AWS{
+		RouteTables: []state.RouteTable{
+			{ID: "rt-pub", VPCID: "vpc-pub", IGWRoute: true, PeeringIDs: []string{"pcx-1"}},
+			{ID: "rt-priv", VPCID: "vpc-priv", PeeringIDs: []string{"pcx-1"}},
+		},
+		Peerings: []state.VPCPeering{
+			{ID: "pcx-1", VPCA: "vpc-pub", VPCB: "vpc-priv", Active: false}, // pending/deleted
+		},
+	}
+	if ex := PeeringExposures(a); len(ex) != 0 {
+		t.Fatalf("inactive peering must not expose, got %+v", ex)
+	}
+}
+
+func TestPeeringExposuresRequiresBothRoutes(t *testing.T) {
+	// Only the internet side routes to the peering; no return route on the private
+	// side, so no bidirectional path -> not flagged.
+	a := &state.AWS{
+		RouteTables: []state.RouteTable{
+			{ID: "rt-pub", VPCID: "vpc-pub", IGWRoute: true, PeeringIDs: []string{"pcx-1"}},
+			{ID: "rt-priv", VPCID: "vpc-priv"}, // no peering route
+		},
+		Peerings: []state.VPCPeering{
+			{ID: "pcx-1", VPCA: "vpc-pub", VPCB: "vpc-priv", Active: true},
+		},
+	}
+	if ex := PeeringExposures(a); len(ex) != 0 {
+		t.Fatalf("one-way route must not expose, got %+v", ex)
+	}
+}
+
+func TestPeeringExposuresBothInternetNotFlagged(t *testing.T) {
+	// Both VPCs have their own IGW: neither is the "private" side.
+	a := &state.AWS{
+		RouteTables: []state.RouteTable{
+			{ID: "rt-a", VPCID: "vpc-a", IGWRoute: true, PeeringIDs: []string{"pcx-1"}},
+			{ID: "rt-b", VPCID: "vpc-b", IGWRoute: true, PeeringIDs: []string{"pcx-1"}},
+		},
+		Peerings: []state.VPCPeering{{ID: "pcx-1", VPCA: "vpc-a", VPCB: "vpc-b", Active: true}},
+	}
+	if ex := PeeringExposures(a); len(ex) != 0 {
+		t.Fatalf("two internet VPCs should not produce a private-exposure finding, got %+v", ex)
+	}
+}
+
+func TestPeeringExposuresNilSafe(t *testing.T) {
+	if ex := PeeringExposures(nil); ex != nil {
+		t.Fatalf("nil state should yield nil, got %+v", ex)
+	}
+}

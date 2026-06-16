@@ -164,6 +164,22 @@ type RouteTable struct {
 	VPCID    string
 	Main     bool
 	IGWRoute bool // has a 0.0.0.0/0 or ::/0 route targeting an internet gateway
+	// PeeringIDs are the VPC-peering connection ids (pcx-...) this table routes
+	// to, i.e. the peers the table's VPC can send traffic to. Used by the
+	// reachability solver to find lateral exposure across a peering.
+	PeeringIDs []string
+}
+
+// VPCPeering is one VPC-peering connection: the two VPCs it bridges and whether
+// it is active. Combined with route tables that target it, it lets the
+// reachability solver discover a private VPC that is reachable from an
+// internet-exposed one across the peering.
+type VPCPeering struct {
+	ID     string // pcx-...
+	Region string
+	VPCA   string // requester VPC id
+	VPCB   string // accepter VPC id
+	Active bool   // status code is "active"
 }
 
 // EBSVolume is the collected encryption posture of a volume.
@@ -423,6 +439,7 @@ type AWS struct {
 	GuardDutyEnabledByRegion map[string]bool         // region -> has an enabled detector
 
 	VPCs               []VPCInfo
+	Peerings           []VPCPeering
 	PublicEBSSnapshots []ResourceRef
 	PublicAMIs         []ResourceRef
 	PublicRDSSnapshots []ResourceRef
@@ -1250,6 +1267,13 @@ func (s *State) AddVPC(v VPCInfo) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.AWS.VPCs = append(s.AWS.VPCs, v)
+}
+
+// AddVPCPeering appends a collected VPC-peering connection under lock.
+func (s *State) AddVPCPeering(p VPCPeering) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.AWS.Peerings = append(s.AWS.Peerings, p)
 }
 
 // AddPublicEBSSnapshot records a publicly shared EBS snapshot under lock.
