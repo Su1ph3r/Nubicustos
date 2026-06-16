@@ -16,7 +16,9 @@ runtime-proven findings.
 > Kubernetes (pod-security/RBAC/control-plane secrets), persisted to SQLite,
 > queryable offline, and exportable as Cairn / SARIF / CSV / HTML plus a
 > container inventory for downstream container-escape analysis. An in-process
-> attack-path graph derives scored internet-exposure, privilege-escalation, and
+> attack-path graph derives scored internet-exposure, lateral-reachability
+> (a private resource reachable from an internet-exposed one via a security-group
+> reference or a peered VPC), privilege-escalation, and
 > assume-role/trust paths with chained PoCs, gated by a local network-reachability
 > solver (AWS + Azure) that both suppresses unreachable findings and discovers
 > indirect exposure (a private VPC reachable from an internet-facing one across

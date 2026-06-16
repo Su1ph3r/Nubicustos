@@ -81,67 +81,40 @@ func (c sgTransitiveWorldOpen) Evaluate(_ *engine.ScanContext, st *state.State) 
 	if st.AWS == nil {
 		return nil, nil
 	}
-	worldOpen := map[string]state.SecurityGroup{}
-	for _, sg := range st.AWS.SecurityGroups {
-		if sg.WorldOpen() {
-			worldOpen[sg.ID] = sg
-		}
+	// Group the (target, world-open source) pairs from the shared solver by target
+	// group, so each exposed group is one finding listing its world-open sources.
+	type group struct {
+		res     findings.Resource
+		sources map[string]struct{}
 	}
-	if len(worldOpen) == 0 {
-		return nil, nil
+	byTarget := map[string]*group{}
+	var order []string
+	for _, e := range reachability.TransitiveWorldOpenSGs(st.AWS) {
+		g, ok := byTarget[e.SecurityGroup]
+		if !ok {
+			g = &group{
+				res:     findings.Resource{ID: e.SecurityGroup, Name: e.SGName, Type: "aws_security_group", Provider: "aws", Region: e.Region},
+				sources: map[string]struct{}{},
+			}
+			byTarget[e.SecurityGroup] = g
+			order = append(order, e.SecurityGroup)
+		}
+		g.sources[fmt.Sprintf("%s (%s) on %s", e.SourceName, e.SourceSG, e.Ports)] = struct{}{}
 	}
 
 	now := time.Now().UTC()
 	var out []findings.Finding
-	for _, sg := range st.AWS.SecurityGroups {
-		if sg.WorldOpen() {
-			continue // directly exposed; aws_ec2_open_ingress already covers it
+	for _, id := range order {
+		g := byTarget[id]
+		labels := make([]string, 0, len(g.sources))
+		for l := range g.sources {
+			labels = append(labels, l)
 		}
-		sources := worldOpenSourceRefs(sg, worldOpen)
-		if len(sources) == 0 {
-			continue
-		}
-		res := findings.Resource{
-			ID: sg.ID, Name: sg.Name, Type: "aws_security_group", Provider: "aws", Region: sg.Region,
-		}
+		sort.Strings(labels)
 		desc := fmt.Sprintf("Security group %s (%s) admits source group(s) %s that are open to the internet, so a host reachable through them can reach hosts in this group even though it has no world-open rule.",
-			sg.Name, sg.ID, strings.Join(sources, ", "))
-		poc := fmt.Sprintf("aws ec2 describe-security-groups --group-ids %s --query 'SecurityGroups[].IpPermissions'", sg.ID)
-		out = append(out, findings.New(c.Spec(), res, desc, poc, now))
+			g.res.Name, g.res.ID, strings.Join(labels, ", "))
+		poc := fmt.Sprintf("aws ec2 describe-security-groups --group-ids %s --query 'SecurityGroups[].IpPermissions'", g.res.ID)
+		out = append(out, findings.New(c.Spec(), g.res, desc, poc, now))
 	}
 	return out, nil
-}
-
-// worldOpenSourceRefs returns labels for the world-open source groups a group's
-// ingress references (deduped, sorted), each annotated with the ports it admits.
-func worldOpenSourceRefs(sg state.SecurityGroup, worldOpen map[string]state.SecurityGroup) []string {
-	seen := map[string]struct{}{}
-	var out []string
-	for _, r := range sg.Ingress {
-		for _, srcID := range r.SourceSGs {
-			src, ok := worldOpen[srcID]
-			if !ok {
-				continue
-			}
-			label := fmt.Sprintf("%s (%s) on %s", src.Name, srcID, portLabel(r))
-			if _, dup := seen[label]; dup {
-				continue
-			}
-			seen[label] = struct{}{}
-			out = append(out, label)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-// portLabel renders the port range a rule admits for human-readable evidence.
-func portLabel(r state.IngressRule) string {
-	if isAllPorts(r) {
-		return "all ports"
-	}
-	if r.FromPort == r.ToPort {
-		return fmt.Sprintf("port %d", r.FromPort)
-	}
-	return fmt.Sprintf("ports %d-%d", r.FromPort, r.ToPort)
 }

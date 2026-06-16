@@ -85,8 +85,73 @@ func (b *builder) fromAWS(a *state.AWS) {
 	b.exposedLoadBalancers(a)
 	b.exposedS3(a)
 	b.exposedSharedArtifacts(a)
+	b.lateralReachability(a)
 	b.rootPrincipal(a)
 	b.trustEdges(a)
+}
+
+// lateralReachability renders the indirect-exposure paths the reachability solver
+// discovers: a resource that is not itself internet-facing but is reachable from
+// one that is. Two forms, both invisible to a per-resource scan:
+//   - a security group that admits a world-open source group (exposure chains
+//     inward one hop): internet -> world-open group -> this group;
+//   - a security group in a private VPC that admits a CIDR overlapping an
+//     internet-exposed peer VPC across an active peering: internet -> peer VPC ->
+//     this group.
+func (b *builder) lateralReachability(a *state.AWS) {
+	for _, t := range reachability.TransitiveWorldOpenSGs(a) {
+		srcNode := Node{ID: resourceNodeID("aws_security_group", t.SourceSG), Kind: NodeResource, Label: t.SourceName, Type: "aws_security_group", Region: t.Region}
+		dstNode := Node{ID: resourceNodeID("aws_security_group", t.SecurityGroup), Kind: NodeResource, Label: t.SGName, Type: "aws_security_group", Region: t.Region}
+		b.addNode(srcNode)
+		b.addNode(dstNode)
+		exposeEdge := Edge{
+			Src: InternetNodeID, Dst: srcNode.ID, Kind: EdgeExposedToInternet,
+			Detail: fmt.Sprintf("security group %s is open to the internet", t.SourceName),
+			PoC:    fmt.Sprintf("# %s admits 0.0.0.0/0; reach a host in it from the internet", t.SourceSG),
+		}
+		lateralEdge := Edge{
+			Src: srcNode.ID, Dst: dstNode.ID, Kind: EdgeLateralReachable,
+			Detail: fmt.Sprintf("group %s admits source group %s on %s", t.SGName, t.SourceName, t.Ports),
+			PoC:    fmt.Sprintf("# from a host in %s, connect to hosts in %s on %s", t.SourceSG, t.SecurityGroup, t.Ports),
+		}
+		b.addEdge(exposeEdge)
+		b.addEdge(lateralEdge)
+		b.addPath(b.scorePath(
+			"lateral-sg:"+t.SourceSG+":"+t.SecurityGroup,
+			fmt.Sprintf("Security group %s is reachable from the internet via world-open group %s", t.SGName, t.SourceName),
+			"The group has no world-open rule of its own, but it admits a group that does, so internet exposure chains inward one hop.",
+			0.5, 0.5, "",
+			[]Node{b.node(InternetNodeID), srcNode, dstNode},
+			[]Edge{exposeEdge, lateralEdge},
+		))
+	}
+
+	for _, e := range reachability.SGPeerReachable(a) {
+		peerNode := Node{ID: resourceNodeID("aws_vpc", e.InternetVPC), Kind: NodeResource, Label: e.InternetVPC, Type: "aws_vpc", Region: e.Region}
+		dstNode := Node{ID: resourceNodeID("aws_security_group", e.SecurityGroup), Kind: NodeResource, Label: e.SGName, Type: "aws_security_group", Region: e.Region}
+		b.addNode(peerNode)
+		b.addNode(dstNode)
+		exposeEdge := Edge{
+			Src: InternetNodeID, Dst: peerNode.ID, Kind: EdgeExposedToInternet,
+			Detail: fmt.Sprintf("VPC %s reaches the internet (peered with the private VPC over %s)", e.InternetVPC, e.PeeringID),
+			PoC:    fmt.Sprintf("# gain a foothold in internet-exposed VPC %s", e.InternetVPC),
+		}
+		lateralEdge := Edge{
+			Src: peerNode.ID, Dst: dstNode.ID, Kind: EdgeLateralReachable,
+			Detail: fmt.Sprintf("group %s admits %s (overlaps peer range %s) on %s across peering %s", e.SGName, e.MatchedCIDR, e.PeerCIDR, e.Ports, e.PeeringID),
+			PoC:    fmt.Sprintf("# from a host in %s, connect to %s on %s over the peering", e.InternetVPC, e.SecurityGroup, e.Ports),
+		}
+		b.addEdge(exposeEdge)
+		b.addEdge(lateralEdge)
+		b.addPath(b.scorePath(
+			"lateral-peer-sg:"+e.PeeringID+":"+e.SecurityGroup,
+			fmt.Sprintf("Security group %s is reachable across peering from internet-exposed VPC %s", e.SGName, e.InternetVPC),
+			"The group admits a private CIDR that is the range of an internet-facing peer VPC, so a foothold there reaches it across the peering despite no world-open rule.",
+			0.5, 0.6, "",
+			[]Node{b.node(InternetNodeID), peerNode, dstNode},
+			[]Edge{exposeEdge, lateralEdge},
+		))
+	}
 }
 
 // exposedInstances: an instance with a public IP is internet-addressable. If it

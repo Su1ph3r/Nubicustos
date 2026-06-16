@@ -406,3 +406,40 @@ func TestMergePathsEmptyAndNilSafe(t *testing.T) {
 	var nilG *Graph
 	nilG.MergePaths([]Path{{ID: "x"}}) // must not panic on nil receiver
 }
+
+func TestLateralTransitiveSGPath(t *testing.T) {
+	st := state.New()
+	st.AWS.SecurityGroups = []state.SecurityGroup{
+		{ID: "sg-web", Name: "web", Region: "us-east-1", VPCID: "vpc-1",
+			Ingress: []state.IngressRule{{Protocol: "tcp", FromPort: 22, ToPort: 22, OpenV4: true, IPv4CIDRs: []string{"0.0.0.0/0"}}}},
+		{ID: "sg-db", Name: "db", Region: "us-east-1", VPCID: "vpc-1",
+			Ingress: []state.IngressRule{{Protocol: "tcp", FromPort: 5432, ToPort: 5432, SourceSGs: []string{"sg-web"}}}},
+	}
+	g := Build(st, nil)
+	p := findPath(t, g, "lateral-sg:sg-web:sg-db")
+	if len(p.Edges) != 2 || p.Edges[1].Kind != EdgeLateralReachable {
+		t.Fatalf("expected an internet->web->db path ending in a lateral edge, got %+v", p.Edges)
+	}
+	if !hasEdge(g, EdgeLateralReachable) {
+		t.Fatal("expected a lateral-reachable edge in the graph")
+	}
+}
+
+func TestLateralPeerSGPath(t *testing.T) {
+	st := state.New()
+	st.AWS.RouteTables = []state.RouteTable{
+		{ID: "rt-pub", VPCID: "vpc-pub", IGWRoute: true, PeeringIDs: []string{"pcx-1"}},
+		{ID: "rt-priv", VPCID: "vpc-priv", PeeringIDs: []string{"pcx-1"}},
+	}
+	st.AWS.Peerings = []state.VPCPeering{{ID: "pcx-1", Region: "us-east-1", VPCA: "vpc-pub", VPCB: "vpc-priv", Active: true}}
+	st.AWS.VPCs = []state.VPCInfo{{ID: "vpc-pub", CIDRs: []string{"10.1.0.0/16"}}, {ID: "vpc-priv", CIDRs: []string{"10.2.0.0/16"}}}
+	st.AWS.SecurityGroups = []state.SecurityGroup{
+		{ID: "sg-db", Name: "db", Region: "us-east-1", VPCID: "vpc-priv",
+			Ingress: []state.IngressRule{{Protocol: "tcp", FromPort: 5432, ToPort: 5432, IPv4CIDRs: []string{"10.1.0.0/16"}}}},
+	}
+	g := Build(st, nil)
+	p := findPath(t, g, "lateral-peer-sg:pcx-1:sg-db")
+	if len(p.Nodes) != 3 || p.Nodes[1].Type != "aws_vpc" {
+		t.Fatalf("expected internet->peerVPC->sg path, got nodes %+v", p.Nodes)
+	}
+}

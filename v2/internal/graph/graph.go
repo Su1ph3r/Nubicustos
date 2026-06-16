@@ -42,6 +42,10 @@ const (
 	// EdgeLiveCredential links a leaked credential to the identity it unlocks once
 	// proven live by an sts:GetCallerIdentity whoami: the runtime-proven hop.
 	EdgeLiveCredential EdgeKind = "live-credential"
+	// EdgeLateralReachable links an internet-exposed resource to one reachable
+	// from it that is not itself internet-facing (a security group that admits the
+	// exposed group, or a private VPC reachable across a peering).
+	EdgeLateralReachable EdgeKind = "lateral-reachable"
 )
 
 // InternetNodeID is the stable id of the singleton internet node.

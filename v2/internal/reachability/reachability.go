@@ -173,6 +173,62 @@ func PeeringExposures(a *state.AWS) []PeeringExposure {
 	return out
 }
 
+// SGTransitiveExposure is a security group reachable from the internet because
+// it admits a source group that is itself world-open: exposure chains inward one
+// hop. It carries one entry per (target group, world-open source group, ports).
+type SGTransitiveExposure struct {
+	SecurityGroup string
+	SGName        string
+	Region        string
+	SourceSG      string
+	SourceName    string
+	Ports         string
+}
+
+// TransitiveWorldOpenSGs returns the groups reachable one hop from the internet
+// via a world-open source group. A group that is itself world-open is excluded
+// (it is directly exposed). Pure and safe on nil state. Shared by the check and
+// the attack-path graph so the relationship has one definition.
+func TransitiveWorldOpenSGs(a *state.AWS) []SGTransitiveExposure {
+	if a == nil {
+		return nil
+	}
+	worldOpen := map[string]state.SecurityGroup{}
+	for _, sg := range a.SecurityGroups {
+		if sg.WorldOpen() {
+			worldOpen[sg.ID] = sg
+		}
+	}
+	if len(worldOpen) == 0 {
+		return nil
+	}
+	var out []SGTransitiveExposure
+	seen := map[string]bool{}
+	for _, sg := range a.SecurityGroups {
+		if sg.WorldOpen() {
+			continue
+		}
+		for _, r := range sg.Ingress {
+			for _, srcID := range r.SourceSGs {
+				src, ok := worldOpen[srcID]
+				if !ok {
+					continue
+				}
+				key := sg.ID + "|" + srcID + "|" + portRange(r)
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				out = append(out, SGTransitiveExposure{
+					SecurityGroup: sg.ID, SGName: sg.Name, Region: sg.Region,
+					SourceSG: srcID, SourceName: src.Name, Ports: portRange(r),
+				})
+			}
+		}
+	}
+	return out
+}
+
 // SGPeerExposure is a security group in a private VPC that admits a CIDR
 // overlapping an internet-exposed peer VPC's range, reachable across an active
 // peering. This is the resource-level refinement of PeeringExposure: the group's
