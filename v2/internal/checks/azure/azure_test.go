@@ -351,6 +351,25 @@ func TestDBFlexPublicNetwork(t *testing.T) {
 	}
 }
 
+func TestVMAndRedisChecks(t *testing.T) {
+	st := stateWith(&state.Azure{
+		VMs: []state.AzureVM{
+			{Name: "vm1", Subscription: "s1", EncryptionAtHost: false},
+			{Name: "vm2", Subscription: "s1", EncryptionAtHost: true},
+		},
+		RedisCaches: []state.AzureRedis{
+			{Name: "r1", Subscription: "s1", NonSSLPortEnabled: true},
+			{Name: "r2", Subscription: "s1", NonSSLPortEnabled: false},
+		},
+	})
+	if fs := evalCheck(t, vmEncryptionAtHost{}, st); len(fs) != 1 || fs[0].Resource.Name != "vm1" {
+		t.Fatalf("only the VM without encryption-at-host should be flagged, got %+v", fs)
+	}
+	if fs := evalCheck(t, redisNonSSLPort{}, st); len(fs) != 1 || fs[0].Resource.Name != "r1" {
+		t.Fatalf("only the non-SSL Redis should be flagged, got %+v", fs)
+	}
+}
+
 func TestNilAzureStateNoPanic(t *testing.T) {
 	st := state.New()
 	st.Azure = nil
@@ -361,7 +380,7 @@ func TestNilAzureStateNoPanic(t *testing.T) {
 		sqlPublicNetwork{}, sqlFirewallAllowAll{}, sqlMinTLS{},
 		cosmosPublicNetwork{}, cosmosLocalAuth{}, defenderPlanFree{}, rbacCustomRoleWildcard{},
 		entraFederatedCredential{}, entraMultiTenantApp{}, entraExpiredCredential{},
-		monitorActivityAlertMissing{}, dbFlexPublicNetwork{},
+		monitorActivityAlertMissing{}, dbFlexPublicNetwork{}, vmEncryptionAtHost{}, redisNonSSLPort{},
 	} {
 		if fs := evalCheck(t, c, st); len(fs) != 0 {
 			t.Fatalf("%s on nil azure state should yield nothing, got %d", c.Spec().ID, len(fs))

@@ -35,6 +35,9 @@ var nubicustosAzureActions = []string{
 	// Database flexible servers (MySQL + PostgreSQL)
 	"Microsoft.DBforMySQL/flexibleServers/read",
 	"Microsoft.DBforPostgreSQL/flexibleServers/read",
+	// Compute VMs (encryption at host) + Redis (non-TLS port)
+	"Microsoft.Compute/virtualMachines/read",
+	"Microsoft.Cache/redis/read",
 	// App Service posture + control-plane secrets (Function/Web apps)
 	"Microsoft.Web/sites/Read",
 	"Microsoft.Web/sites/config/Read",        // GetConfiguration: min TLS, FTPS state (Reader-granted)

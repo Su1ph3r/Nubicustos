@@ -10,6 +10,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/appservice/armappservice/v4"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
+	armcompute "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v6"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/cosmos/armcosmos"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/keyvault/armkeyvault"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/managementgroups/armmanagementgroups"
@@ -17,6 +18,7 @@ import (
 	armmysql "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/mysql/armmysqlflexibleservers"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
 	armpostgres "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/postgresql/armpostgresqlflexibleservers"
+	armredis "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/redis/armredis/v3"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armsubscriptions"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/security/armsecurity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/sql/armsql"
@@ -186,6 +188,20 @@ func liveAzureReads(cred azcore.TokenCredential, subscription string) map[string
 				return err
 			}
 			return drainFirst(ctx, c.NewListPager(nil))
+		},
+		"Microsoft.Compute/virtualMachines/read": func(ctx context.Context) error {
+			c, err := armcompute.NewVirtualMachinesClient(subscription, cred, nil)
+			if err != nil {
+				return err
+			}
+			return drainFirst(ctx, c.NewListAllPager(nil))
+		},
+		"Microsoft.Cache/redis/read": func(ctx context.Context) error {
+			c, err := armredis.NewClient(subscription, cred, nil)
+			if err != nil {
+				return err
+			}
+			return drainFirst(ctx, c.NewListBySubscriptionPager(nil))
 		},
 		"Microsoft.Sql/servers/firewallRules/read": func(ctx context.Context) error {
 			// Listing firewall rules needs an actual server; find one first.

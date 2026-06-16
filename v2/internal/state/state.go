@@ -606,6 +606,24 @@ type AzureMonitor struct {
 	AlertedOperations []string // operationName values covered by enabled alerts
 }
 
+// AzureVM is the collected posture of an Azure virtual machine.
+type AzureVM struct {
+	Name             string
+	ResourceGroup    string
+	Subscription     string
+	Location         string
+	EncryptionAtHost bool // encryption at host enabled (protects temp/cache disks + VM-to-storage)
+}
+
+// AzureRedis is the collected posture of an Azure Cache for Redis instance.
+type AzureRedis struct {
+	Name              string
+	ResourceGroup     string
+	Subscription      string
+	Location          string
+	NonSSLPortEnabled bool // the non-TLS port (6379) is enabled
+}
+
 // AzureDBFlexServer is the collected posture of an Azure Database flexible
 // server (MySQL or PostgreSQL).
 type AzureDBFlexServer struct {
@@ -632,6 +650,8 @@ type Azure struct {
 	SubnetNSGs       []AzureSubnetNSG
 	Monitors         []AzureMonitor
 	DBFlexServers    []AzureDBFlexServer
+	VMs              []AzureVM
+	RedisCaches      []AzureRedis
 	SecretHits       []SecretHit
 }
 
@@ -967,6 +987,20 @@ func (s *State) AddKeyVault(v KeyVault) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Azure.KeyVaults = append(s.Azure.KeyVaults, v)
+}
+
+// AddAzureVM appends a collected virtual machine under lock.
+func (s *State) AddAzureVM(v AzureVM) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Azure.VMs = append(s.Azure.VMs, v)
+}
+
+// AddAzureRedis appends a collected Redis cache under lock.
+func (s *State) AddAzureRedis(r AzureRedis) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Azure.RedisCaches = append(s.Azure.RedisCaches, r)
 }
 
 // AddAzureDBFlexServer appends a collected MySQL/PostgreSQL flexible server under lock.
