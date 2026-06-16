@@ -23,6 +23,7 @@ import (
 	"github.com/Su1ph3r/nubicustos/internal/findings"
 	"github.com/Su1ph3r/nubicustos/internal/progress"
 	awsprovider "github.com/Su1ph3r/nubicustos/internal/providers/aws"
+	"github.com/Su1ph3r/nubicustos/internal/pubscan"
 	"github.com/Su1ph3r/nubicustos/internal/secrets"
 	"github.com/Su1ph3r/nubicustos/internal/store"
 	"github.com/Su1ph3r/nubicustos/internal/validate"
@@ -63,12 +64,13 @@ type scanFlags struct {
 	// Azure estate scoping (§9.4)
 	managementGroup string
 
-	dbPath           string
-	exportPath       string
-	exportContainers string
-	validate         bool
-	captureSecrets   bool
-	rulesDir         string
+	dbPath            string
+	exportPath        string
+	exportContainers  string
+	validate          bool
+	captureSecrets    bool
+	scanPublicContent bool
+	rulesDir          string
 }
 
 func newScanCmd() *cobra.Command {
@@ -113,6 +115,7 @@ func newScanCmd() *cobra.Command {
 	pf.StringVar(&f.exportContainers, "export-containers", "", "write the Kubernetes container inventory JSON (for Cepheus) to this path")
 	pf.BoolVar(&f.validate, "validate", false, "opt-in: actively (read-only) confirm findings and capture evidence")
 	pf.BoolVar(&f.captureSecrets, "capture-secrets", false, "AWS: retain raw control-plane secrets in-process so --validate can confirm AWS-key liveness (never written to disk or exported)")
+	pf.BoolVar(&f.scanPublicContent, "scan-public-content", false, "AWS: anonymously read a bounded sample of public S3 object content and report objects serving secret material (active, read-only)")
 	pf.StringVar(&f.rulesDir, "rules-dir", "", "directory of user policy-as-code rules to evaluate alongside the built-ins")
 
 	return cmd
@@ -276,6 +279,13 @@ func runScan(ctx context.Context, f *scanFlags) error {
 	started := time.Now().UTC()
 	sc.Progress = &cliProgress{} // honest per-phase progress to stderr (real totals)
 	result := engine.Run(sc)
+
+	// Opt-in active public-object content scan (read-only, anonymous). Runs before
+	// validation so any AWS key recovered from a public object joins the captured
+	// set and is liveness-probed / chained alongside control-plane secrets.
+	if f.scanPublicContent && provider == "aws" {
+		scanPublicObjects(ctx, result, capture)
+	}
 
 	// Opt-in active validation (read-only): confirm findings and attach evidence
 	// before persistence so it is stored and exported. Off unless --validate.
@@ -475,6 +485,10 @@ func scanOneAccount(ctx context.Context, f *scanFlags, st *store.Store, persistM
 	started := time.Now().UTC()
 	result := engine.Run(sc)
 
+	if f.scanPublicContent {
+		scanPublicObjects(ctx, result, capture)
+	}
+
 	if f.validate {
 		// Confirm findings read-only against this account's own session; evidence
 		// attaches to the findings before they are persisted/exported.
@@ -661,14 +675,43 @@ func synthesizeChains(result *engine.Result, keyLiveness []validate.KeyLiveness)
 		return
 	}
 	result.Findings = append(result.Findings, cf...)
-	sort.SliceStable(result.Findings, func(i, j int) bool {
-		if result.Findings[i].Severity.Rank() != result.Findings[j].Severity.Rank() {
-			return result.Findings[i].Severity.Rank() > result.Findings[j].Severity.Rank()
-		}
-		return result.Findings[i].ID < result.Findings[j].ID
-	})
+	sortFindingsBySeverity(result.Findings)
 	result.Graph.MergePaths(cp)
 	fmt.Fprintf(os.Stderr, "attack-chain synthesis: %d runtime-proven exposed-key privilege-escalation chain(s)\n", len(cf))
+}
+
+// scanPublicObjects runs the opt-in anonymous public-object content scan and
+// folds any objects serving secret material into the result (re-sorting so a
+// critical leak leads the summary). capture, when set, receives raw AWS key
+// pairs recovered from public content so the liveness/chain passes can act on
+// them. No-op when state is absent or nothing is public.
+func scanPublicObjects(ctx context.Context, result *engine.Result, capture *secrets.Capture) {
+	if result == nil || result.State == nil {
+		return
+	}
+	var sink pubscan.SecretSink
+	if capture != nil {
+		sink = capture // pass a true nil interface when capture is off
+	}
+	pf := pubscan.Scan(ctx, result.State.AWS, sink, pubscan.Options{})
+	if len(pf) == 0 {
+		return
+	}
+	result.Findings = append(result.Findings, pf...)
+	sortFindingsBySeverity(result.Findings)
+	fmt.Fprintf(os.Stderr, "public-content scan: %d public object(s) serving secret material\n", len(pf))
+}
+
+// sortFindingsBySeverity orders findings most-severe first (stable, then by id),
+// matching the engine's initial ordering — used after post-scan passes append
+// new findings so the scan summary stays severity-ordered.
+func sortFindingsBySeverity(fs []findings.Finding) {
+	sort.SliceStable(fs, func(i, j int) bool {
+		if fs[i].Severity.Rank() != fs[j].Severity.Rank() {
+			return fs[i].Severity.Rank() > fs[j].Severity.Rank()
+		}
+		return fs[i].ID < fs[j].ID
+	})
 }
 
 // firstRegion returns the first region or "" — STS/global resolution only needs one.

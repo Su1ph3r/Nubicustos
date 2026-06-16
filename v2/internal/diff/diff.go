@@ -8,7 +8,7 @@
 // of a prior scan, so they can never say "this resource became reachable since
 // last week" or "this principal gained a privilege-escalation path." Nubicustos
 // persists every scan to the embedded SQLite store, so the delta is a pure local
-// computation over two snapshots — no cloud calls, exact, and reproducible.
+// computation over two snapshots: no cloud calls, exact, and reproducible.
 //
 // The computation is deliberately storage-agnostic: it operates on already-
 // loaded Snapshot values so it is trivial to unit-test and so the store stays
@@ -23,7 +23,7 @@ import (
 	"github.com/Su1ph3r/nubicustos/internal/graph"
 )
 
-// Snapshot is one scan's persisted result — the unit a diff is computed over.
+// Snapshot is one scan's persisted result: the unit a diff is computed over.
 // Findings and Paths are matched across snapshots by their stable IDs
 // (Finding.ID is "checkID::resourceID"; Path.ID is graph-assigned), so the same
 // misconfiguration on the same resource is recognized as the same item between
@@ -56,7 +56,7 @@ type Result struct {
 	// Resolved are findings present in the from-scan and absent in the to-scan.
 	Resolved []findings.Finding `json:"resolved"`
 	// NewlyReachable are findings present in both scans whose reachability
-	// transitioned to "reachable" — an exposure that opened since the prior scan.
+	// transitioned to "reachable": an exposure that opened since the prior scan.
 	// This is the headline regression signal for change-gating in CI.
 	NewlyReachable []findings.Finding `json:"newly_reachable"`
 	// SeverityUp / SeverityDown are findings present in both whose severity rose
@@ -79,7 +79,7 @@ func (r Result) Empty() bool {
 }
 
 // Compute returns the delta from the older snapshot to the newer one. It does
-// not assume StartedAt ordering — the caller decides which snapshot is "from"
+// not assume StartedAt ordering; the caller decides which snapshot is "from"
 // (the baseline) and which is "to" (the current); Compute reports changes as if
 // moving from the first argument to the second.
 func Compute(from, to Snapshot) Result {

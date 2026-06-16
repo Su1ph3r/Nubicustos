@@ -47,7 +47,7 @@ type KeyLiveness struct {
 // returns one KeyLiveness per key (same order). A transport/timeout failure on a
 // key marks it Blocked rather than aborting the batch; only context cancellation
 // stops the run and returns the partial results with the cancellation error.
-// This is the single place captured-key whoami probing happens — both the
+// This is the single place captured-key whoami probing happens: both the
 // exposed-secret evidence and the attack-chain synthesis consume its output, so
 // a key is probed exactly once per scan.
 func ProbeCapturedKeys(ctx context.Context, keys []secrets.AWSKeyCredential, prober AWSKeyProber) ([]KeyLiveness, error) {

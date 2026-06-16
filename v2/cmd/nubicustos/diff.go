@@ -80,7 +80,7 @@ func runDiff(ctx context.Context, f *diffFlags) error {
 		fromID, err = st.PreviousScanID(ctx, toID)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return fmt.Errorf("scan %s is the earliest scan — need at least two scans to diff (or pass --from)", toID)
+				return fmt.Errorf("scan %s is the earliest scan; need at least two scans to diff (or pass --from)", toID)
 			}
 			return err
 		}
@@ -167,7 +167,7 @@ func printDiff(r diff.Result) error {
 		r.FromScanID, fmtTime(r.FromTime), r.ToScanID, fmtTime(r.ToTime))
 
 	if r.Empty() {
-		fmt.Println("\nno changes — posture is identical across both scans")
+		fmt.Println("\nno changes: posture is identical across both scans")
 		return nil
 	}
 

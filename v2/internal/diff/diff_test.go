@@ -32,7 +32,7 @@ func TestCompute_AddedAndResolved(t *testing.T) {
 		f("b", findings.SeverityLow, findings.ReachUnknown),
 	}, nil)
 	to := snap("s1", t1, []findings.Finding{
-		f("a", findings.SeverityHigh, findings.ReachUnknown), // unchanged
+		f("a", findings.SeverityHigh, findings.ReachUnknown),   // unchanged
 		f("c", findings.SeverityMedium, findings.ReachUnknown), // new
 	}, nil)
 
@@ -55,9 +55,9 @@ func TestCompute_AddedAndResolved(t *testing.T) {
 func TestCompute_NewlyReachable(t *testing.T) {
 	now := time.Now().UTC()
 	tests := []struct {
-		name      string
-		from, to  findings.Reachability
-		wantOpen  bool
+		name     string
+		from, to findings.Reachability
+		wantOpen bool
 	}{
 		{"unknown to reachable", findings.ReachUnknown, findings.ReachYes, true},
 		{"not-reachable to reachable", findings.ReachNo, findings.ReachYes, true},

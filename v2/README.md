@@ -133,7 +133,7 @@ guessed. Evidence carries only the masked key id and the ARN it resolves to.
 **Exposed-key privilege-escalation chains.** When a captured key is proven live,
 its identity is joined to the IAM privilege graph: if the user or role the key
 maps to holds administrator access or a privilege-escalation path, the scan emits
-a single critical finding and a scored attack path that reads end-to-end — "the
+a single critical finding and a scored attack path that reads end-to-end: "the
 key in function `ingest` is live, maps to `user/deploy`, and `deploy` can escalate
 to admin via `iam:PutUserPolicy`." This joins three signals (a control-plane
 secret, proof it is valid, and the privilege of the identity behind it) that
@@ -141,6 +141,19 @@ single-signal scanners flag, at most, as three unrelated facts. The chain's
 terminal node is the same principal node the trust graph builds, so it slots into
 the existing attack-path view. Produced under `--capture-secrets --validate`;
 appears in `findings`, `paths`, exports, and the MCP/TUI surfaces like any other.
+
+**Public-object content scan.** A public bucket is a config assertion until an
+object in it is shown to actually serve secret material to an unauthenticated
+caller. `scan --scan-public-content` anonymously (credential-free, operator
+vantage) reads a bounded sample of each public bucket's objects and runs the
+secret detector over the real content, emitting "this public object is serving a
+file containing an AWS key" as confirmed runtime proof of an active leak. It is
+strictly bounded and privacy-careful: read-only GETs, a per-bucket object cap, a
+per-object byte cap (oversized objects are skipped by their listed size, never
+downloaded), a total byte budget, and masked-only output (raw content never
+enters a finding or the store). Combined with `--capture-secrets --validate`, a
+recovered AWS key is liveness-probed and fed the same privilege-escalation chain
+above: public object to live key to admin.
 
 Requires `lambda:ListFunctions`, `ec2:DescribeInstanceAttribute`,
 `ssm:DescribeParameters`, and `ssm:GetParameters`; the last (reading parameter

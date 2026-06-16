@@ -73,7 +73,7 @@ func (b *builder) addPath(p Path) {
 // synthesized path's terminal node coincide with the trust dimension's
 // holds-admin / can-escalate node rather than duplicating it.
 func ResourceNodeID(rtype, id string) string { return "resource:" + rtype + ":" + id }
-func PrincipalNodeID(id string) string        { return "principal:" + id }
+func PrincipalNodeID(id string) string       { return "principal:" + id }
 
 func resourceNodeID(rtype, id string) string { return ResourceNodeID(rtype, id) }
 func principalNodeID(id string) string       { return PrincipalNodeID(id) }

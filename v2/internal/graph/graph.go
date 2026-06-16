@@ -40,7 +40,7 @@ const (
 	// an SSM parameter) to a credential leaked through it.
 	EdgeExposedSecret EdgeKind = "exposed-secret"
 	// EdgeLiveCredential links a leaked credential to the identity it unlocks once
-	// proven live by an sts:GetCallerIdentity whoami — the runtime-proven hop.
+	// proven live by an sts:GetCallerIdentity whoami: the runtime-proven hop.
 	EdgeLiveCredential EdgeKind = "live-credential"
 )
 
