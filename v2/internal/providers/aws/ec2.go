@@ -41,6 +41,7 @@ func (ec2Collector) Collect(sc *engine.ScanContext, st *state.State) error {
 }
 
 func collectSecurityGroups(sc *engine.ScanContext, client *ec2.Client, region string, st *state.State) {
+	plCIDRs := collectPrefixLists(sc, client)
 	pager := ec2.NewDescribeSecurityGroupsPaginator(client, &ec2.DescribeSecurityGroupsInput{})
 	for pager.HasMorePages() {
 		page, err := pager.NextPage(sc.Ctx)
@@ -55,44 +56,99 @@ func collectSecurityGroups(sc *engine.ScanContext, client *ec2.Client, region st
 				VPCID:  awssdk.ToString(g.VpcId),
 			}
 			for _, perm := range g.IpPermissions {
-				sg.Ingress = append(sg.Ingress, ingressRule(perm))
+				sg.Ingress = append(sg.Ingress, ingressRule(perm, plCIDRs))
 			}
 			st.AddSecurityGroup(sg)
 		}
 	}
 }
 
-// ingressRule normalizes an IpPermission: every source CIDR and referenced
-// source security group, with the world-open shortcuts derived alongside.
-func ingressRule(perm ec2types.IpPermission) state.IngressRule {
+// collectPrefixLists resolves each customer-managed prefix list in the region to
+// its member CIDRs (plID -> CIDRs). AWS-managed lists (e.g. the S3/DynamoDB
+// service ranges, OwnerId "AWS") are skipped: they are egress allowlists, not a
+// peer/source identity, and would add large irrelevant ranges. Best-effort: a
+// denied describe yields an empty map rather than failing the SG collection.
+func collectPrefixLists(sc *engine.ScanContext, client *ec2.Client) map[string][]string {
+	out := map[string][]string{}
+	pager := ec2.NewDescribeManagedPrefixListsPaginator(client, &ec2.DescribeManagedPrefixListsInput{})
+	for pager.HasMorePages() {
+		page, err := pager.NextPage(sc.Ctx)
+		if err != nil {
+			return out
+		}
+		for _, pl := range page.PrefixLists {
+			id := awssdk.ToString(pl.PrefixListId)
+			if id == "" || awssdk.ToString(pl.OwnerId) == "AWS" {
+				continue
+			}
+			out[id] = prefixListEntries(sc, client, id)
+		}
+	}
+	return out
+}
+
+// prefixListEntries reads the CIDR entries of one customer-managed prefix list.
+func prefixListEntries(sc *engine.ScanContext, client *ec2.Client, id string) []string {
+	var cidrs []string
+	pager := ec2.NewGetManagedPrefixListEntriesPaginator(client, &ec2.GetManagedPrefixListEntriesInput{PrefixListId: awssdk.String(id)})
+	for pager.HasMorePages() {
+		page, err := pager.NextPage(sc.Ctx)
+		if err != nil {
+			return cidrs
+		}
+		for _, e := range page.Entries {
+			if c := awssdk.ToString(e.Cidr); c != "" {
+				cidrs = append(cidrs, c)
+			}
+		}
+	}
+	return cidrs
+}
+
+// ingressRule normalizes an IpPermission: every source CIDR (including those
+// expanded from a customer-managed prefix list), referenced source security
+// group, and prefix-list id, with the world-open shortcuts derived alongside.
+func ingressRule(perm ec2types.IpPermission, plCIDRs map[string][]string) state.IngressRule {
 	r := state.IngressRule{
 		Protocol: awssdk.ToString(perm.IpProtocol),
 		FromPort: int(awssdk.ToInt32(perm.FromPort)),
 		ToPort:   int(awssdk.ToInt32(perm.ToPort)),
 	}
-	for _, ipr := range perm.IpRanges {
-		cidr := awssdk.ToString(ipr.CidrIp)
+	addCIDR := func(cidr string) {
 		if cidr == "" {
-			continue
+			return
+		}
+		if strings.Contains(cidr, ":") {
+			r.IPv6CIDRs = append(r.IPv6CIDRs, cidr)
+			if cidr == "::/0" {
+				r.OpenV6 = true
+			}
+			return
 		}
 		r.IPv4CIDRs = append(r.IPv4CIDRs, cidr)
 		if cidr == "0.0.0.0/0" {
 			r.OpenV4 = true
 		}
 	}
+	for _, ipr := range perm.IpRanges {
+		addCIDR(awssdk.ToString(ipr.CidrIp))
+	}
 	for _, ipr := range perm.Ipv6Ranges {
-		cidr := awssdk.ToString(ipr.CidrIpv6)
-		if cidr == "" {
-			continue
-		}
-		r.IPv6CIDRs = append(r.IPv6CIDRs, cidr)
-		if cidr == "::/0" {
-			r.OpenV6 = true
-		}
+		addCIDR(awssdk.ToString(ipr.CidrIpv6))
 	}
 	for _, pair := range perm.UserIdGroupPairs {
 		if id := awssdk.ToString(pair.GroupId); id != "" {
 			r.SourceSGs = append(r.SourceSGs, id)
+		}
+	}
+	for _, pl := range perm.PrefixListIds {
+		id := awssdk.ToString(pl.PrefixListId)
+		if id == "" {
+			continue
+		}
+		r.SourcePrefixLists = append(r.SourcePrefixLists, id)
+		for _, cidr := range plCIDRs[id] {
+			addCIDR(cidr)
 		}
 	}
 	return r

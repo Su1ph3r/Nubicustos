@@ -115,9 +115,13 @@ type IngressRule struct {
 	ToPort    int
 	OpenV4    bool     // an IPv4 source is 0.0.0.0/0
 	OpenV6    bool     // an IPv6 source is ::/0
-	IPv4CIDRs []string // all IPv4 source CIDRs (includes 0.0.0.0/0 when OpenV4)
+	IPv4CIDRs []string // all IPv4 source CIDRs (includes 0.0.0.0/0 when OpenV4, and any expanded from a customer-managed prefix list)
 	IPv6CIDRs []string // all IPv6 source CIDRs (includes ::/0 when OpenV6)
 	SourceSGs []string // source security-group ids (UserIdGroupPairs)
+	// SourcePrefixLists are the customer-managed prefix list ids (pl-...) this
+	// rule sources; their member CIDRs are expanded into IPv4CIDRs/IPv6CIDRs so
+	// reachability sees them, and the ids are kept for evidence.
+	SourcePrefixLists []string
 }
 
 // SecurityGroup is the collected ingress posture of a security group.

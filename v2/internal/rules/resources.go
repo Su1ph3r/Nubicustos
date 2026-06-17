@@ -69,9 +69,10 @@ func flattenAWS(a *state.AWS) []Resource {
 	for _, sg := range a.SecurityGroups {
 		out = append(out, res("aws_security_group", sg.ID, sg.Name, sg.Region, a.Account, map[string]any{
 			"id": sg.ID, "name": sg.Name, "region": sg.Region, "vpc": sg.VPCID,
-			"world_open":   sg.WorldOpen(),
-			"source_cidrs": sgSourceCIDRs(sg),
-			"source_sgs":   sgSourceSGs(sg),
+			"world_open":          sg.WorldOpen(),
+			"source_cidrs":        sgSourceCIDRs(sg),
+			"source_sgs":          sgSourceSGs(sg),
+			"source_prefix_lists": sgSourcePrefixLists(sg),
 		}))
 	}
 	return out
@@ -95,6 +96,16 @@ func sgSourceSGs(sg state.SecurityGroup) []string {
 	var out []string
 	for _, r := range sg.Ingress {
 		out = append(out, r.SourceSGs...)
+	}
+	return out
+}
+
+// sgSourcePrefixLists is the flat set of every customer-managed prefix list id a
+// group's ingress references.
+func sgSourcePrefixLists(sg state.SecurityGroup) []string {
+	var out []string
+	for _, r := range sg.Ingress {
+		out = append(out, r.SourcePrefixLists...)
 	}
 	return out
 }
