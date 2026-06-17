@@ -229,34 +229,117 @@ func TransitiveWorldOpenSGs(a *state.AWS) []SGTransitiveExposure {
 	return out
 }
 
+// VPCLateralExposure is a private VPC reachable from an internet-exposed VPC
+// across a network bridge: a peering connection or a transit gateway. It unifies
+// the two bridge types so the rule-level solver and the graph treat them alike.
+type VPCLateralExposure struct {
+	PrivateVPC  string
+	InternetVPC string
+	Via         string // "peering" | "transit-gateway"
+	ViaID       string // pcx-... | tgw-...
+	Region      string
+}
+
+// VPCLateralExposures returns every private VPC reachable from an internet-exposed
+// VPC, across either a peering connection or a transit gateway. Pure and safe on
+// nil state.
+func VPCLateralExposures(a *state.AWS) []VPCLateralExposure {
+	var out []VPCLateralExposure
+	for _, e := range PeeringExposures(a) {
+		out = append(out, VPCLateralExposure{
+			PrivateVPC: e.PrivateVPC, InternetVPC: e.InternetVPC, Via: "peering", ViaID: e.PeeringID, Region: e.Region,
+		})
+	}
+	out = append(out, tgwExposures(a)...)
+	return out
+}
+
+// tgwExposures finds private VPCs reachable from an internet-exposed VPC over a
+// shared transit gateway: both VPCs have an available attachment to the gateway
+// and a route table that routes to it, the internet side has its own IGW route,
+// and the private side does not. Transit-gateway route-table segmentation is not
+// modeled, so a gateway whose route tables isolate attachments is reported
+// conservatively (the VPC-route requirement on both sides is the gate applied).
+func tgwExposures(a *state.AWS) []VPCLateralExposure {
+	if a == nil {
+		return nil
+	}
+	hasIGW := map[string]bool{}
+	routesToTGW := map[string]map[string]bool{}
+	for _, rt := range a.RouteTables {
+		if rt.VPCID == "" {
+			continue
+		}
+		if rt.IGWRoute {
+			hasIGW[rt.VPCID] = true
+		}
+		for _, tgw := range rt.TransitGatewayIDs {
+			if routesToTGW[rt.VPCID] == nil {
+				routesToTGW[rt.VPCID] = map[string]bool{}
+			}
+			routesToTGW[rt.VPCID][tgw] = true
+		}
+	}
+	byTGW := map[string][]state.TGWAttachment{}
+	for _, att := range a.TGWAttachments {
+		if att.Available && att.TgwID != "" && att.VPCID != "" {
+			byTGW[att.TgwID] = append(byTGW[att.TgwID], att)
+		}
+	}
+
+	var out []VPCLateralExposure
+	seen := map[string]bool{}
+	for tgw, atts := range byTGW {
+		for _, src := range atts {
+			if !hasIGW[src.VPCID] || !routesToTGW[src.VPCID][tgw] {
+				continue
+			}
+			for _, dst := range atts {
+				if dst.VPCID == src.VPCID || hasIGW[dst.VPCID] || !routesToTGW[dst.VPCID][tgw] {
+					continue
+				}
+				key := tgw + "|" + dst.VPCID
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				out = append(out, VPCLateralExposure{
+					PrivateVPC: dst.VPCID, InternetVPC: src.VPCID, Via: "transit-gateway", ViaID: tgw, Region: dst.Region,
+				})
+			}
+		}
+	}
+	return out
+}
+
 // SGPeerExposure is a security group in a private VPC that admits a CIDR
-// overlapping an internet-exposed peer VPC's range, reachable across an active
-// peering. This is the resource-level refinement of PeeringExposure: the group's
-// own rule looks like ordinary internal access (a 10.x source, not 0.0.0.0/0),
-// but the source range is the internet-facing peer, so a host there can reach
-// this group on the admitted ports.
+// overlapping an internet-exposed peer VPC's range, reachable across a bridge
+// (peering or transit gateway). The group's own rule looks like ordinary
+// internal access (a 10.x source, not 0.0.0.0/0), but the source range is the
+// internet-facing peer, so a host there can reach this group on the admitted ports.
 type SGPeerExposure struct {
 	SecurityGroup string
 	SGName        string
 	Region        string
 	PrivateVPC    string
 	InternetVPC   string
-	PeeringID     string
+	Via           string // "peering" | "transit-gateway"
+	ViaID         string // pcx-... | tgw-...
 	MatchedCIDR   string // the group's ingress CIDR that overlaps the peer VPC
 	PeerCIDR      string // the internet-exposed peer VPC CIDR it overlaps
 	Ports         string // ports the matching rule admits
 }
 
 // SGPeerReachable finds security groups reachable from an internet-exposed VPC at
-// the rule level: for each private VPC reachable across a peering (PeeringExposures),
-// it returns the groups in that VPC whose non-world ingress admits a CIDR
-// overlapping the internet-exposed peer's VPC range. World-open rules are skipped
-// (covered by the direct-exposure check). Pure and safe on nil state.
+// the rule level: for each private VPC reachable across a bridge (peering or
+// transit gateway), it returns the groups in that VPC whose non-world ingress
+// admits a CIDR overlapping the internet-exposed peer's VPC range. World-open
+// rules are skipped (covered by the direct-exposure check). Pure and safe on nil.
 func SGPeerReachable(a *state.AWS) []SGPeerExposure {
 	if a == nil {
 		return nil
 	}
-	exposures := PeeringExposures(a)
+	exposures := VPCLateralExposures(a)
 	if len(exposures) == 0 {
 		return nil
 	}
@@ -285,14 +368,14 @@ func SGPeerReachable(a *state.AWS) []SGPeerExposure {
 				if matched == "" {
 					continue
 				}
-				key := sg.ID + "|" + ex.PeeringID + "|" + matched + "|" + portRange(r)
+				key := sg.ID + "|" + ex.ViaID + "|" + matched + "|" + portRange(r)
 				if seen[key] {
 					continue
 				}
 				seen[key] = true
 				out = append(out, SGPeerExposure{
 					SecurityGroup: sg.ID, SGName: sg.Name, Region: sg.Region,
-					PrivateVPC: ex.PrivateVPC, InternetVPC: ex.InternetVPC, PeeringID: ex.PeeringID,
+					PrivateVPC: ex.PrivateVPC, InternetVPC: ex.InternetVPC, Via: ex.Via, ViaID: ex.ViaID,
 					MatchedCIDR: matched, PeerCIDR: peer, Ports: portRange(r),
 				})
 			}

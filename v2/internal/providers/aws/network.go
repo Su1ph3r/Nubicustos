@@ -18,6 +18,7 @@ func collectNetworkTopology(sc *engine.ScanContext, client *ec2.Client, region s
 	explicit := collectRouteTables(sc, client, region, st)
 	collectSubnets(sc, client, region, st, explicit)
 	collectVPCPeerings(sc, client, region, st)
+	collectTGWAttachments(sc, client, region, st)
 }
 
 // collectRouteTables records each route table (main flag + whether it routes a
@@ -44,6 +45,7 @@ func collectRouteTables(sc *engine.ScanContext, client *ec2.Client, region strin
 				}
 			}
 			seenPeer := map[string]bool{}
+			seenTGW := map[string]bool{}
 			for _, route := range rt.Routes {
 				if routesToIGW(route) {
 					entry.IGWRoute = true
@@ -51,6 +53,10 @@ func collectRouteTables(sc *engine.ScanContext, client *ec2.Client, region strin
 				if pcx := awssdk.ToString(route.VpcPeeringConnectionId); pcx != "" && !seenPeer[pcx] {
 					seenPeer[pcx] = true
 					entry.PeeringIDs = append(entry.PeeringIDs, pcx)
+				}
+				if tgw := awssdk.ToString(route.TransitGatewayId); tgw != "" && !seenTGW[tgw] {
+					seenTGW[tgw] = true
+					entry.TransitGatewayIDs = append(entry.TransitGatewayIDs, tgw)
 				}
 			}
 			st.AddRouteTable(entry)
@@ -99,6 +105,27 @@ func vpcInfoID(info *ec2types.VpcPeeringConnectionVpcInfo) string {
 		return ""
 	}
 	return awssdk.ToString(info.VpcId)
+}
+
+// collectTGWAttachments records the region's transit-gateway VPC attachments:
+// which VPC attaches to which gateway, and whether the attachment is available.
+// Two VPCs on the same gateway with routes to it can reach each other through it.
+func collectTGWAttachments(sc *engine.ScanContext, client *ec2.Client, region string, st *state.State) {
+	pager := ec2.NewDescribeTransitGatewayVpcAttachmentsPaginator(client, &ec2.DescribeTransitGatewayVpcAttachmentsInput{})
+	for pager.HasMorePages() {
+		page, err := pager.NextPage(sc.Ctx)
+		if err != nil {
+			return
+		}
+		for _, att := range page.TransitGatewayVpcAttachments {
+			st.AddTGWAttachment(state.TGWAttachment{
+				TgwID:     awssdk.ToString(att.TransitGatewayId),
+				VPCID:     awssdk.ToString(att.VpcId),
+				Region:    region,
+				Available: att.State == ec2types.TransitGatewayAttachmentStateAvailable,
+			})
+		}
+	}
 }
 
 // collectSubnets records each subnet's VPC, public-IP-on-launch flag, and the

@@ -133,20 +133,20 @@ func (b *builder) lateralReachability(a *state.AWS) {
 		b.addNode(dstNode)
 		exposeEdge := Edge{
 			Src: InternetNodeID, Dst: peerNode.ID, Kind: EdgeExposedToInternet,
-			Detail: fmt.Sprintf("VPC %s reaches the internet (peered with the private VPC over %s)", e.InternetVPC, e.PeeringID),
+			Detail: fmt.Sprintf("VPC %s reaches the internet (bridged to the private VPC via %s %s)", e.InternetVPC, e.Via, e.ViaID),
 			PoC:    fmt.Sprintf("# gain a foothold in internet-exposed VPC %s", e.InternetVPC),
 		}
 		lateralEdge := Edge{
 			Src: peerNode.ID, Dst: dstNode.ID, Kind: EdgeLateralReachable,
-			Detail: fmt.Sprintf("group %s admits %s (overlaps peer range %s) on %s across peering %s", e.SGName, e.MatchedCIDR, e.PeerCIDR, e.Ports, e.PeeringID),
-			PoC:    fmt.Sprintf("# from a host in %s, connect to %s on %s over the peering", e.InternetVPC, e.SecurityGroup, e.Ports),
+			Detail: fmt.Sprintf("group %s admits %s (overlaps peer range %s) on %s across %s %s", e.SGName, e.MatchedCIDR, e.PeerCIDR, e.Ports, e.Via, e.ViaID),
+			PoC:    fmt.Sprintf("# from a host in %s, connect to %s on %s over the %s", e.InternetVPC, e.SecurityGroup, e.Ports, e.Via),
 		}
 		b.addEdge(exposeEdge)
 		b.addEdge(lateralEdge)
 		b.addPath(b.scorePath(
-			"lateral-peer-sg:"+e.PeeringID+":"+e.SecurityGroup,
-			fmt.Sprintf("Security group %s is reachable across peering from internet-exposed VPC %s", e.SGName, e.InternetVPC),
-			"The group admits a private CIDR that is the range of an internet-facing peer VPC, so a foothold there reaches it across the peering despite no world-open rule.",
+			"lateral-peer-sg:"+e.ViaID+":"+e.SecurityGroup,
+			fmt.Sprintf("Security group %s is reachable from internet-exposed VPC %s across %s", e.SGName, e.InternetVPC, e.Via),
+			"The group admits a private CIDR that is the range of an internet-facing peer VPC, so a foothold there reaches it across the bridge despite no world-open rule.",
 			0.5, 0.6, "",
 			[]Node{b.node(InternetNodeID), peerNode, dstNode},
 			[]Edge{exposeEdge, lateralEdge},

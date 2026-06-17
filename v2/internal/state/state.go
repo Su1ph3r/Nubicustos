@@ -180,6 +180,19 @@ type RouteTable struct {
 	// to, i.e. the peers the table's VPC can send traffic to. Used by the
 	// reachability solver to find lateral exposure across a peering.
 	PeeringIDs []string
+	// TransitGatewayIDs are the transit-gateway ids (tgw-...) this table routes
+	// to. The transit-gateway analog of PeeringIDs.
+	TransitGatewayIDs []string
+}
+
+// TGWAttachment is one VPC's attachment to a transit gateway. Two VPCs attached
+// to the same gateway (with routes to it) can reach each other through it, the
+// multi-VPC analog of a peering connection.
+type TGWAttachment struct {
+	TgwID     string // tgw-...
+	VPCID     string
+	Region    string
+	Available bool // attachment state is "available"
 }
 
 // VPCPeering is one VPC-peering connection: the two VPCs it bridges and whether
@@ -453,6 +466,7 @@ type AWS struct {
 
 	VPCs               []VPCInfo
 	Peerings           []VPCPeering
+	TGWAttachments     []TGWAttachment
 	PublicEBSSnapshots []ResourceRef
 	PublicAMIs         []ResourceRef
 	PublicRDSSnapshots []ResourceRef
@@ -1309,6 +1323,13 @@ func (s *State) AddVPCPeering(p VPCPeering) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.AWS.Peerings = append(s.AWS.Peerings, p)
+}
+
+// AddTGWAttachment appends a collected transit-gateway VPC attachment under lock.
+func (s *State) AddTGWAttachment(t TGWAttachment) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.AWS.TGWAttachments = append(s.AWS.TGWAttachments, t)
 }
 
 // AddPublicEBSSnapshot records a publicly shared EBS snapshot under lock.

@@ -18,7 +18,7 @@ runtime-proven findings.
 > container inventory for downstream container-escape analysis. An in-process
 > attack-path graph derives scored internet-exposure, lateral-reachability
 > (a private resource reachable from an internet-exposed one via a security-group
-> reference or a peered VPC), privilege-escalation, and
+> reference, or a VPC bridged by peering or a transit gateway), privilege-escalation, and
 > assume-role/trust paths with chained PoCs, gated by a local network-reachability
 > solver (AWS + Azure) that both suppresses unreachable findings and discovers
 > indirect exposure (a private VPC reachable from an internet-facing one across
@@ -50,7 +50,7 @@ Two shapes, chosen per check:
 | S3 | public access (ACL/policy) |
 | IAM | root MFA, root access keys, weak password policy, access-key rotation, console user without MFA, directly-attached AdministratorAccess; trust/privilege-escalation analysis; role assumable from another cloud via OIDC federation (cross-cloud) |
 | EC2 | open ingress on sensitive ports*, security group reachable from the internet via a world-open source group (transitive exposure), security group admitting a CIDR reachable from an internet-exposed peer VPC (resource-level lateral exposure), IMDSv2 not enforced, public IP, unencrypted EBS volume, EBS default encryption disabled* |
-| VPC | flow logs disabled*; private VPC reachable from an internet-exposed VPC via active peering (lateral exposure discovered by the reachability solver) |
+| VPC | flow logs disabled*; private VPC reachable from an internet-exposed VPC via active peering or a shared transit gateway (lateral exposure discovered by the reachability solver) |
 | RDS | publicly accessible, unencrypted storage, backups disabled, deletion protection disabled, public snapshot* |
 | CloudTrail | no logging multi-region trail, log-file validation disabled, not KMS-encrypted |
 | KMS | customer-managed key rotation disabled |

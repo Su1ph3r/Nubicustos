@@ -49,8 +49,8 @@ func (c sgPeerReachableExposure) Evaluate(_ *engine.ScanContext, st *state.State
 		res := findings.Resource{
 			ID: e.SecurityGroup, Name: e.SGName, Type: "aws_security_group", Provider: "aws", Region: e.Region,
 		}
-		desc := fmt.Sprintf("Security group %s (%s) in VPC %s admits %s on %s, which overlaps the range %s of internet-exposed peer VPC %s (across active peering %s). A host in %s can reach this group even though it has no world-open rule.",
-			e.SGName, e.SecurityGroup, e.PrivateVPC, e.MatchedCIDR, e.Ports, e.PeerCIDR, e.InternetVPC, e.PeeringID, e.InternetVPC)
+		desc := fmt.Sprintf("Security group %s (%s) in VPC %s admits %s on %s, which overlaps the range %s of internet-exposed peer VPC %s (across %s %s). A host in %s can reach this group even though it has no world-open rule.",
+			e.SGName, e.SecurityGroup, e.PrivateVPC, e.MatchedCIDR, e.Ports, e.PeerCIDR, e.InternetVPC, e.Via, e.ViaID, e.InternetVPC)
 		poc := fmt.Sprintf("aws ec2 describe-security-groups --group-ids %s --query 'SecurityGroups[].IpPermissions'", e.SecurityGroup)
 		out = append(out, findings.New(c.Spec(), res, desc, poc, now))
 	}

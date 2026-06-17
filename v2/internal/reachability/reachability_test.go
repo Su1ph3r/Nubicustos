@@ -275,3 +275,64 @@ func TestSGPeerReachableWorldOpenSkipped(t *testing.T) {
 		t.Fatalf("world-open rule should be skipped (direct exposure), got %+v", ex)
 	}
 }
+
+func TestTGWExposures(t *testing.T) {
+	a := &state.AWS{
+		RouteTables: []state.RouteTable{
+			{ID: "rt-pub", VPCID: "vpc-pub", IGWRoute: true, TransitGatewayIDs: []string{"tgw-1"}},
+			{ID: "rt-priv", VPCID: "vpc-priv", TransitGatewayIDs: []string{"tgw-1"}},
+			{ID: "rt-iso", VPCID: "vpc-iso"}, // attached but no route to the TGW
+		},
+		TGWAttachments: []state.TGWAttachment{
+			{TgwID: "tgw-1", VPCID: "vpc-pub", Region: "us-east-1", Available: true},
+			{TgwID: "tgw-1", VPCID: "vpc-priv", Region: "us-east-1", Available: true},
+			{TgwID: "tgw-1", VPCID: "vpc-iso", Region: "us-east-1", Available: true},
+		},
+	}
+	ex := tgwExposures(a)
+	if len(ex) != 1 {
+		t.Fatalf("expected 1 TGW exposure, got %d: %+v", len(ex), ex)
+	}
+	if ex[0].PrivateVPC != "vpc-priv" || ex[0].InternetVPC != "vpc-pub" || ex[0].Via != "transit-gateway" || ex[0].ViaID != "tgw-1" {
+		t.Fatalf("unexpected exposure: %+v", ex[0])
+	}
+}
+
+func TestTGWExposuresInactiveAttachmentSkipped(t *testing.T) {
+	a := &state.AWS{
+		RouteTables: []state.RouteTable{
+			{ID: "rt-pub", VPCID: "vpc-pub", IGWRoute: true, TransitGatewayIDs: []string{"tgw-1"}},
+			{ID: "rt-priv", VPCID: "vpc-priv", TransitGatewayIDs: []string{"tgw-1"}},
+		},
+		TGWAttachments: []state.TGWAttachment{
+			{TgwID: "tgw-1", VPCID: "vpc-pub", Available: true},
+			{TgwID: "tgw-1", VPCID: "vpc-priv", Available: false}, // pending/deleting
+		},
+	}
+	if ex := tgwExposures(a); len(ex) != 0 {
+		t.Fatalf("an unavailable attachment must not expose, got %+v", ex)
+	}
+}
+
+func TestVPCLateralExposuresUnifiesPeeringAndTGW(t *testing.T) {
+	a := &state.AWS{
+		RouteTables: []state.RouteTable{
+			{ID: "rt-pub", VPCID: "vpc-pub", IGWRoute: true, PeeringIDs: []string{"pcx-1"}, TransitGatewayIDs: []string{"tgw-1"}},
+			{ID: "rt-p1", VPCID: "vpc-p1", PeeringIDs: []string{"pcx-1"}},
+			{ID: "rt-p2", VPCID: "vpc-p2", TransitGatewayIDs: []string{"tgw-1"}},
+		},
+		Peerings:       []state.VPCPeering{{ID: "pcx-1", VPCA: "vpc-pub", VPCB: "vpc-p1", Active: true}},
+		TGWAttachments: []state.TGWAttachment{{TgwID: "tgw-1", VPCID: "vpc-pub", Available: true}, {TgwID: "tgw-1", VPCID: "vpc-p2", Available: true}},
+	}
+	ex := VPCLateralExposures(a)
+	if len(ex) != 2 {
+		t.Fatalf("expected one peering + one TGW exposure, got %d: %+v", len(ex), ex)
+	}
+	vias := map[string]bool{}
+	for _, e := range ex {
+		vias[e.Via] = true
+	}
+	if !vias["peering"] || !vias["transit-gateway"] {
+		t.Fatalf("expected both bridge types, got %v", vias)
+	}
+}
