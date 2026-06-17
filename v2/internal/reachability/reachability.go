@@ -20,21 +20,25 @@ import (
 
 // Result holds the precomputed topology indexes for reachability queries.
 type Result struct {
-	subnetRT    map[string]string // subnetID -> explicitly associated routeTableID
-	mainRT      map[string]string // vpcID    -> main routeTableID
-	rtIGW       map[string]bool   // routeTableID -> has a default route to an IGW
-	sgWorldOpen map[string]bool   // sgID -> has a world-open ingress rule
-	hasTopology bool              // any subnet/route-table data was collected
+	subnetRT      map[string]string // subnetID -> explicitly associated routeTableID
+	mainRT        map[string]string // vpcID    -> main routeTableID
+	rtIGW         map[string]bool   // routeTableID -> has a default route to an IGW
+	sgWorldOpen   map[string]bool   // sgID -> has a world-open ingress rule
+	subnetHasNACL map[string]bool   // subnetID -> a network ACL was collected for it
+	subnetNACLNet map[string]bool   // subnetID -> its ACL admits the internet inbound (allow to 0.0.0.0/0 or ::/0)
+	hasTopology   bool              // any subnet/route-table data was collected
 }
 
 // Solve indexes the collected topology for reachability queries. It is pure and
 // safe on nil/empty state.
 func Solve(a *state.AWS) *Result {
 	r := &Result{
-		subnetRT:    map[string]string{},
-		mainRT:      map[string]string{},
-		rtIGW:       map[string]bool{},
-		sgWorldOpen: map[string]bool{},
+		subnetRT:      map[string]string{},
+		mainRT:        map[string]string{},
+		rtIGW:         map[string]bool{},
+		sgWorldOpen:   map[string]bool{},
+		subnetHasNACL: map[string]bool{},
+		subnetNACLNet: map[string]bool{},
 	}
 	if a == nil {
 		return r
@@ -53,8 +57,36 @@ func Solve(a *state.AWS) *Result {
 	for _, sg := range a.SecurityGroups {
 		r.sgWorldOpen[sg.ID] = sg.WorldOpen()
 	}
+	// A network ACL admits the internet if it has any inbound ALLOW rule open to
+	// 0.0.0.0/0 or ::/0. A subnet whose ACL has none blocks the internet outright,
+	// regardless of port. (A port-specific public allow is treated conservatively
+	// as admitting the internet, so we never downgrade a finding we cannot rule
+	// out, only those a clearly-restrictive ACL blocks.)
+	for _, acl := range a.NetworkACLs {
+		admits := false
+		for _, rule := range acl.Inbound {
+			if rule.Allow && (rule.CIDR == "0.0.0.0/0" || rule.CIDR == "::/0") {
+				admits = true
+				break
+			}
+		}
+		for _, sn := range acl.SubnetIDs {
+			r.subnetHasNACL[sn] = true
+			if admits {
+				r.subnetNACLNet[sn] = true
+			}
+		}
+	}
 	r.hasTopology = len(a.Subnets) > 0 || len(a.RouteTables) > 0
 	return r
+}
+
+// naclBlocksInternet reports whether a subnet's network ACL is known and admits
+// no internet inbound (so it blocks traffic an open security group would
+// otherwise allow). False when no ACL was collected for the subnet, so missing
+// data never produces a false "not reachable".
+func (r *Result) naclBlocksInternet(subnetID string) bool {
+	return r.subnetHasNACL[subnetID] && !r.subnetNACLNet[subnetID]
 }
 
 // Instance reports whether an instance is reachable from the internet: it needs
@@ -98,6 +130,11 @@ func (r *Result) Instance(inst state.EC2Instance) findings.Reachability {
 	}
 
 	if igw && worldOpen {
+		// A subnet ACL that admits no internet inbound blocks the path even though
+		// the security group is world-open: the instance is not actually reachable.
+		if r.naclBlocksInternet(inst.SubnetID) {
+			return findings.ReachNo
+		}
 		return findings.ReachYes
 	}
 	return findings.ReachNo

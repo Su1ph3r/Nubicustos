@@ -19,6 +19,7 @@ func collectNetworkTopology(sc *engine.ScanContext, client *ec2.Client, region s
 	collectSubnets(sc, client, region, st, explicit)
 	collectVPCPeerings(sc, client, region, st)
 	collectTGWAttachments(sc, client, region, st)
+	collectNetworkACLs(sc, client, region, st)
 }
 
 // collectRouteTables records each route table (main flag + whether it routes a
@@ -124,6 +125,48 @@ func collectTGWAttachments(sc *engine.ScanContext, client *ec2.Client, region st
 				Region:    region,
 				Available: att.State == ec2types.TransitGatewayAttachmentStateAvailable,
 			})
+		}
+	}
+}
+
+// collectNetworkACLs records each network ACL's inbound entries and the subnets
+// it governs, so the reachability solver can tell whether a subnet's ACL admits
+// the internet at all (a restrictive ACL blocks traffic an open SG would allow).
+func collectNetworkACLs(sc *engine.ScanContext, client *ec2.Client, region string, st *state.State) {
+	pager := ec2.NewDescribeNetworkAclsPaginator(client, &ec2.DescribeNetworkAclsInput{})
+	for pager.HasMorePages() {
+		page, err := pager.NextPage(sc.Ctx)
+		if err != nil {
+			return
+		}
+		for _, acl := range page.NetworkAcls {
+			nacl := state.NetworkACL{ID: awssdk.ToString(acl.NetworkAclId), Region: region}
+			for _, assoc := range acl.Associations {
+				if sid := awssdk.ToString(assoc.SubnetId); sid != "" {
+					nacl.SubnetIDs = append(nacl.SubnetIDs, sid)
+				}
+			}
+			for _, e := range acl.Entries {
+				if awssdk.ToBool(e.Egress) {
+					continue // inbound rules only
+				}
+				cidr := awssdk.ToString(e.CidrBlock)
+				if cidr == "" {
+					cidr = awssdk.ToString(e.Ipv6CidrBlock)
+				}
+				rule := state.NACLRule{
+					RuleNumber: int(awssdk.ToInt32(e.RuleNumber)),
+					Protocol:   awssdk.ToString(e.Protocol),
+					CIDR:       cidr,
+					Allow:      e.RuleAction == ec2types.RuleActionAllow,
+				}
+				if e.PortRange != nil {
+					rule.FromPort = int(awssdk.ToInt32(e.PortRange.From))
+					rule.ToPort = int(awssdk.ToInt32(e.PortRange.To))
+				}
+				nacl.Inbound = append(nacl.Inbound, rule)
+			}
+			st.AddNetworkACL(nacl)
 		}
 	}
 }

@@ -336,3 +336,37 @@ func TestVPCLateralExposuresUnifiesPeeringAndTGW(t *testing.T) {
 		t.Fatalf("expected both bridge types, got %v", vias)
 	}
 }
+
+func TestInstanceNACLGate(t *testing.T) {
+	// world-open SG + public IP + IGW route would normally be ReachYes.
+	base := &state.AWS{
+		Subnets:        []state.Subnet{{ID: "sn-1", VPCID: "vpc-1", RouteTableID: "rt-1"}},
+		RouteTables:    []state.RouteTable{{ID: "rt-1", VPCID: "vpc-1", IGWRoute: true}},
+		SecurityGroups: []state.SecurityGroup{{ID: "sg-open", Ingress: []state.IngressRule{{Protocol: "tcp", FromPort: 22, ToPort: 22, OpenV4: true}}}},
+	}
+	inst := state.EC2Instance{ID: "i-1", PublicIP: "1.2.3.4", SubnetID: "sn-1", VPCID: "vpc-1", SecurityGroupIDs: []string{"sg-open"}}
+
+	// No NACL collected -> unchanged (reachable).
+	if v := Solve(base).Instance(inst); v != findings.ReachYes {
+		t.Fatalf("without NACL data the instance should be reachable, got %s", v)
+	}
+
+	// A NACL on the subnet that only allows a corp CIDR (no 0.0.0.0/0 allow)
+	// blocks the internet -> downgrade to not-reachable.
+	blocked := *base
+	blocked.NetworkACLs = []state.NetworkACL{{ID: "acl-1", SubnetIDs: []string{"sn-1"}, Inbound: []state.NACLRule{
+		{RuleNumber: 100, Protocol: "6", FromPort: 22, ToPort: 22, CIDR: "10.0.0.0/8", Allow: true},
+	}}}
+	if v := Solve(&blocked).Instance(inst); v != findings.ReachNo {
+		t.Fatalf("a restrictive NACL should downgrade to not-reachable, got %s", v)
+	}
+
+	// A NACL that allows 0.0.0.0/0 inbound admits the internet -> still reachable.
+	open := *base
+	open.NetworkACLs = []state.NetworkACL{{ID: "acl-2", SubnetIDs: []string{"sn-1"}, Inbound: []state.NACLRule{
+		{RuleNumber: 100, Protocol: "-1", CIDR: "0.0.0.0/0", Allow: true},
+	}}}
+	if v := Solve(&open).Instance(inst); v != findings.ReachYes {
+		t.Fatalf("an internet-admitting NACL should keep it reachable, got %s", v)
+	}
+}

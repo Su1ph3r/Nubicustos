@@ -20,9 +20,10 @@ runtime-proven findings.
 > (a private resource reachable from an internet-exposed one via a security-group
 > reference, or a VPC bridged by peering or a transit gateway), privilege-escalation, and
 > assume-role/trust paths with chained PoCs, gated by a local network-reachability
-> solver (AWS + Azure) that both suppresses unreachable findings and discovers
-> indirect exposure (a private VPC reachable from an internet-facing one across
-> peering). Federation/trust analysis (AWS IAM, Azure RBAC + Entra
+> solver (AWS + Azure) that both suppresses unreachable findings (including a
+> subnet whose network ACL blocks the internet despite an open security group)
+> and discovers indirect exposure (a private VPC reachable from an internet-facing
+> one across peering or a transit gateway). Federation/trust analysis (AWS IAM, Azure RBAC + Entra
 > workload-identity federation, GCP cross-project service accounts), including
 > cross-cloud federation (an AWS role assumable from Azure/GCP, an Entra app
 > impersonable from AWS/GCP, or a GCP workload-identity provider that federates

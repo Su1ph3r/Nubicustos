@@ -207,6 +207,28 @@ type VPCPeering struct {
 	Active bool   // status code is "active"
 }
 
+// NACLRule is one inbound network-ACL entry. Network ACLs are the subnet-level
+// stateless filter layered beneath security groups; a restrictive one can block
+// traffic an open security group would otherwise admit.
+type NACLRule struct {
+	RuleNumber int
+	Protocol   string // IP protocol number ("-1" = all, "6" = tcp, "17" = udp)
+	FromPort   int
+	ToPort     int
+	CIDR       string // source CIDR (IPv4 or IPv6)
+	Allow      bool   // rule action is "allow" (else "deny")
+}
+
+// NetworkACL is the collected inbound posture of a network ACL and the subnets
+// it governs, used by the reachability solver to downgrade an instance whose
+// subnet ACL blocks the internet even when its security group is world-open.
+type NetworkACL struct {
+	ID        string
+	Region    string
+	SubnetIDs []string
+	Inbound   []NACLRule
+}
+
 // EBSVolume is the collected encryption posture of a volume.
 type EBSVolume struct {
 	ID        string
@@ -467,6 +489,7 @@ type AWS struct {
 	VPCs               []VPCInfo
 	Peerings           []VPCPeering
 	TGWAttachments     []TGWAttachment
+	NetworkACLs        []NetworkACL
 	PublicEBSSnapshots []ResourceRef
 	PublicAMIs         []ResourceRef
 	PublicRDSSnapshots []ResourceRef
@@ -1330,6 +1353,13 @@ func (s *State) AddTGWAttachment(t TGWAttachment) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.AWS.TGWAttachments = append(s.AWS.TGWAttachments, t)
+}
+
+// AddNetworkACL appends a collected network ACL under lock.
+func (s *State) AddNetworkACL(n NetworkACL) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.AWS.NetworkACLs = append(s.AWS.NetworkACLs, n)
 }
 
 // AddPublicEBSSnapshot records a publicly shared EBS snapshot under lock.
